@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pydantic models for the Events resource (Google Calendar API v3): enums, start/end
+# DateTime, people/attendees, reminders, conference data (input and output), type-specific
+# properties (focus time, out of office, working location, birthday), the Event resource,
+# create/update/move/quickAdd/import requests, list/instances responses and watch channel models.
 """
 Event models following Google Calendar API v3 structure
 """
@@ -12,6 +17,8 @@ from pydantic import BaseModel, Extra, Field, field_validator, model_validator
 
 
 class EventStatus(str, Enum):
+    # [CLASS DOC]
+    # String enum: confirmed, tentative, cancelled.
     """Event status enum"""
 
     CONFIRMED = "confirmed"
@@ -20,6 +27,8 @@ class EventStatus(str, Enum):
 
 
 class EventVisibility(str, Enum):
+    # [CLASS DOC]
+    # String enum: default, public, private, confidential.
     """Event visibility enum"""
 
     DEFAULT = "default"
@@ -29,6 +38,8 @@ class EventVisibility(str, Enum):
 
 
 class Transparency(str, Enum):
+    # [CLASS DOC]
+    # String enum: opaque, transparent.
     """Event transparency enum"""
 
     OPAQUE = "opaque"
@@ -36,6 +47,8 @@ class Transparency(str, Enum):
 
 
 class OrderByEnum(str, Enum):
+    # [CLASS DOC]
+    # String enum of list orderings: startTime, updated.
     """Event list ordering enum"""
 
     START_TIME = "startTime"
@@ -43,6 +56,8 @@ class OrderByEnum(str, Enum):
 
 
 class EventTypesEnum(str, Enum):
+    # [CLASS DOC]
+    # String enum of event types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation.
     """Event types enum for filtering"""
 
     DEFAULT = "default"
@@ -54,6 +69,8 @@ class EventTypesEnum(str, Enum):
 
 
 class ResponseStatusEnum(str, Enum):
+    # [CLASS DOC]
+    # String enum of attendee responses: needsAction, declined, tentative, accepted.
     needsAction = "needsAction"
     declined = "declined"
     tentative = "tentative"
@@ -61,11 +78,15 @@ class ResponseStatusEnum(str, Enum):
 
 
 class ReminderMethodEnum(str, Enum):
+    # [CLASS DOC]
+    # String enum of reminder methods: email, popup.
     email = "email"
     popup = "popup"
 
 
 class EntryPointType(str, Enum):
+    # [CLASS DOC]
+    # String enum of conference entry point types: video, phone, sip, more.
     """Conference entry point types"""
 
     VIDEO = "video"
@@ -75,6 +96,8 @@ class EntryPointType(str, Enum):
 
 
 class DateTime(BaseModel):
+    # [CLASS DOC]
+    # Event time: exactly one of dateTime (RFC3339 string) or date (YYYY-MM-DD), plus optional IANA timeZone.
     """DateTime object for event start/end times"""
 
     dateTime: Optional[str] = Field(None, description="RFC3339 timestamp")
@@ -83,6 +106,8 @@ class DateTime(BaseModel):
 
     @model_validator(mode="after")
     def validate_datetime_or_date(self) -> "DateTime":
+        # [FUNCTION DOC]
+        # After-validator: raises ValueError if both or neither of dateTime/date are set; returns self.
         """Ensure either dateTime or date is provided, but not both"""
         has_datetime = self.dateTime is not None
         has_date = self.date is not None
@@ -102,6 +127,8 @@ class DateTime(BaseModel):
     @field_validator("timeZone")
     @classmethod
     def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Validator: None passes; otherwise must be a dateutil-known timezone, else ValueError "validation failed".
         if v is None:
             return v
         try:
@@ -116,6 +143,8 @@ class DateTime(BaseModel):
 
 
 class Person(BaseModel):
+    # [CLASS DOC]
+    # Person reference: optional id, email, displayName and self flag.
     """Person object for organizer and attendees"""
 
     id: Optional[str] = Field(None, description="Person identifier")
@@ -125,6 +154,8 @@ class Person(BaseModel):
 
 
 class Attendee(Person):
+    # [CLASS DOC]
+    # Person plus organizer flag, responseStatus (default needsAction), comment, additionalGuests (0), optional and resource flags.
     """Event attendee"""
 
     organizer: Optional[bool] = Field(
@@ -145,6 +176,8 @@ class Attendee(Person):
 
 
 class EventReminder(BaseModel):
+    # [CLASS DOC]
+    # Reminder override: method (email/popup) and minutes strictly between 0 and 40320.
     """Event reminder settings"""
 
     method: ReminderMethodEnum = Field(..., description="Reminder method: email, popup")
@@ -152,6 +185,8 @@ class EventReminder(BaseModel):
 
 
 class ReminderOverrides(BaseModel):
+    # [CLASS DOC]
+    # Event reminders: optional overrides list and useDefault (default True).
     """Event reminder overrides"""
 
     overrides: Optional[List[EventReminder]] = Field(
@@ -161,12 +196,16 @@ class ReminderOverrides(BaseModel):
 
 
 class ConferenceSolutionKey(BaseModel):
+    # [CLASS DOC]
+    # Conference solution key with optional type.
     """Conference solution key"""
 
     type: Optional[str] = Field(None, description="Conference solution type")
 
 
 class ConferenceSolution(BaseModel):
+    # [CLASS DOC]
+    # Conference solution with optional iconUri, key and name.
     """Conference solution details"""
 
     iconUri: Optional[str] = Field(
@@ -179,6 +218,8 @@ class ConferenceSolution(BaseModel):
 
 
 class CreateRequestStatus(BaseModel):
+    # [CLASS DOC]
+    # Conference create request status with optional statusCode.
     """Create request status"""
 
     statusCode: Optional[str] = Field(
@@ -187,6 +228,8 @@ class CreateRequestStatus(BaseModel):
 
 
 class CreateRequest(BaseModel):
+    # [CLASS DOC]
+    # Conference create request: optional conferenceSolutionKey, requestId and status.
     """Conference create request details"""
 
     conferenceSolutionKey: Optional[ConferenceSolutionKey] = Field(
@@ -201,6 +244,8 @@ class CreateRequest(BaseModel):
 
 
 class EntryPoint(BaseModel):
+    # [CLASS DOC]
+    # Conference entry point: access/meeting codes, passcode, password, pin (<=128 chars), label (<=512), entryPointType and uri (<=1300).
     """Conference entry point details"""
 
     accessCode: Optional[str] = Field(
@@ -231,6 +276,8 @@ class EntryPoint(BaseModel):
     @field_validator("uri")
     @classmethod
     def validate_uri(cls, v: str, info) -> str:
+        # [FUNCTION DOC]
+        # Validator: requires a non-empty uri when given; checks scheme by entryPointType (video/more: http(s), phone: tel, sip: sip). Returns uri. Raises ValueError otherwise.
         """Validate URI format based on entry point type"""
         if not v:
             raise ValueError("URI is required")
@@ -257,6 +304,8 @@ class EntryPoint(BaseModel):
 
 
 class ConferenceData(BaseModel):
+    # [CLASS DOC]
+    # Input conference data: conferenceId, conferenceSolution, createRequest, entryPoints, notes (<=2048), signature.
     """Conference/meeting data"""
 
     conferenceId: Optional[str] = Field(None, description="Conference ID")
@@ -274,6 +323,9 @@ class ConferenceData(BaseModel):
 
     @model_validator(mode="after")
     def validate_conference_data(self) -> "ConferenceData":
+        # [FUNCTION DOC]
+        # After-validator: requires either createRequest alone, or conferenceSolution plus at
+        # least one entry point (not both forms). Raises ValueError otherwise.
         """Validate that either (conferenceSolution + entryPoints) or createRequest is provided"""
         has_solution = self.conferenceSolution is not None
         has_entry_points = self.entryPoints is not None and len(self.entryPoints) > 0
@@ -299,6 +351,8 @@ class ConferenceData(BaseModel):
     def validate_entry_points(
         cls, v: Optional[List[EntryPoint]]
     ) -> Optional[List[EntryPoint]]:
+        # [FUNCTION DOC]
+        # Validator: at most one video, one sip and one more entry point; a single "more" entry point alone is invalid. Raises ValueError; returns the list.
         """Validate entry point constraints"""
         if not v:
             return v
@@ -325,6 +379,8 @@ class ConferenceData(BaseModel):
 
 
 class ConferenceDataOutput(BaseModel):
+    # [CLASS DOC]
+    # Output conference data without validation constraints (solution, createRequest, entryPoints, notes, signature).
     conferenceSolution: Optional[ConferenceSolution] = Field(
         None, description="Conference solution details"
     )
@@ -339,6 +395,10 @@ class ConferenceDataOutput(BaseModel):
 
 
 class FocusTimeProperties(BaseModel):
+    # [CLASS DOC]
+    # Focus time settings: autoDeclineMode (declineNone/declineAllConflictingInvitations/
+    # declineOnlyNewConflictingInvitations), chatStatus (available/doNotDisturb), declineMessage; all default to "".
+    # KNOWN ISSUE: the "" defaults are not among the allowed literal values (defaults are not validated, so they leak into output).
     """Focus time properties for focus time events"""
 
     autoDeclineMode: Optional[
@@ -362,6 +422,8 @@ class FocusTimeProperties(BaseModel):
 
 
 class OutOfOfficeProperties(BaseModel):
+    # [CLASS DOC]
+    # Out-of-office settings: autoDeclineMode (same literals, default "") and declineMessage.
     """Out of office properties for outOfOfficeProperties events"""
 
     autoDeclineMode: Optional[
@@ -381,6 +443,8 @@ class OutOfOfficeProperties(BaseModel):
 
 
 class CustomLocation(BaseModel):
+    # [CLASS DOC]
+    # Custom working location with optional label.
     """Custom location details for working location events"""
 
     label: Optional[str] = Field(
@@ -389,6 +453,8 @@ class CustomLocation(BaseModel):
 
 
 class OfficeLocation(BaseModel):
+    # [CLASS DOC]
+    # Office working location: optional buildingId, deskId, floorId, floorSectionId, label.
     """Office location details for working location events"""
 
     buildingId: Optional[str] = Field(
@@ -407,6 +473,8 @@ class OfficeLocation(BaseModel):
 
 
 class WorkingLocationProperties(BaseModel):
+    # [CLASS DOC]
+    # Working location: required type (homeOffice/officeLocation/customLocation) and optional customLocation, homeOffice (any), officeLocation.
     """Working location properties for working location events"""
 
     type: Literal["homeOffice", "officeLocation", "customLocation"] = Field(
@@ -428,6 +496,8 @@ class WorkingLocationProperties(BaseModel):
     @field_validator("homeOffice")
     @classmethod
     def _validate_homeOffice(cls, v):
+        # [FUNCTION DOC]
+        # HELPER validator: if homeOffice is a string, returns it JSON-decoded when possible, else unchanged.
         if isinstance(v, str):
             try:
                 return json.loads(v)
@@ -437,6 +507,8 @@ class WorkingLocationProperties(BaseModel):
 
 
 class BirthdayProperties(BaseModel):
+    # [CLASS DOC]
+    # Birthday properties; type must be "birthday".
     """Birthday properties for birthday events"""
 
     type: Literal["birthday"] = Field(
@@ -446,6 +518,8 @@ class BirthdayProperties(BaseModel):
 
 
 class ExtendedProperties(BaseModel):
+    # [CLASS DOC]
+    # Optional private and shared string-to-string dicts.
     """Extended properties for events"""
 
     private: Optional[Dict[str, str]] = Field(
@@ -457,6 +531,8 @@ class ExtendedProperties(BaseModel):
 
 
 class EventSource(BaseModel):
+    # [CLASS DOC]
+    # Event source with required url and title.
     """Event source information"""
 
     url: str = Field(..., description="Source URL")
@@ -464,6 +540,12 @@ class EventSource(BaseModel):
 
 
 class Event(BaseModel):
+    # [CLASS DOC]
+    # Event resource response model (kind "calendar#event") with ids, status, links,
+    # timestamps, summary/description/location/colorId, creator/organizer, required
+    # start/end, recurrence info, transparency, visibility, iCalUID, sequence, attendees,
+    # extendedProperties, hangoutLink, conferenceData (output form), guest permissions,
+    # privateCopy, locked, reminders, source, attachments, eventType string and type-specific properties.
     """Event model following Google Calendar API v3 structure"""
 
     kind: str = Field(default="calendar#event", description="Resource type")
@@ -568,6 +650,12 @@ class Event(BaseModel):
 
 
 class EventCreateRequest(BaseModel):
+    # [CLASS DOC]
+    # Events.insert body: required start/end plus optional fields (attachments, attendees,
+    # birthday/focus/outOfOffice/workingLocation properties, colorId, conferenceData,
+    # description, eventType default "default", extendedProperties, guest flags,
+    # hangoutLink, iCalUID, location, originalStartTime, recurrence, reminders, sequence,
+    # source dict, status, summary, transparency default opaque, visibility).
     """Request model for creating an event - matches Google Calendar API v3 Events.insert"""
 
     # Required properties
@@ -642,6 +730,9 @@ class EventCreateRequest(BaseModel):
     @field_validator("iCalUID")
     @classmethod
     def _validate_iCalUID(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER validator: requires an email-like "local@domain.tld" string; returns it; else ValueError.
+        # KNOWN ISSUE: an explicit null iCalUID makes re.match raise TypeError instead of passing.
         pattern = r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         if not re.match(pattern, v):
             raise ValueError(
@@ -652,6 +743,9 @@ class EventCreateRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _validate_source(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: None passes; otherwise source["url"] must be an https URL with a host; returns the dict; else ValueError.
+        # KNOWN ISSUE: the error text says "https or http" but http is rejected.
         if v is None:
             return None
         s = str(v.get("url")).strip()
@@ -662,6 +756,9 @@ class EventCreateRequest(BaseModel):
 
 
 class EventUpdateRequest(BaseModel):
+    # [CLASS DOC]
+    # Events.patch/update body: every event field optional (None means not provided);
+    # outOfOfficeProperties and source are plain dicts.
     """Request model for updating an event - matches Google Calendar API v3 Events.patch"""
 
     # Basic event properties
@@ -751,6 +848,9 @@ class EventUpdateRequest(BaseModel):
     @field_validator("iCalUID")
     @classmethod
     def _validate_iCalUID(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER validator: same email-like iCalUID check as the create request.
+        # KNOWN ISSUE: explicit null raises TypeError.
         pattern = r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         if not re.match(pattern, v):
             raise ValueError(
@@ -761,6 +861,8 @@ class EventUpdateRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _validate_source(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: same https-only source URL check as the create request.
         if v is None:
             return None
         s = str(v.get("url")).strip()
@@ -771,6 +873,9 @@ class EventUpdateRequest(BaseModel):
 
 
 class EventListResponse(BaseModel):
+    # [CLASS DOC]
+    # Events list: kind "calendar#events", etag, summary, description, updated, timeZone,
+    # accessRole, defaultReminders, nextPageToken, nextSyncToken and required items.
     """Response model for events list"""
 
     kind: str = Field(default="calendar#events", description="Resource type")
@@ -789,6 +894,8 @@ class EventListResponse(BaseModel):
 
 
 class EventMoveRequest(BaseModel):
+    # [CLASS DOC]
+    # Move body: destination calendar id and optional sendUpdates.
     """Request model for moving an event to another calendar"""
 
     destination: str = Field(..., description="ID of destination calendar")
@@ -798,6 +905,8 @@ class EventMoveRequest(BaseModel):
 
 
 class EventQuickAddRequest(BaseModel):
+    # [CLASS DOC]
+    # Quick add body: text (1..1000 chars) and optional sendUpdates.
     """Request model for quick adding an event"""
 
     text: str = Field(..., min_length=1, max_length=1000, description="Quick add text")
@@ -807,6 +916,9 @@ class EventQuickAddRequest(BaseModel):
 
 
 class EventImportRequest(BaseModel):
+    # [CLASS DOC]
+    # Simple import body: summary, description, location, ISO start/end datetimes with
+    # optional timezones, recurrence string, status, visibility and supportsImport.
     """Request model for importing an event"""
 
     summary: str = Field(..., min_length=1, max_length=255, description="Event title")
@@ -829,6 +941,8 @@ class EventImportRequest(BaseModel):
 
 
 class EventInstancesResponse(BaseModel):
+    # [CLASS DOC]
+    # Recurring instances list: same as EventListResponse without nextSyncToken.
     """Response model for recurring event instances"""
 
     kind: str = Field(default="calendar#events", description="Resource type")
@@ -846,6 +960,8 @@ class EventInstancesResponse(BaseModel):
 
 
 class Channel(BaseModel):
+    # [CLASS DOC]
+    # Watch channel response: kind "api#channel", id, resourceId, resourceUri, token, expiration string.
     """Channel model for watch notifications"""
 
     kind: str = Field(default="api#channel", description="Resource type identifier")
@@ -857,16 +973,22 @@ class Channel(BaseModel):
 
 
 class WatchParams(BaseModel):
+    # [CLASS DOC]
+    # Watch params allowing only ttl (positive integer seconds as string); extras forbidden.
     """Watch parameters"""
 
     ttl: Optional[str] = Field(None, description="Time to live (seconds)")
 
     class Config:
+        # [CLASS DOC]
+        # Pydantic config forbidding extra fields.
         extra = Extra.forbid
 
     @field_validator("ttl")
     @classmethod
     def _validate_ttl(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER validator: None passes; stripped value must be digits and > 0; returns stripped string; else ValueError.
         if v is None:
             return v
         s = str(v).strip()
@@ -880,6 +1002,8 @@ class WatchParams(BaseModel):
 
 
 class EventWatchRequest(BaseModel):
+    # [CLASS DOC]
+    # Events watch body: id, required type, address, optional token and params.
     """Request model for watching events"""
 
     id: str = Field(..., description="Channel identifier")
@@ -894,6 +1018,8 @@ class EventWatchRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def _validate_type(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: accepts web_hook/webhook (case-insensitive) and returns "web_hook"; else ValueError.
         if v is None:
             raise ValueError("type is required")
         s = str(v).strip().lower()
@@ -905,6 +1031,8 @@ class EventWatchRequest(BaseModel):
     @field_validator("address")
     @classmethod
     def _validate_address(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: requires an https URL with host; returns trimmed string; else ValueError.
         if v is None:
             raise ValueError("address is required")
         s = str(v).strip()

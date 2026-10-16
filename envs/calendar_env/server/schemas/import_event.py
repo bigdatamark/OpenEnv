@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pydantic models for the Events.import operation (Google Calendar API v3): start/end
+# times, conference data with stricter enums, attendees, attachments, reminders, type
+# properties, organizer, the import request and query params, response, error and
+# internal validation/result models.
 """
 Event Import schemas following Google Calendar API v3 structure
 """
@@ -12,6 +17,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator, validat
 
 
 class EventDateTime(BaseModel):
+    # [CLASS DOC]
+    # Event time with exactly one of dateTime or date, plus optional IANA timeZone.
     """DateTime model for event start/end times"""
 
     dateTime: Optional[str] = Field(None, description="RFC3339 timestamp with timezone")
@@ -22,6 +29,8 @@ class EventDateTime(BaseModel):
 
     @model_validator(mode="after")
     def validate_datetime_or_date(self) -> "EventDateTime":
+        # [FUNCTION DOC]
+        # After-validator: raises ValueError if both or neither of dateTime/date are set; returns self.
         """Ensure either dateTime or date is provided, but not both"""
         has_datetime = self.dateTime is not None
         has_date = self.date is not None
@@ -41,6 +50,8 @@ class EventDateTime(BaseModel):
     @field_validator("timeZone")
     @classmethod
     def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Validator: None passes; otherwise must be dateutil-known, else ValueError "validation failed".
         if v is None:
             return v
         try:
@@ -56,6 +67,8 @@ class EventDateTime(BaseModel):
 
 # Conference Data Enums
 class ConferenceSolutionType(str, Enum):
+    # [CLASS DOC]
+    # String enum of solution types: hangoutsMeet, addOn.
     """Conference solution types according to Google Calendar API"""
 
     HANGOUTS_MEET = "hangoutsMeet"
@@ -63,6 +76,8 @@ class ConferenceSolutionType(str, Enum):
 
 
 class EntryPointType(str, Enum):
+    # [CLASS DOC]
+    # String enum of entry point types: video, phone, sip, more.
     """Conference entry point types"""
 
     VIDEO = "video"
@@ -72,6 +87,8 @@ class EntryPointType(str, Enum):
 
 
 class CreateRequestStatusCode(str, Enum):
+    # [CLASS DOC]
+    # String enum of conference create statuses: pending, success, failure.
     """Conference create request status codes"""
 
     PENDING = "pending"
@@ -80,6 +97,8 @@ class CreateRequestStatusCode(str, Enum):
 
 
 class ResponseStatusEnum(str, Enum):
+    # [CLASS DOC]
+    # String enum of attendee responses: needsAction, declined, tentative, accepted.
     needsAction = "needsAction"
     declined = "declined"
     tentative = "tentative"
@@ -88,6 +107,8 @@ class ResponseStatusEnum(str, Enum):
 
 # Conference Data Models
 class ConferenceSolutionKey(BaseModel):
+    # [CLASS DOC]
+    # Solution key with optional ConferenceSolutionType.
     """Conference solution key with type validation"""
 
     type: Optional[ConferenceSolutionType] = Field(
@@ -96,6 +117,8 @@ class ConferenceSolutionKey(BaseModel):
 
 
 class ConferenceSolution(BaseModel):
+    # [CLASS DOC]
+    # Solution details: optional iconUri, key, name.
     """Conference solution details"""
 
     iconUri: Optional[str] = Field(
@@ -110,6 +133,8 @@ class ConferenceSolution(BaseModel):
 
 
 class CreateRequestStatus(BaseModel):
+    # [CLASS DOC]
+    # Create request status with required statusCode enum.
     """Status of conference create request"""
 
     statusCode: CreateRequestStatusCode = Field(
@@ -118,6 +143,8 @@ class CreateRequestStatus(BaseModel):
 
 
 class CreateRequest(BaseModel):
+    # [CLASS DOC]
+    # Conference create request: optional conferenceSolutionKey, requestId and status.
     """Request to generate a new conference and attach it to the event"""
 
     conferenceSolutionKey: Optional[ConferenceSolutionKey] = Field(
@@ -132,6 +159,8 @@ class CreateRequest(BaseModel):
 
 
 class EntryPoint(BaseModel):
+    # [CLASS DOC]
+    # Entry point with required entryPointType and uri (<=1300) plus optional codes/password/pin (<=128) and label (<=512).
     """Individual conference entry point (URLs or phone numbers)"""
 
     entryPointType: EntryPointType = Field(
@@ -164,6 +193,8 @@ class EntryPoint(BaseModel):
     @field_validator("uri")
     @classmethod
     def validate_uri(cls, v: str, info) -> str:
+        # [FUNCTION DOC]
+        # Validator: non-empty uri whose scheme matches the type (video/more: http(s), phone: tel, sip: sip). Raises ValueError; returns uri.
         """Validate URI format based on entry point type"""
         if not v:
             raise ValueError("URI is required")
@@ -190,6 +221,8 @@ class EntryPoint(BaseModel):
 
 
 class ConferenceData(BaseModel):
+    # [CLASS DOC]
+    # Conference data: conferenceId, signature, notes (<=2048), and either conferenceSolution+entryPoints or createRequest.
     """Conference-related information such as Google Meet details"""
 
     # Basic properties
@@ -214,6 +247,8 @@ class ConferenceData(BaseModel):
 
     @model_validator(mode="after")
     def validate_conference_data(self) -> "ConferenceData":
+        # [FUNCTION DOC]
+        # After-validator: exactly one of createRequest or (conferenceSolution and >=1 entry point). Raises ValueError otherwise.
         """Validate that either (conferenceSolution + entryPoints) or createRequest is provided"""
         has_solution = self.conferenceSolution is not None
         has_entry_points = self.entryPoints is not None and len(self.entryPoints) > 0
@@ -239,6 +274,8 @@ class ConferenceData(BaseModel):
     def validate_entry_points(
         cls, v: Optional[List[EntryPoint]]
     ) -> Optional[List[EntryPoint]]:
+        # [FUNCTION DOC]
+        # Validator: at most one video, sip and more entry point; a lone "more" entry point is invalid.
         """Validate entry point constraints"""
         if not v:
             return v
@@ -265,6 +302,8 @@ class ConferenceData(BaseModel):
 
 
 class AttendeeRequest(BaseModel):
+    # [CLASS DOC]
+    # Import attendee: required email, optional displayName, optional/resource flags, responseStatus (default needsAction), comment, additionalGuests.
     """Attendee model for import requests"""
 
     email: str = Field(..., description="Attendee email address")
@@ -283,6 +322,8 @@ class AttendeeRequest(BaseModel):
 
 
 class EventAttachment(BaseModel):
+    # [CLASS DOC]
+    # Attachment: required fileUrl (https), optional title, mimeType, iconLink, fileId.
     """Event attachment model"""
 
     fileUrl: str = Field(..., description="URL of the attached file")
@@ -294,6 +335,8 @@ class EventAttachment(BaseModel):
     @field_validator("fileUrl")
     @classmethod
     def _validate_fileUrl(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: requires an https URL with a host; returns the original value. Raises ValueError (message mentions "source" and "http" inaccurately).
         if v is None:
             return None
         s = str(v).strip()
@@ -304,6 +347,8 @@ class EventAttachment(BaseModel):
 
 
 class EventReminder(BaseModel):
+    # [CLASS DOC]
+    # Reminder override: method string and minutes strictly between 0 and 40320.
     """Event reminder model"""
 
     method: str = Field(..., description="Reminder method: email or popup")
@@ -313,18 +358,24 @@ class EventReminder(BaseModel):
 
     @validator("method")
     def validate_method(cls, v):
+        # [FUNCTION DOC]
+        # Legacy validator: method must be "email" or "popup", else ValueError.
         if v not in ["email", "popup"]:
             raise ValueError("Method must be either 'email' or 'popup'")
         return v
 
     @validator("minutes")
     def validate_minutes(cls, v):
+        # [FUNCTION DOC]
+        # Legacy validator: raises ValueError for negative minutes (redundant with gt=0).
         if v < 0:
             raise ValueError("Please enter the non-negative value for minutes")
         return v
 
 
 class EventReminders(BaseModel):
+    # [CLASS DOC]
+    # Reminders config: useDefault (True) and optional overrides.
     """Event reminders configuration"""
 
     useDefault: bool = Field(True, description="Whether to use default reminders")
@@ -334,6 +385,8 @@ class EventReminders(BaseModel):
 
 
 class EventSource(BaseModel):
+    # [CLASS DOC]
+    # Source with required url and title.
     """Event source information"""
 
     url: str = Field(..., description="Source URL")
@@ -341,6 +394,8 @@ class EventSource(BaseModel):
 
 
 class ExtendedProperties(BaseModel):
+    # [CLASS DOC]
+    # Optional private/shared string dicts.
     """Extended properties for events"""
 
     private: Optional[Dict[str, str]] = Field(
@@ -352,6 +407,8 @@ class ExtendedProperties(BaseModel):
 
 
 class WorkingLocationProperties(BaseModel):
+    # [CLASS DOC]
+    # Working location with type string, homeOffice bool, customLocation/officeLocation dicts.
     """Working location properties for events"""
 
     type: str = Field(..., description="Working location type")
@@ -365,6 +422,8 @@ class WorkingLocationProperties(BaseModel):
 
     @validator("type")
     def validate_type(cls, v):
+        # [FUNCTION DOC]
+        # Legacy validator: type must be homeOffice, officeLocation or customLocation, else ValueError.
         valid_types = ["homeOffice", "officeLocation", "customLocation"]
         if v not in valid_types:
             raise ValueError(f"Type must be one of: {valid_types}")
@@ -372,6 +431,9 @@ class WorkingLocationProperties(BaseModel):
 
 
 class FocusTimeProperties(BaseModel):
+    # [CLASS DOC]
+    # Focus time settings (autoDeclineMode, chatStatus, declineMessage), defaults "".
+    # KNOWN ISSUE: "" defaults are not valid literal values (defaults bypass validation).
     """Focus time properties for focus time events"""
 
     autoDeclineMode: Optional[
@@ -395,6 +457,8 @@ class FocusTimeProperties(BaseModel):
 
 
 class EventOrganizerImport(BaseModel):
+    # [CLASS DOC]
+    # Organizer for import: required email and optional displayName.
     """Event organizer model for import requests"""
 
     email: str = Field(
@@ -408,6 +472,8 @@ class EventOrganizerImport(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # Validator: requires non-empty email matching a simple email regex; returns it; else ValueError.
         """Validate email format according to RFC5322"""
         if not v:
             raise ValueError("Organizer email is required")
@@ -423,6 +489,8 @@ class EventOrganizerImport(BaseModel):
 
 
 class OutOfOfficeProperties(BaseModel):
+    # [CLASS DOC]
+    # Out-of-office settings: autoDeclineMode and declineMessage, defaults "".
     """Out of office properties for outOfOfficeProperties events"""
 
     autoDeclineMode: Optional[
@@ -442,6 +510,13 @@ class OutOfOfficeProperties(BaseModel):
 
 
 class EventImportRequest(BaseModel):
+    # [CLASS DOC]
+    # Import body: required start, end and iCalUID (typed str but defaulting to None), plus
+    # summary, description, location, colorId, status/transparency/visibility (validated,
+    # with defaults), organizer, attendees, guest flags, gadget, recurrence, recurringEventId,
+    # originalStartTime, reminders, attachments, conferenceData, source, extendedProperties,
+    # focusTime/outOfOffice properties and sequence.
+    # KNOWN ISSUE: iCalUID, source and sequence are non-Optional types with None defaults, so explicit nulls fail validation (iCalUID null raises TypeError in its validator).
     """Request model for importing an event"""
 
     # Required fields
@@ -522,6 +597,8 @@ class EventImportRequest(BaseModel):
     @field_validator("iCalUID")
     @classmethod
     def _validate_iCalUID(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER validator: requires an email-like "local@domain.tld" iCalUID; returns it; else ValueError.
         pattern = r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         if not re.match(pattern, v):
             raise ValueError(
@@ -531,6 +608,8 @@ class EventImportRequest(BaseModel):
 
     @validator("status")
     def validate_status(cls, v):
+        # [FUNCTION DOC]
+        # Legacy validator: status must be confirmed, tentative or cancelled.
         valid_statuses = ["confirmed", "tentative", "cancelled"]
         if v not in valid_statuses:
             raise ValueError(f"Status must be one of: {valid_statuses}")
@@ -538,12 +617,16 @@ class EventImportRequest(BaseModel):
 
     @validator("transparency")
     def validate_transparency(cls, v):
+        # [FUNCTION DOC]
+        # Legacy validator: transparency must be opaque or transparent.
         if v not in ["opaque", "transparent"]:
             raise ValueError("Transparency must be either 'opaque' or 'transparent'")
         return v
 
     @validator("visibility")
     def validate_visibility(cls, v):
+        # [FUNCTION DOC]
+        # Legacy validator: visibility must be default, public, private or confidential.
         valid_visibilities = ["default", "public", "private", "confidential"]
         if v not in valid_visibilities:
             raise ValueError(f"Visibility must be one of: {valid_visibilities}")
@@ -552,6 +635,8 @@ class EventImportRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _validate_source(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: None passes; otherwise source.url must be https with a host; returns source; else ValueError.
         if v is None:
             return None
         s = str(v.url).strip()
@@ -562,6 +647,8 @@ class EventImportRequest(BaseModel):
 
 
 class EventImportQueryParams(BaseModel):
+    # [CLASS DOC]
+    # Import query params: conferenceDataVersion (0 or 1) and supportsAttachments.
     """Query parameters for event import API"""
 
     conferenceDataVersion: Optional[int] = Field(
@@ -576,6 +663,12 @@ class EventImportQueryParams(BaseModel):
 
 
 class EventImportResponse(BaseModel):
+    # [CLASS DOC]
+    # Imported event response: kind "calendar#event", required id, etag, status, htmlLink,
+    # created, updated, summary, creator, organizer, start, end, plus optional event fields
+    # (description, location, colorId, transparency, visibility, eventType, attendees,
+    # recurrence, reminders, attachments, conferenceData, source, extendedProperties, type
+    # properties, guest flags, iCalUID, sequence).
     """Response model for successful event import"""
 
     kind: str = Field(default="calendar#event", description="Resource type")
@@ -640,6 +733,8 @@ class EventImportResponse(BaseModel):
 
 
 class EventImportError(BaseModel):
+    # [CLASS DOC]
+    # Import error: domain, reason, message, optional locationType and location.
     """Error model for event import failures"""
 
     domain: str = Field(..., description="Error domain")
@@ -650,6 +745,8 @@ class EventImportError(BaseModel):
 
 
 class EventImportValidation(BaseModel):
+    # [CLASS DOC]
+    # Internal import context: calendar_id, user_id, event_data, preserve_event_id (False), generate_new_id (True).
     """Internal model for event import validation"""
 
     calendar_id: str = Field(..., description="Target calendar ID")
@@ -661,21 +758,29 @@ class EventImportValidation(BaseModel):
     generate_new_id: bool = Field(True, description="Whether to generate new event ID")
 
     def validate_calendar_access(self) -> bool:
+        # [FUNCTION DOC]
+        # Stub: always returns True (no access check implemented).
         """Validate user has access to target calendar"""
         # This would be implemented with actual calendar access checks
         return True
 
     def validate_event_conflicts(self) -> bool:
+        # [FUNCTION DOC]
+        # Stub: always returns True (no conflict check implemented).
         """Validate no conflicts with existing events"""
         # This would check for time conflicts, duplicate IDs, etc.
         return True
 
     def validate_import_permissions(self) -> bool:
+        # [FUNCTION DOC]
+        # Stub: always returns True.
         """Validate user has import permissions"""
         return True
 
 
 class EventImportResult(BaseModel):
+    # [CLASS DOC]
+    # Internal import outcome: success, event_id, original_event_type, converted_to_default, properties_dropped, warnings, error.
     """Internal model for event import operation result"""
 
     success: bool = Field(..., description="Whether import was successful")

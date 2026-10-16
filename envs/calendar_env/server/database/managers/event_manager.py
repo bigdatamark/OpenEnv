@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Event operations for the Google Calendar API v3 clone (Events resource): list, get,
+# create (including recurring series expansion), update/patch, delete, move, quickAdd,
+# import, instances and watch, plus ACL-based permission checks, DB-to-schema conversion,
+# creation of related rows (attendees, attachments, conference data, extended
+# properties, reminders, working location, birthday properties), notifications and
+# opaque page/sync tokens. Each public method opens and closes its own session on the
+# per-database_id SQLite DB.
 """
 Event database manager with Google Calendar API v3 compatible operations
 Handles all 11 Events API operations with database-per-user architecture
@@ -63,9 +71,13 @@ logger = logging.getLogger(__name__)
 
 
 class EventManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id; also holds a CalendarManager for calendar lookups.
     """Event manager for database operations"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id, calls init_database (engine creation only) and creates a CalendarManager (which opens a long-lived session).
         self.database_id = database_id
         # Initialize database on first use
         init_database(database_id)
@@ -73,6 +85,10 @@ class EventManager:
         # self.recurring_event_manager = RecurringEventManager(database_id)
 
     def _get_user_calendar_role(self, user_id: str, calendar: Calendar) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns the highest ACL role name ("none" < freeBusyReader < reader < writer <
+        # owner) that the user's email holds via "user"-scope ACLs on the calendar; "none" if the
+        # user or ACLs are missing. Opens its own session.
         """Get the highest role a user has on a calendar"""
         from database.models.acl import ACLs, Scope
 
@@ -120,6 +136,10 @@ class EventManager:
     def check_event_permissions(
         self, user_id: str, calendar_id: str, event_id: str, required_roles: list[str]
     ) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if the user's calendar role for the event's calendar is in required_roles,
+        # or the user created the event and is writer/owner; False if the event is missing, the
+        # role is insufficient, or any error occurs (logged).
         """
         Check if user has required permissions for an event operation
 
@@ -168,6 +188,10 @@ class EventManager:
     def check_event_visibility_permission(
         self, user_id: str, calendar_id: str, event_id: str
     ) -> bool:
+        # [FUNCTION DOC]
+        # Returns whether the user may see the event: requires any calendar role; default/public
+        # events are visible to any role, private ones only to the creator or owners,
+        # confidential ones only to owners. False on missing event or errors.
         """
         Check if user can see a specific event based on visibility settings
 
@@ -220,6 +244,9 @@ class EventManager:
     def check_event_delete_permission(
         self, user_id: str, calendar_id: str, event_id: str
     ) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if the user owns the calendar or created the event and has writer/owner
+        # role; False otherwise, on missing event or on errors.
         """
         Check if user has permission to delete a specific event
 
@@ -264,6 +291,9 @@ class EventManager:
     def check_event_modification_permission(
         self, user_id: str, calendar_id: str, event_id: str
     ) -> bool:
+        # [FUNCTION DOC]
+        # Returns True for calendar owners, writers who created the event, or (when
+        # guestsCanModify) users who are attendees of the event; False otherwise or on errors.
         """
         Check if user can modify a specific event
 
@@ -324,6 +354,19 @@ class EventManager:
             session.close()
 
     def _convert_db_event_to_schema(self, db_event: Event) -> EventSchema:
+        # [FUNCTION DOC]
+        # HELPER: builds an EventSchema from an Event row: id, etag (quoted updated_at epoch),
+        # status, htmlLink, created/updated ISO, summary/description/location, start/end and
+        # originalStartTime via the _build helpers, recurringEventId, recurrence (JSON-decoded,
+        # [] if empty), visibility, transparency, iCalUID, guest flags, privateCopy, locked,
+        # hangoutLink, creator=organizer built from organizer_* columns, sequence, eventType
+        # value, colorId, attendees (email from linked user, organizer/self flags by matching
+        # organizer email), attachments (fileUrl and title = last URL segment), conferenceData
+        # (solution, createRequest, entry points or legacy meeting_uri), source, extended
+        # properties merged per scope, working location, birthday, focus time, out-of-office
+        # properties, and reminders {useDefault true if any row has use_default, overrides list}.
+        # Raises: re-raises conversion/validation errors after logging.
+        # KNOWN ISSUE: recurrence stored as a plain RRULE string (not JSON) makes json.loads fail; when there is no organizer, creator/organizer are empty dicts.
         """Convert database Event model to EventSchema"""
         try:
             # Build organizer info from stored database fields
@@ -595,6 +638,8 @@ class EventManager:
             raise
 
     def _parse_datetime_string(self, datetime_str: str) -> datetime:
+        # [FUNCTION DOC]
+        # HELPER: parses an ISO-8601 string ("Z" -> "+00:00") to a datetime; raises ValueError on failure.
         """Parse ISO datetime string to datetime object"""
         try:
             return parser.isoparse(datetime_str.replace("Z", "+00:00"))
@@ -605,6 +650,11 @@ class EventManager:
     def _parse_datetime_from_api_format(
         self, datetime_obj: DateTime
     ) -> tuple[datetime, str]:
+        # [FUNCTION DOC]
+        # HELPER: accepts a DateTime model or dict; validates its timeZone, then returns
+        # (datetime, tz name defaulting to "UTC") for dateTime values or (midnight naive datetime,
+        # tz) for all-day date values. Raises ValueError wrapping any problem (including a dict
+        # without a "timeZone" key).
         """Parse Google Calendar API DateTime format to datetime object and timezone"""
         try:
             if isinstance(datetime_obj, dict):
@@ -651,6 +701,10 @@ class EventManager:
             raise ValueError(f"Invalid DateTime format: {e}")
 
     def _process_create_attendees(self, db_event: Event, attendees_data: list, session):
+        # [FUNCTION DOC]
+        # HELPER: validates attendee emails via check_attendees_email_id (which may create
+        # users), then adds an Attendees row per attendee whose email maps to a user (others are
+        # skipped with a warning). Adds to session; no commit.
         """Process attendees from create request"""
         if not attendees_data:
             return
@@ -683,6 +737,8 @@ class EventManager:
             session.add(attendee)
 
     def _validate_attachment_file_url(self, attachments_data):
+        # [FUNCTION DOC]
+        # HELPER: raises ValueError if any attachment dict lacks "fileUrl" or its URL is not https with a host.
         from urllib.parse import urlparse
 
         for data in attachments_data:
@@ -696,6 +752,9 @@ class EventManager:
     def _process_create_attachments(
         self, db_event: Event, attachments_data: list, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: validates attachment URLs (https) and adds an Attachment row per dict with its "fileUrl". No commit.
+        # Raises: ValueError for missing/invalid fileUrl.
         """Process attachments from create request"""
         if not attachments_data:
             return
@@ -716,6 +775,15 @@ class EventManager:
     def _process_create_conference_data(
         self, db_event: Event, conference_data, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: stores conference data for an event, accepting a Pydantic ConferenceData (has
+        # conferenceId) or a legacy dict. Rejects a conferenceId that already exists (ValueError).
+        # Extracts solution type/name/icon (name also used as legacy label), entry points as a
+        # JSON list (first video uri becomes legacy meeting_uri), notes and signature. If a
+        # createRequest is present: when its requestId already exists in the DB, stores a row with
+        # status "failure" (without request id/entry points); otherwise stores a full row with
+        # status "success" and the create solution type. Row id is conferenceId or a new UUID. No commit.
+        # KNOWN ISSUE: no row is created at all when conferenceSolution+entryPoints are given without createRequest, so such conference data is silently dropped; the dict branch only checks id uniqueness within the same event.
         """Process conference data from create request using new comprehensive schema"""
         from database.models.event import ConferenceData as DBConferenceData
 
@@ -964,6 +1032,8 @@ class EventManager:
                     session.add(db_conference)
 
     def _process_create_extended_properties(self, db_event: Event, ext_props, session):
+        # [FUNCTION DOC]
+        # HELPER: adds ExtendedProperty rows (scope "private" and/or "shared") from the dict's non-empty "private"/"shared" maps. No commit.
         """Process extended properties from create request"""
         from database.models.event import ExtendedProperty
 
@@ -986,6 +1056,10 @@ class EventManager:
             session.add(shared_prop)
 
     def _process_create_reminders(self, db_event: Event, reminders_data, session):
+        # [FUNCTION DOC]
+        # HELPER: from a ReminderOverrides model: if useDefault, adds one default reminder row
+        # (popup, 10 minutes, use_default True); otherwise adds a row per valid override
+        # (method email/popup, minutes >= 0), skipping invalid ones. Swallows all errors (logged). No commit.
         """Process reminders from create request"""
         if not reminders_data:
             return
@@ -1052,6 +1126,11 @@ class EventManager:
     def _process_create_reminders_for_update(
         self, db_event: Event, reminders_data, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: same as _process_create_reminders but for a dict: useDefault -> one popup/10
+        # default row; otherwise a row per override using override["method"].value and minutes.
+        # Swallows errors (logged). No commit.
+        # KNOWN ISSUE: assumes method is an enum (".value"); a plain string method raises AttributeError, which is swallowed so reminders are silently not saved. Docstring says "create request".
         """Process reminders from create request"""
         if not reminders_data:
             return
@@ -1100,6 +1179,10 @@ class EventManager:
     def _process_create_working_location(
         self, db_event: Event, working_location, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: converts a model to dict if needed and adds a WorkingLocationProperties row
+        # (type, homeOffice, customLocation label); if officeLocation is given, first adds and
+        # flushes a new OfficeLocation (missing fields stored as "") and links it. No commit.
         """Process working location properties from create request"""
         from database.models.event import OfficeLocation, WorkingLocationProperties
 
@@ -1155,6 +1238,8 @@ class EventManager:
     def _process_create_birthday_properties(
         self, db_event: Event, birthday_props, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: validates the (dict or object) type equals "birthday" (ValueError otherwise) and adds a BirthdayProperties row of type "birthday". No commit.
         """Process birthday properties from create request"""
         from database.models.event import BirthdayProperties
 
@@ -1180,6 +1265,8 @@ class EventManager:
     def _process_import_birthday_properties(
         self, db_event: Event, birthday_props, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: same as the create variant for import objects: ValueError if type is not "birthday", then adds a "birthday" row. No commit.
         """Process birthday properties from import request"""
         from database.models.event import BirthdayProperties
 
@@ -1218,6 +1305,23 @@ class EventManager:
         time_zone: Optional[str] = None,
         updated_min: Optional[str] = None,
     ) -> EventListResponse:
+        # [FUNCTION DOC]
+        # Lists events of a calendar visible to the user (GET /calendars/{id}/events).
+        # Steps: decode page_token to an offset (invalid -> 0); load the calendar (optionally
+        # requiring Calendar.time_zone == time_zone after validating it); require a non-"none"
+        # ACL role (PermissionError). Filter by role: freeBusyReader sees default/public only;
+        # reader/writer see default/public plus their own private events; owners see all. Then:
+        # show_deleted False excludes cancelled, True returns only cancelled; time_min/time_max
+        # overlap filters; updated_min; iCalUID or (else) text search q over
+        # summary/description/location; comma-separated eventTypes; private/shared extended
+        # property "name=value" filters; order by updated desc or start time asc; limit/offset.
+        # Each event is re-checked with check_event_visibility_permission, converted to schema
+        # and attendees truncated to max_attendees (setting attendeesOmitted).
+        # Returns: EventListResponse (etag "etag-events-<id>", calendar summary/description,
+        # updated now, timeZone, accessRole with freeBusyReader reported as reader, empty
+        # defaultReminders, no page/sync tokens).
+        # Raises: ValueError for missing calendar or bad datetimes/timezone; PermissionError; re-raises others.
+        # KNOWN ISSUE: calls self.expand_recurring_events, which does not exist (the AttributeError is caught and logged as a warning); show_deleted=True returns only cancelled events instead of including them; extended-property filters use a PostgreSQL JSON ".astext" accessor that does not work on SQLite; nextPageToken is never produced; max_results/sync_token/single_events/show_hidden_invitations are ignored or partially ignored.
         """
         List events from calendar with ACL permission and visibility checking
         Only returns events the user has permission to see based on visibility settings
@@ -1484,6 +1588,17 @@ class EventManager:
         total_occurences,
         datetime_dict,
     ):
+        # [FUNCTION DOC]
+        # Creates one Event row per occurrence string in total_occurences (linked to
+        # recurring_event_id), copying fields from the create request: start = occurrence, end =
+        # occurrence + datetime_dict["duration"], timezones, recurrence JSON, status,
+        # visibility, sequence, source, originalStartTime date or dateTime (depending on a "T" in
+        # the string), eventType, colorId, transparency, iCalUID (request or shared master
+        # iCalUID), guest flags, organizer from the creating user, plus attendees, attachments,
+        # conference data, extended properties, reminders, working location and type-specific
+        # properties. Commits after each instance.
+        # Returns None. All errors are swallowed and only logged (partially created series possible).
+        # KNOWN ISSUE: the unsupported-eventType fallback references EventTypeEnum.DEFAULT, which does not exist (member is "default"); a shared conferenceId across instances will fail uniqueness checks and silently stop instance creation.
         # Create database event with Google API fields
         # Generate event ID for single event
         try:
@@ -1688,6 +1803,27 @@ class EventManager:
         event_request: EventCreateRequest,
         query_params,
     ) -> EventSchema:
+        # [FUNCTION DOC]
+        # Creates an event in a calendar owned by the user (POST /calendars/{id}/events).
+        # Validates: end after start (comparing naive/aware datetimes by dropping tzinfo);
+        # originalStartTime consistent with start (same kind, value and timezone), otherwise
+        # defaults originalStartTime from start; birthday/focusTime/outOfOffice properties only
+        # with the matching eventType; at most 5 reminder overrides; conferenceSolution key type
+        # hangoutsMeet (generates a random "abc-defg-hij" conferenceId, rejects a provided one)
+        # or addOn (requires conferenceId); createRequest solution type hangoutsMeet/addOn.
+        # If recurrence is given, parses it with RecurrenceParser (RRULE required), expands up to
+        # 365 occurrences and commits a RecurringEvent row. Then inserts the master Event (UUID
+        # id, iCalUID default "<id>@calendar.google.com", organizer = creating user, guest flags,
+        # colors, transparency, type properties, source) and related rows (attendees,
+        # attachments if supportsAttachments is not False, conference data only if
+        # conferenceDataVersion >= 1, extended properties, reminders, working location), commits,
+        # sends notifications per query_params["sendUpdates"] (errors ignored), and for recurring
+        # events creates instances via create_recurrence_event_instance.
+        # Inputs: query_params - dict-like of query options or None.
+        # Returns: the created master event as EventSchema.
+        # Raises: ValueError for validation/recurrence errors or a calendar not owned by the user (rolled back); other errors re-raised.
+        # Side effects: DB writes, possible webhook/email notifications.
+        # KNOWN ISSUE: the RecurringEvent row is committed before the master event, so later failures leave an orphan; instances duplicate the master event's first occurrence; EventTypeEnum.DEFAULT fallback does not exist.
         """
         Create a new event following Google Calendar API v3 structure
         Handles both single events and recurring events based on recurrence data
@@ -1718,6 +1854,8 @@ class EventManager:
 
             # Validate datetime consistency - handle timezone-aware vs naive comparison
             def safe_datetime_compare(dt1, dt2):
+                # [FUNCTION DOC]
+                # HELPER: returns dt1 <= dt2, stripping tzinfo from both when only one is timezone-aware.
                 """Compare two datetimes, handling timezone awareness differences"""
                 # If both are naive or both are aware, compare directly
                 if (dt1.tzinfo is None) == (dt2.tzinfo is None):
@@ -2183,6 +2321,12 @@ class EventManager:
         timeZone: str = None,
         maxAttendees: Optional[int] = None,
     ) -> Optional[EventSchema]:
+        # [FUNCTION DOC]
+        # Returns the EventSchema of an event created by user_id in a calendar the user owns
+        # (optionally requiring the calendar's time_zone to equal timeZone when non-blank), with
+        # attendees truncated to maxAttendees (setting attendeesOmitted); None if the event is not found.
+        # Raises: ValueError if the calendar is not found for the user/timezone; re-raises other errors.
+        # KNOWN ISSUE: timeZone is used as a calendar filter rather than to convert response times; events created by other users in the calendar are not returned.
         """
         Get a specific event
 
@@ -2257,11 +2401,17 @@ class EventManager:
             session.close()
 
     def _validate_email_pattern(self, email: str) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns True if the string matches a simple "local@domain.tld" regex.
         """Validate email pattern using regex"""
         email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         return re.match(email_pattern, email) is not None
 
     def _create_user_from_email(self, session, email: str) -> User:
+        # [FUNCTION DOC]
+        # HELPER: creates and commits a new active, unverified User for the email (random UUID
+        # user_id and static_token, name = local part, timezone UTC) and returns it.
+        # Raises: ValueError wrapping any failure. Side effect: commits the caller's session.
         """Create a new user from email address"""
         try:
             # Generate user data from email
@@ -2294,6 +2444,11 @@ class EventManager:
             raise ValueError(f"Failed to create user for email {email}: {e}")
 
     def check_attendees_email_id(self, session, value):
+        # [FUNCTION DOC]
+        # Ensures every attendee (dict or model) has an email; for emails not in the users table,
+        # validates the format and auto-creates a user via _create_user_from_email.
+        # Raises: ValueError for a missing/invalid email or failed user creation.
+        # Side effects: inserts and commits users on the given session.
         for v in value:
             # Handle both dictionary and Pydantic model formats
             if isinstance(v, dict):
@@ -2328,6 +2483,20 @@ class EventManager:
         is_patch: bool = True,
         query_params: Optional[Dict[str, Any]] = None,
     ) -> Optional[EventSchema]:
+        # [FUNCTION DOC]
+        # Updates an event created by user_id in a calendar the user owns (PATCH when is_patch,
+        # else PUT). Dumps the request (dropping None fields for PATCH) and applies each field:
+        # start/end parsed with timezone and checked end > start; colorId; attendees replaced
+        # (unknown emails auto-create users; existing rows deleted and re-created, with commits);
+        # recurrence stored as JSON; attachments replaced if supportsAttachments; conferenceData
+        # replaced only when conferenceDataVersion >= 1; birthdayProperties validated as immutable
+        # "birthday"; extendedProperties replaced; reminders replaced; guest flags;
+        # focusTime/outOfOffice JSON; workingLocation replaced; any other non-empty field set
+        # directly on the row. Rejects eventType changes. Increments sequence, sets updated_at,
+        # commits and returns the reloaded EventSchema; None if the event is not found.
+        # Raises: ValueError for missing calendar, eventType change, bad times or invalid data;
+        # rolls back and re-raises on errors.
+        # KNOWN ISSUE: model_dump turns start/end into dicts that always contain a "dateTime" key, so all-day (date-only) updates try to parse None and fail; "source" updates are silently ignored; PUT does not clear omitted fields because None values are skipped; intermediate commits during attendee replacement make the rollback partial.
         """
         Update an event (PATCH or PUT)
 
@@ -2736,6 +2905,11 @@ class EventManager:
         event_id: str,
         send_updates: Optional[str] = "all",
     ) -> bool:
+        # [FUNCTION DOC]
+        # Deletes an event created by user_id in a calendar the user owns: first triggers
+        # notifications per send_updates (errors ignored), then deletes the row (cascading related
+        # rows) and commits. Returns True, or False if the event is not found.
+        # Raises: ValueError if the calendar is not owned by the user; rolls back and re-raises other errors.
         """
         Delete an event with notification control
 
@@ -2807,6 +2981,11 @@ class EventManager:
         event_id: str,
         move_request: EventMoveRequest,
     ) -> Optional[EventSchema]:
+        # [FUNCTION DOC]
+        # Moves an event created by user_id from its owned source calendar to another calendar
+        # the user owns (changes calendar_id, updated_at), commits, sends notifications per
+        # sendUpdates (errors ignored) and returns the EventSchema; None if the event is not found.
+        # Raises: ValueError if source or destination calendar is not owned by the user.
         """
         Move an event to another calendar
 
@@ -2888,6 +3067,12 @@ class EventManager:
     def quick_add_event(
         self, user_id: str, calendar_id: str, quick_add_request: EventQuickAddRequest
     ) -> EventSchema:
+        # [FUNCTION DOC]
+        # Creates a confirmed default-visibility event whose summary is the raw text (no natural
+        # language parsing), starting at the current UTC hour and lasting one hour, with the
+        # creating user as organizer; commits, sends notifications (errors ignored) and returns the EventSchema.
+        # Raises: ValueError if the calendar is not owned by the user.
+        # KNOWN ISSUE: end time is computed by replacing hour with hour+1, which raises ValueError when run during the 23:00 UTC hour.
         """
         Quick add an event using natural language
 
@@ -2971,6 +3156,20 @@ class EventManager:
         event_request: EventImportRequest,
         query_params: EventImportQueryParams,
     ) -> EventImportResponse:
+        # [FUNCTION DOC]
+        # Imports an event into a calendar owned by the user. Validates the request
+        # (_validate_import_request), then requires that an event with the same iCalUID already
+        # exists in this calendar for the user and has eventType "default"; validates
+        # originalStartTime consistency, rejects focusTime/outOfOffice properties, max 5 reminder
+        # overrides, an organizer email/displayName that must match an existing user, and
+        # conference solution rules (hangoutsMeet gets a generated id; addOn needs one). Creates a
+        # new Event (new UUID, same iCalUID) with times from _parse_import_datetimes, recurrence,
+        # guest flags, organizer (event user_id becomes the organizer's), attendees, attachments
+        # (if supported), conference data (if version >= 1; errors only logged), extended
+        # properties, reminders and source; commits.
+        # Returns: the new event as EventSchema (attendeesOmitted copied), despite the EventImportResponse annotation.
+        # Raises: ValueError for any validation failure; rolls back and re-raises errors.
+        # KNOWN ISSUE: Google's import creates or updates by iCalUID, but this requires a pre-existing event and then creates a duplicate with the same iCalUID; is_all_day is computed but unused.
         """
         Import an event as a private copy to the specified calendar.
         This operation is used to add a private copy of an existing event to a calendar.
@@ -3344,6 +3543,10 @@ class EventManager:
     def _validate_import_request(
         self, user_id: str, calendar_id: str, event_request: EventImportRequest, session
     ) -> EventImportResult:
+        # [FUNCTION DOC]
+        # HELPER: returns EventImportResult(success=True) unless start/end are missing or both are
+        # dateTime values with end <= start (or parsing fails), in which case it returns
+        # success=False with an EventImportError (domain "calendar", reason "required"/"invalid", message).
         """Validate import request and permissions"""
         try:
             # Validate required fields
@@ -3386,6 +3589,10 @@ class EventManager:
     def _handle_event_type_conversion(
         self, original_type: str, event_request: EventImportRequest
     ) -> tuple[str, list[str]]:
+        # [FUNCTION DOC]
+        # HELPER (unused in this server): returns (final_type, warnings): unsupported types, or
+        # workingLocation/focusTime/outOfOffice without their properties, become "default" with a
+        # warning; otherwise the original type and no warnings.
         """Handle event type conversion and return warnings"""
         warnings = []
 
@@ -3428,6 +3635,11 @@ class EventManager:
     def _parse_import_datetimes(
         self, event_request: EventImportRequest
     ) -> tuple[str, datetime, str, datetime, str, str]:
+        # [FUNCTION DOC]
+        # HELPER: parses an import request's start/end into (start_date string or None,
+        # start datetime, end_date string or None, end datetime, start tz, end tz). Date-only values
+        # become naive midnight datetimes; timezones default to "UTC" and are validated.
+        # Raises: ValueError for missing/invalid values or end <= start.
         """Parse start and end datetime from import request with proper all-day event handling"""
         from datetime import date
 
@@ -3478,6 +3690,8 @@ class EventManager:
         return start_date, start_dt, end_date, end_dt, start_tz, end_tz
 
     def _validate_timezone(self, tz_name: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns tz_name unchanged if None or a dateutil-known timezone; raises ValueError otherwise.
         """Validate IANA timezone name"""
         if tz_name is None:
             return tz_name
@@ -3492,12 +3706,18 @@ class EventManager:
         return tz_name
 
     def _is_all_day_event(self, start_date: str, end_date: str) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns True when both start_date and end_date are not None.
         """Check if the event is an all-day event based on date fields"""
         return start_date is not None and end_date is not None
 
     def _process_import_attendees(
         self, db_event: Event, attendees_data: list, session, organizer=None
     ):
+        # [FUNCTION DOC]
+        # HELPER: adds an Attendees row for each import attendee whose email maps to an existing
+        # user (unknown emails skipped); if the attendee is the organizer and has no displayName,
+        # the organizer's displayName is used. No commit.
         """Process attendees from import request with organizer handling"""
         if not attendees_data:
             return
@@ -3532,6 +3752,8 @@ class EventManager:
     def _process_import_attachments(
         self, db_event: Event, attachments_data: list, session
     ):
+        # [FUNCTION DOC]
+        # HELPER: adds an Attachment row per import attachment using its fileUrl. No commit.
         """Process attachments from import request"""
         if not attachments_data:
             return
@@ -3549,6 +3771,11 @@ class EventManager:
     def _process_import_conference_data(
         self, db_event: Event, conference_data, version: int, session
     ):
+        # [FUNCTION DOC]
+        # HELPER (unused in this server): if version >= 1, adds a simplified ConferenceData row
+        # (id, request id, solution type, status code, first video uri, label) from an import
+        # ConferenceData model or legacy dict. No commit.
+        # KNOWN ISSUE: dereferences conferenceSolution.key.type.value and createRequest.conferenceSolutionKey.type.value without None checks.
         """Process conference data from import request using new comprehensive schema"""
         if version < 1:
             return  # Conference data not supported in version 0
@@ -3624,6 +3851,8 @@ class EventManager:
         session.add(db_conference)
 
     def _process_import_extended_properties(self, db_event: Event, ext_props, session):
+        # [FUNCTION DOC]
+        # HELPER: adds ExtendedProperty rows for the model's non-empty private/shared maps. No commit.
         """Process extended properties from import request"""
         from database.models.event import ExtendedProperty
 
@@ -3648,6 +3877,9 @@ class EventManager:
     def _process_import_working_location(
         self, db_event: Event, working_location, session
     ):
+        # [FUNCTION DOC]
+        # HELPER (unused in this server): adds a WorkingLocationProperties row (and an
+        # OfficeLocation row when officeLocation is given) from an import model. No commit.
         """Process working location properties from import request"""
         from database.models.event import OfficeLocation, WorkingLocationProperties
 
@@ -3679,6 +3911,10 @@ class EventManager:
         session.add(working_loc)
 
     def _process_import_reminders(self, db_event: Event, reminders_data, session):
+        # [FUNCTION DOC]
+        # HELPER: same logic as _process_create_reminders: useDefault adds a popup/10-minute
+        # default row; otherwise adds valid overrides (email/popup, minutes >= 0). Errors are
+        # swallowed and logged. No commit.
         """
         Process reminders from import request with proper Google Calendar logic
 
@@ -3767,6 +4003,13 @@ class EventManager:
         ical_uid: str,
         is_all_day: bool = False,
     ) -> EventImportResponse:
+        # [FUNCTION DOC]
+        # HELPER (unused in this server): builds an EventImportResponse from an Event row with a
+        # synthetic creator/organizer ("user-<id>@calendar.google.com", "Calendar User"), start/end
+        # as date or dateTime depending on is_all_day, transparency "opaque", the given eventType
+        # and iCalUID, plus optional colorId, recurrence, attendees, attachments, conference data,
+        # source, extended properties, working location, type properties and reminders.
+        # KNOWN ISSUE: compares ExtendedProperty.scope (an Enum) with plain strings, so extended properties are never included; assigns ORM objects (birthdayProperties) into a pydantic response.
         """Build comprehensive import response"""
         import uuid
 
@@ -3988,6 +4231,10 @@ class EventManager:
         return response
 
     def _build_datetime_for_schema(self, dt: datetime, tz: str) -> DateTime:
+        # [FUNCTION DOC]
+        # HELPER: returns a schema DateTime: a date (YYYY-MM-DD) form when the time part is exactly
+        # midnight, otherwise a dateTime ISO string, both with the given timezone.
+        # KNOWN ISSUE: timed events that start or end exactly at 00:00 are reported as all-day dates.
         """Build DateTime response for regular event schema"""
         # Check if this appears to be an all-day event (time is 00:00:00 and timezone is UTC)
         is_all_day = dt.time() == dt.min.time()
@@ -4002,6 +4249,9 @@ class EventManager:
     def _build_original_start_time_for_schema(
         self, db_event: Event
     ) -> Optional[DateTime]:
+        # [FUNCTION DOC]
+        # HELPER: returns a DateTime from originalStartTime_date (date form) or
+        # originalStartTime_dateTime (dateTime form) with the stored timezone, or None if neither is set.
         """Build originalStartTime DateTime response for event schema"""
         if (
             hasattr(db_event, "originalStartTime_date")
@@ -4028,6 +4278,8 @@ class EventManager:
     def _build_event_datetime_response(
         self, dt: datetime, tz: str, is_all_day: bool
     ) -> EventDateTime:
+        # [FUNCTION DOC]
+        # HELPER: returns an import EventDateTime in date form (if is_all_day) or dateTime form, with the timezone.
         """Build EventDateTime response with proper format for all-day vs timed events"""
         if is_all_day:
             # For all-day events, return date format (YYYY-MM-DD)
@@ -4052,6 +4304,18 @@ class EventManager:
         time_max: Optional[str] = None,
         time_zone: Optional[str] = None,
     ) -> EventInstancesResponse:
+        # [FUNCTION DOC]
+        # Returns the events of a recurring series (GET .../events/{eventId}/instances), where
+        # event_id is interpreted as the RecurringEvent id (recurring_event_id), not an event id.
+        # Requires the calendar to exist (ValueError) and the user to have a non-"none" role
+        # (PermissionError) and visibility of the first series event (PermissionError); the
+        # series must have recurrence (ValueError). Applies filters: excludes cancelled unless
+        # show_deleted, time_min/time_max overlap, original_start exact match on
+        # originalStartTime_dateTime, and page offset; converts each to schema, truncates
+        # attendees to max_attendees, caps the list at min(max_results, 2500).
+        # Returns: EventInstancesResponse (accessRole with freeBusyReader reported as reader,
+        # timeZone = requested or calendar timezone, no next page token).
+        # KNOWN ISSUE: the series master event shares recurring_event_id with its instances, so it is returned as an extra instance; time_zone is only validated, not applied to times.
         """
         Returns instances of the specified recurring event following Google Calendar API v3 specification
 
@@ -4213,6 +4477,14 @@ class EventManager:
         watch_request: Dict[str, Any],
         event_types: Optional[str] = None,
     ) -> Channel:
+        # [FUNCTION DOC]
+        # Creates an "event" WatchChannel for a calendar owned by the user: resource id
+        # "events-<calendar>-<8 hex>", uri "/calendars/<calendar>/events" (with "?eventTypes=..."
+        # when given), params JSON including the request params and the eventTypes filter,
+        # expiration now+24h. Returns a Channel with ISO expiration plus "Z".
+        # Inputs: watch_request - an object with id/address/token/type/params (despite the Dict annotation).
+        # Raises: ValueError if the calendar is not owned by the user or the channel id exists.
+        # KNOWN ISSUE: params.ttl is ignored; no rollback is done on commit errors.
         """
         Watch for changes to events with optional event type filtering
 
@@ -4316,6 +4588,10 @@ class EventManager:
             session.close()
 
     def _handle_create_notifications(self, db_event: Event, send_updates: str, session):
+        # [FUNCTION DOC]
+        # HELPER: computes which attendees would be notified for a created event ("none": nobody;
+        # "all": every attendee with an email; "externalOnly": attendees outside gmail.com,
+        # googlemail.com, google.com) and only logs them. No messages are actually sent.
         """
         Handle notification logic for event creation based on sendUpdates parameter
 
@@ -4381,6 +4657,9 @@ class EventManager:
             )
 
     def _handle_notifications(self, db_event: Event, send_updates: str, session):
+        # [FUNCTION DOC]
+        # HELPER: same recipient selection as _handle_create_notifications for update/delete/move
+        # operations; only logs recipients, sends nothing.
         """
         Handle notification logic for event operations based on sendUpdates parameter
 
@@ -4444,6 +4723,8 @@ class EventManager:
             )
 
     def _encode_page_token(self, offset: int) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns base64 of the integer offset ("" on error). Unused within this module.
         """Encode offset as a page token"""
         try:
             token_data = str(offset)
@@ -4453,6 +4734,9 @@ class EventManager:
             return ""
 
     def _decode_page_token(self, token: str) -> int:
+        # [FUNCTION DOC]
+        # HELPER: accepts a raw digit string (legacy) or a base64 token (padding added) and
+        # returns the integer offset. Raises ValueError for invalid tokens.
         """Decode page token to get offset"""
         try:
             # Handle legacy case where raw numbers might be passed
@@ -4476,6 +4760,8 @@ class EventManager:
             )
 
     def _encode_sync_token(self, timestamp: datetime) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns base64 of the timestamp's ISO string ("" on error).
         """Encode timestamp as a sync token"""
         try:
             # Use ISO format timestamp for sync token
@@ -4486,6 +4772,8 @@ class EventManager:
             return ""
 
     def _decode_sync_token(self, token: str) -> datetime:
+        # [FUNCTION DOC]
+        # HELPER: decodes a base64 ISO timestamp token into a datetime. Raises ValueError if malformed.
         """Decode sync token to get timestamp"""
         try:
             # Add padding if needed for base64 decoding
