@@ -524,6 +524,10 @@ except Exception as e:
         # counted elementwise against atol + rtol * abs(reference). Parses the last
         # stdout line as JSON. Returns a CorrectnessResult; parse failures, script
         # errors, timeouts and exceptions become correct=False with an error.
+        # KNOWN ISSUE: no random seed is set before building the two models, so
+        # problems with randomly initialized parameters or buffers get different
+        # weights in reference and solution and cannot match unless the solution
+        # reproduces the same RNG sequence.
         """Run correctness check comparing solution to reference."""
 
         correctness_script = f'''

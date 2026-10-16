@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Regression tests for rubric hook and container execution-order bugs: pre-forward hooks must run
+# before forward (sync and async), Sequential must call each child exactly once when switching from
+# sync to async children mid-chain, and containers (Sequential, Gate, WeightedSum) must run
+# pre-hooks in both sync and async paths.
+# KNOWN ISSUE: the module and several test docstrings say the tests currently fail and cite specific
+# source line numbers; these statements describe a past state and are likely stale.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for pre-hook and container execution bugs.
@@ -18,37 +26,53 @@ from openenv.core.rubrics.containers import Gate, Sequential, WeightedSum
 
 
 class TrackingRubric(Rubric):
+    # [CLASS DOC]
+    # HELPER: Sync rubric appending "<name>.forward" to its execution log and returning a fixed score.
     """Rubric that tracks execution order."""
 
     def __init__(self, name: str, score: float = 1.0):
+        # [FUNCTION DOC]
+        # HELPER: Stores name and score and creates an empty log.
         super().__init__()
         self.name = name
         self.score = score
         self.execution_log = []
 
     def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Logs the call and returns the score.
         self.execution_log.append(f"{self.name}.forward")
         return self.score
 
 
 class AsyncTrackingRubric(Rubric):
+    # [CLASS DOC]
+    # HELPER: Async rubric appending "<name>.forward" to its execution log and returning a fixed score.
     """Async rubric that tracks execution order."""
 
     def __init__(self, name: str, score: float = 1.0):
+        # [FUNCTION DOC]
+        # HELPER: Stores name and score and creates an empty log.
         super().__init__()
         self.name = name
         self.score = score
         self.execution_log = []
 
     async def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Logs the call and returns the score.
         self.execution_log.append(f"{self.name}.forward")
         return self.score
 
 
 class TestPreHookExecutionOrder:
+    # [CLASS DOC]
+    # Tests that pre-hooks run before forward.
     """Test that pre-hooks are called BEFORE forward(), not after."""
 
     def test_pre_hook_before_forward_sync(self):
+        # [FUNCTION DOC]
+        # In the sync path the pre-hook runs while forward has not yet logged anything.
         """Pre-hook must be called BEFORE forward() executes (sync path).
 
         BUG: Currently pre-hook is called AFTER forward() in base.py:78-88.
@@ -59,6 +83,8 @@ class TestPreHookExecutionOrder:
         execution_order = []
 
         def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Records the call and asserts forward has not run yet.
             # Pre-hook should see that forward hasn't executed yet
             execution_order.append("pre_hook")
             # At this point, execution_log should be EMPTY
@@ -74,11 +100,15 @@ class TestPreHookExecutionOrder:
 
     @pytest.mark.asyncio
     async def test_pre_hook_before_forward_async(self):
+        # [FUNCTION DOC]
+        # In the async path an async pre-hook runs before forward.
         """Pre-hook must be called BEFORE forward() executes (async path)."""
         rubric = AsyncTrackingRubric("test", 0.8)
         execution_order = []
 
         async def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Records the call and asserts forward has not run yet.
             execution_order.append("pre_hook")
             # At this point, execution_log should be EMPTY
             assert len(rubric.execution_log) == 0, "Pre-hook called AFTER forward()!"
@@ -92,6 +122,10 @@ class TestPreHookExecutionOrder:
         assert result == 0.8
 
     def test_pre_hook_can_modify_state(self):
+        # [FUNCTION DOC]
+        # State set by a pre-hook is visible to a post-hook.
+        # KNOWN ISSUE: this cannot detect a pre-hook running after forward, since the post-hook only checks
+        # that the pre-hook ran at some point.
         """Pre-hook should be able to set up state before forward() runs.
 
         This is a realistic use case: pre-hook sets up caching or logging
@@ -101,9 +135,13 @@ class TestPreHookExecutionOrder:
         state = {"initialized": False}
 
         def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Marks the shared state initialized.
             state["initialized"] = True
 
         def post_hook(r, action, obs, result):
+            # [FUNCTION DOC]
+            # HELPER: Asserts the shared state was initialized.
             # Verify state was set by pre-hook BEFORE forward ran
             assert state["initialized"], "Pre-hook didn't run before forward"
 
@@ -113,10 +151,14 @@ class TestPreHookExecutionOrder:
 
 
 class TestSequentialDoubleCallBug:
+    # [CLASS DOC]
+    # Tests that Sequential calls each child once across sync/async transitions.
     """Test that Sequential doesn't call rubrics twice when async detected mid-way."""
 
     @pytest.mark.asyncio
     async def test_sequential_async_third_position_no_double_call(self):
+        # [FUNCTION DOC]
+        # With an async child third of four, every child runs once and the last score is returned.
         """When async is detected at position 2 (third rubric), no double-call.
 
         BUG: In containers.py:95-101, when we detect async mid-iteration,
@@ -155,6 +197,8 @@ class TestSequentialDoubleCallBug:
 
     @pytest.mark.asyncio
     async def test_sequential_async_detected_midway_no_double_call(self):
+        # [FUNCTION DOC]
+        # With an async child second of three, every child runs once.
         """When async is detected mid-way, rubrics shouldn't be called twice.
 
         This test has async at the second position (index 1), which means
@@ -182,6 +226,8 @@ class TestSequentialDoubleCallBug:
 
     @pytest.mark.asyncio
     async def test_sequential_async_at_second_position_no_double_call(self):
+        # [FUNCTION DOC]
+        # A sync then async pair each run once.
         """Specific case: async at position 1 (second rubric).
 
         When async is at position 1, it's detected immediately after the first
@@ -191,12 +237,20 @@ class TestSequentialDoubleCallBug:
         call_counts = {"sync": 0, "async": 0}
 
         class CountingSync(Rubric):
+            # [CLASS DOC]
+            # HELPER: Sync rubric incrementing the shared sync counter and returning 1.0.
             def forward(self, action, obs):
+                # [FUNCTION DOC]
+                # HELPER: Increments the sync count and returns 1.0.
                 call_counts["sync"] += 1
                 return 1.0
 
         class CountingAsync(Rubric):
+            # [CLASS DOC]
+            # HELPER: Async rubric incrementing the shared async counter and returning 0.8.
             async def forward(self, action, obs):
+                # [FUNCTION DOC]
+                # HELPER: Increments the async count and returns 0.8.
                 call_counts["async"] += 1
                 return 0.8
 
@@ -210,6 +264,8 @@ class TestSequentialDoubleCallBug:
 
     @pytest.mark.asyncio
     async def test_sequential_multiple_async_transitions(self):
+        # [FUNCTION DOC]
+        # Alternating sync/async children each run once.
         """Test multiple sync->async transitions don't cause double calls."""
         r1 = TrackingRubric("sync1", 1.0)
         r2 = AsyncTrackingRubric("async1", 0.8)
@@ -228,9 +284,13 @@ class TestSequentialDoubleCallBug:
 
 
 class TestContainerPreHooksSyncPath:
+    # [CLASS DOC]
+    # Tests container pre-hooks in the sync path.
     """Test that container pre-hooks work in sync path."""
 
     def test_sequential_pre_hooks_called_sync(self):
+        # [FUNCTION DOC]
+        # Sequential runs its pre-hook in the sync path.
         """Sequential should call pre-hooks in sync path.
 
         BUG: Looking at containers.py:68-116, the Sequential.__call__ sync
@@ -245,6 +305,8 @@ class TestContainerPreHooksSyncPath:
         pre_hook_called = {"called": False}
 
         def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Marks the pre-hook as called.
             pre_hook_called["called"] = True
 
         rubric.register_forward_pre_hook(pre_hook)
@@ -254,12 +316,16 @@ class TestContainerPreHooksSyncPath:
         assert result == 0.8
 
     def test_gate_pre_hooks_called_sync(self):
+        # [FUNCTION DOC]
+        # Gate runs its pre-hook in the sync path.
         """Gate should call pre-hooks in sync path."""
         rubric = Gate(TrackingRubric("child", 0.8), threshold=0.5)
 
         pre_hook_called = {"called": False}
 
         def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Marks the pre-hook as called.
             pre_hook_called["called"] = True
 
         rubric.register_forward_pre_hook(pre_hook)
@@ -269,6 +335,8 @@ class TestContainerPreHooksSyncPath:
         assert result == 0.8
 
     def test_weighted_sum_pre_hooks_called_sync(self):
+        # [FUNCTION DOC]
+        # WeightedSum runs its pre-hook in the sync path.
         """WeightedSum should call pre-hooks in sync path."""
         rubric = WeightedSum(
             [TrackingRubric("r1", 0.6), TrackingRubric("r2", 0.8)],
@@ -278,6 +346,8 @@ class TestContainerPreHooksSyncPath:
         pre_hook_called = {"called": False}
 
         def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Marks the pre-hook as called.
             pre_hook_called["called"] = True
 
         rubric.register_forward_pre_hook(pre_hook)
@@ -287,6 +357,8 @@ class TestContainerPreHooksSyncPath:
         assert result == pytest.approx(0.7)
 
     def test_sequential_post_hooks_still_work_sync(self):
+        # [FUNCTION DOC]
+        # Sequential post-hooks receive the result (control).
         """Verify post-hooks still work (as control test)."""
         rubric = Sequential(
             TrackingRubric("r1", 1.0),
@@ -296,6 +368,8 @@ class TestContainerPreHooksSyncPath:
         post_hook_called = {"called": False, "result": None}
 
         def post_hook(r, action, obs, result):
+            # [FUNCTION DOC]
+            # HELPER: Records that it was called and the result.
             post_hook_called["called"] = True
             post_hook_called["result"] = result
 
@@ -308,10 +382,14 @@ class TestContainerPreHooksSyncPath:
 
 
 class TestContainerPreHooksAsyncPath:
+    # [CLASS DOC]
+    # Tests container pre-hooks in the async path (controls).
     """Test that container pre-hooks work correctly in async path (control tests)."""
 
     @pytest.mark.asyncio
     async def test_sequential_pre_hooks_called_async(self):
+        # [FUNCTION DOC]
+        # Sequential runs an async pre-hook in the async path.
         """Sequential should call pre-hooks in async path (this should work)."""
         rubric = Sequential(
             AsyncTrackingRubric("r1", 1.0),
@@ -321,6 +399,8 @@ class TestContainerPreHooksAsyncPath:
         pre_hook_called = {"called": False}
 
         async def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Marks the pre-hook as called.
             pre_hook_called["called"] = True
 
         rubric.register_forward_pre_hook(pre_hook)
@@ -331,12 +411,16 @@ class TestContainerPreHooksAsyncPath:
 
     @pytest.mark.asyncio
     async def test_gate_pre_hooks_called_async(self):
+        # [FUNCTION DOC]
+        # Gate runs an async pre-hook in the async path.
         """Gate should call pre-hooks in async path (this should work)."""
         rubric = Gate(AsyncTrackingRubric("child", 0.8), threshold=0.5)
 
         pre_hook_called = {"called": False}
 
         async def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Marks the pre-hook as called.
             pre_hook_called["called"] = True
 
         rubric.register_forward_pre_hook(pre_hook)

@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Tests for openenv.harbor.install_fixes, which patches upstream Harbor agent
+# adapters: exporting openclaw's SQLite session transcript to JSONL, trimming
+# a trailing stderr log line from openclaw's capture file so Harbor's own
+# parser succeeds, OpenHands runtime preparation, Kimi process-group
+# isolation, node version pinning for openclaw, positional exec_as_agent
+# compatibility, and openclaw provider catalog config. Skipped without
+# install_fixes or harbor's openclaw agent. Module constants hold the trim
+# script, container/session paths, a realistic capture envelope and the
+# trailing log line.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +41,10 @@ _SESSION_FILE = "/root/.openclaw/agents/main/sessions/790c93f1.jsonl"
 
 
 def test_sqlite_export_preserves_per_call_usage_for_harbor(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # With subprocess.run patched to emulate "openclaw sessions export-trajectory",
+    # the export writes the bundle's entries as JSONL that Harbor converts to ATIF
+    # steps with the original per-call completion token counts.
     import subprocess
     from types import SimpleNamespace
 
@@ -52,6 +66,9 @@ def test_sqlite_export_preserves_per_call_usage_for_harbor(tmp_path, monkeypatch
     (bundle / "session-branch.json").write_text(json.dumps({"entries": entries}))
 
     def run(command, **kwargs):
+        # [FUNCTION DOC]
+        # Fake subprocess.run: checks the command/flags and returns stdout naming the
+        # session and bundle directory.
         assert command[:5] == [
             "openclaw",
             "sessions",
@@ -77,6 +94,8 @@ def test_sqlite_export_preserves_per_call_usage_for_harbor(tmp_path, monkeypatch
 
 
 def test_sqlite_export_rejects_other_session(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # An export for a different session raises ValueError and writes nothing.
     import subprocess
     from types import SimpleNamespace
 
@@ -105,6 +124,8 @@ def test_sqlite_export_rejects_other_session(tmp_path, monkeypatch):
 
 
 def test_sqlite_export_preserves_existing_native_jsonl(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # An existing JSONL transcript is kept and no export subprocess runs.
     import subprocess
 
     target = tmp_path / "openclaw.session.jsonl"
@@ -137,11 +158,19 @@ _TRAILING_LOG = (
 
 
 def _capture_file(with_trailing_log: bool = True) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the pretty-printed envelope text, optionally followed by the
+    # trailing log line.
     body = json.dumps(_ENVELOPE, indent=2)
     return f"{body}\n{_TRAILING_LOG}\n" if with_trailing_log else f"{body}\n"
 
 
 def _run_trim(tmp_path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: writes a capture file with a trailing log to tmp_path, executes the
+    # production trim script with its container path replaced by that file
+    # (asserting the replacement happened), and returns the resulting file text.
+    # Side effects: executes code via exec and writes a file.
     """Execute the real production trim script against a temp file, not a copy of its logic."""
     target = tmp_path / "openclaw.txt"
     script = TRIM.replace(_CONTAINER_PATH, str(target))
@@ -155,6 +184,8 @@ def _run_trim(tmp_path) -> str:
 
 # --- openclaw ---------------------------------------------------------------
 def test_harbor_cannot_parse_its_own_capture_file_when_openclaw_logs_after_the_json():
+    # [FUNCTION DOC]
+    # Harbor's _load_json_object returns None when a log line follows the JSON.
     """The bug itself: one stderr line after the envelope and Harbor's parser gives up.
 
     `_load_json_object` requires the JSON object to consume the entire remaining suffix, but Harbor's
@@ -165,6 +196,8 @@ def test_harbor_cannot_parse_its_own_capture_file_when_openclaw_logs_after_the_j
 
 
 def test_trimming_the_trailing_log_line_makes_harbors_own_parser_succeed(tmp_path):
+    # [FUNCTION DOC]
+    # After trimming, Harbor parses the envelope including sessionFile.
     """The fix, stated as the only thing it is allowed to be: Harbor's parser does the parsing.
 
     The subclass removes the trailing lines and nothing else, so the envelope that comes back is
@@ -177,6 +210,8 @@ def test_trimming_the_trailing_log_line_makes_harbors_own_parser_succeed(tmp_pat
 
 
 def test_trim_leaves_an_already_clean_capture_file_untouched(tmp_path):
+    # [FUNCTION DOC]
+    # A clean capture file is unchanged by the trim script.
     """A run whose stopReason is `end_turn` logs nothing, so the file is already parseable."""
     target = tmp_path / "openclaw.txt"
     script = TRIM.replace(_CONTAINER_PATH, str(target))
@@ -189,6 +224,8 @@ def test_trim_leaves_an_already_clean_capture_file_untouched(tmp_path):
 
 
 def test_trim_survives_a_capture_file_with_no_envelope_at_all(tmp_path):
+    # [FUNCTION DOC]
+    # A file without JSON is left unchanged without error.
     """An agent that died before emitting JSON must not turn into a crash in our override."""
     target = tmp_path / "openclaw.txt"
     script = TRIM.replace(_CONTAINER_PATH, str(target))
@@ -201,6 +238,9 @@ def test_trim_survives_a_capture_file_with_no_envelope_at_all(tmp_path):
 
 
 def test_a_backwards_scan_without_the_suffix_rule_latches_onto_the_wrong_object():
+    # [FUNCTION DOC]
+    # Demonstrates that a backwards raw-decode scan finds the nested completion
+    # object rather than the envelope.
     """Why the fix trims text instead of loosening the parser -- the obvious loosening is wrong.
 
     Dropping Harbor's "must consume the suffix" rule looks like the one-line fix. It is not: the scan
@@ -229,6 +269,9 @@ def test_a_backwards_scan_without_the_suffix_rule_latches_onto_the_wrong_object(
 
 @pytest.mark.asyncio
 async def test_openhands_clean_install_still_prepares_local_runtime(monkeypatch):
+    # [FUNCTION DOC]
+    # Async: after a successful base install, InterceptOpenHands runs three root
+    # commands creating python and poetry wrappers for the OpenHands venv.
     """A dependency-successful install must not leave LocalRuntime invoking real Poetry."""
     from unittest.mock import AsyncMock
 
@@ -246,6 +289,9 @@ async def test_openhands_clean_install_still_prepares_local_runtime(monkeypatch)
 
 
 def test_kimi_terminal_signal_does_not_kill_its_exec_transport():
+    # [FUNCTION DOC]
+    # A command wrapped by _isolated_process_group that runs "kill 0" exits 143
+    # after printing, without killing the outer bash (runs a real subprocess).
     import subprocess
 
     wrapped = install_fixes._isolated_process_group("echo finished; kill 0")
@@ -262,6 +308,8 @@ def test_kimi_terminal_signal_does_not_kill_its_exec_transport():
 
 @pytest.mark.asyncio
 async def test_openclaw_install_and_runtime_select_supported_node(monkeypatch):
+    # [FUNCTION DOC]
+    # Async: InterceptOpenClaw rewrites "nvm install/use 22" to 24.16.0.
     from unittest.mock import AsyncMock
 
     execution = AsyncMock()
@@ -287,6 +335,9 @@ async def test_openclaw_install_and_runtime_select_supported_node(monkeypatch):
 async def test_command_wrappers_preserve_harbor_positional_call_contract(
     monkeypatch, adapter, parent
 ):
+    # [FUNCTION DOC]
+    # Async: positional exec_as_agent arguments are forwarded as keywords to the
+    # parent implementation and its result returned.
     from unittest.mock import AsyncMock
 
     execution = AsyncMock(return_value="executed")
@@ -302,6 +353,9 @@ async def test_command_wrappers_preserve_harbor_positional_call_contract(
 
 
 def test_openclaw_catalog_model_id_is_local_to_its_provider(tmp_path):
+    # [FUNCTION DOC]
+    # The openclaw config's provider catalog lists the provider-local model id,
+    # the capture base URL plus /v1 and the session API key.
     from openenv.harbor.seams import get
 
     selected, kwargs, env, _ = get("openclaw").resolve(

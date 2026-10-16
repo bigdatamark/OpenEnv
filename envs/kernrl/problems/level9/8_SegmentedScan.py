@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 9): segmented exclusive prefix sum over 16M floats with
+# 1000 segments; the reference loops over segments in Python.
 """
 Segmented Prefix Sum
 
@@ -17,16 +20,24 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference segmented scan model. No parameters.
     """
     Segmented exclusive prefix sum.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(
         self, values: torch.Tensor, segment_heads: torch.Tensor
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Collects segment start indices from the head flags (adding 0 if missing),
+        # and for each segment writes cumsum(segment) - segment, so each segment's
+        # exclusive scan restarts at 0. Returns an (N,) tensor.
         """
         Compute segmented exclusive prefix sum.
 
@@ -62,6 +73,9 @@ num_segments = 1000
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns uniform random values and a boolean head-flag array with index 0 and
+    # num_segments - 1 other distinct random positions set.
     values = torch.rand(array_size)
     # Random segment heads
     segment_heads = torch.zeros(array_size, dtype=torch.bool)
@@ -72,4 +86,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

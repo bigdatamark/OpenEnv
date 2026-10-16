@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests that GradioForwarder drains its tunnel child's stdout and stderr so
+# the child never blocks, and stop() terminates only its own tunnel.
 """A live forwarder must not block when its child fills stdout or stderr."""
 
 import subprocess
@@ -9,12 +12,21 @@ from openenv.core.harness.capture.forwarding import GradioForwarder
 
 
 def test_gradio_drains_both_pipes_and_stops_only_its_child(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Patches gradio.networking/tunneling in sys.modules with fakes whose
+    # setup_tunnel spawns a Python child writing 1 MiB to each pipe then a marker
+    # file; asserts the marker appears within 5 s, stop() ends the child and keeps
+    # the unrelated tunnel, and a second stop is harmless. Cleans up processes in
+    # finally. Side effects: real subprocesses and file writes in tmp_path.
     finished = tmp_path / "both-pipes-written"
     children = []
     unrelated = SimpleNamespace(share_token="other", proc=None)
     tunnels = [unrelated]
 
     def setup_tunnel(**kwargs):
+        # [FUNCTION DOC]
+        # Fake: starts the child process, registers a tunnel record with a kill that
+        # terminates it, and returns a fake share URL.
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -34,6 +46,8 @@ def test_gradio_drains_both_pipes_and_stops_only_its_child(monkeypatch, tmp_path
         tunnel = SimpleNamespace(share_token=kwargs["share_token"], proc=process)
 
         def kill():
+            # [FUNCTION DOC]
+            # Terminates the child and clears the tunnel's proc.
             process.terminate()
             tunnel.proc = None
 

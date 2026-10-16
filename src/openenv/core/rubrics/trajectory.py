@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Trajectory rubrics for delayed rewards: accumulate (action, observation) pairs over an
+# episode, return an intermediate reward until the observation is done, then score the
+# whole trajectory; subclasses define per-step credit assignment (e.g. exponential
+# discounting).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Trajectory-based rubrics for delayed reward computation.
@@ -20,6 +25,11 @@ from openenv.core.rubrics.base import Rubric
 
 
 class TrajectoryRubric(Rubric):
+    # [CLASS DOC]
+    # Abstract rubric that stores the episode trajectory in memory and returns
+    # intermediate_reward for non-terminal steps and score_trajectory() at the terminal step.
+    # Subclasses implement score_trajectory and compute_step_rewards. The trajectory is only
+    # cleared by reset().
     """Abstract base for rubrics that score based on full trajectories.
 
     Subclasses implement:
@@ -60,6 +70,8 @@ class TrajectoryRubric(Rubric):
     intermediate_reward: float
 
     def __init__(self, intermediate_reward: float = 0.0):
+        # [FUNCTION DOC]
+        # Stores intermediate_reward (default 0.0) and an empty trajectory.
         """Initialize trajectory rubric.
 
         Args:
@@ -71,6 +83,9 @@ class TrajectoryRubric(Rubric):
         self._trajectory = []
 
     def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # Appends (action, observation); returns score_trajectory(trajectory) if observation.done
+        # is truthy (missing attribute counts as not done), else intermediate_reward.
         """Accumulate step and return reward.
 
         Returns intermediate_reward until done, then computes trajectory score.
@@ -91,6 +106,8 @@ class TrajectoryRubric(Rubric):
 
     @abstractmethod
     def score_trajectory(self, trajectory: List[Tuple[Any, Any]]) -> float:
+        # [FUNCTION DOC]
+        # Abstract. Must return the final score for a list of (action, observation) pairs.
         """Score the complete trajectory. Return 0.0-1.0.
 
         Called when observation.done=True.
@@ -106,6 +123,8 @@ class TrajectoryRubric(Rubric):
 
     @abstractmethod
     def compute_step_rewards(self) -> List[float]:
+        # [FUNCTION DOC]
+        # Abstract. Must return one reward per accumulated step.
         """Compute per-step rewards from the accumulated trajectory.
 
         Define your credit assignment strategy here (e.g., discounting,
@@ -117,25 +136,36 @@ class TrajectoryRubric(Rubric):
         raise NotImplementedError
 
     def reset(self) -> None:
+        # [FUNCTION DOC]
+        # Clears the accumulated trajectory.
         """Clear accumulated trajectory. Call on env.reset()."""
         self._trajectory = []
 
     @property
     def trajectory(self) -> List[Tuple[Any, Any]]:
+        # [FUNCTION DOC]
+        # Returns a copy of the trajectory list.
         """Current trajectory (read-only copy)."""
         return list(self._trajectory)
 
     def state_dict(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns {"intermediate_reward": value}; trajectory is not serialized.
         """Serialize configuration (not trajectory data)."""
         return {"intermediate_reward": self.intermediate_reward}
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Restores intermediate_reward if present.
         """Load configuration from checkpoint."""
         if "intermediate_reward" in state:
             self.intermediate_reward = state["intermediate_reward"]
 
 
 class ExponentialDiscountingTrajectoryRubric(TrajectoryRubric):
+    # [CLASS DOC]
+    # Trajectory rubric whose per-step rewards are R_final * gamma^(T-1-t), where R_final is
+    # score_trajectory() and T the trajectory length.
     """TrajectoryRubric with exponential discounting for credit assignment.
 
     Per-step reward:
@@ -171,6 +201,9 @@ class ExponentialDiscountingTrajectoryRubric(TrajectoryRubric):
     gamma: float
 
     def __init__(self, gamma: float = 0.99, intermediate_reward: float = 0.0):
+        # [FUNCTION DOC]
+        # Stores intermediate_reward and gamma.
+        # Raises: ValueError if gamma is outside [0, 1].
         """Initialize with discount factor.
 
         Args:
@@ -185,6 +218,9 @@ class ExponentialDiscountingTrajectoryRubric(TrajectoryRubric):
         self.gamma = gamma
 
     def compute_step_rewards(self) -> List[float]:
+        # [FUNCTION DOC]
+        # Returns [] for an empty trajectory; otherwise computes R_final once and returns
+        # R_final * gamma^(T-1-t) for t = 0..T-1.
         """Apply exponential discounting from final reward.
 
         Returns:
@@ -199,12 +235,16 @@ class ExponentialDiscountingTrajectoryRubric(TrajectoryRubric):
         return [final_score * (self.gamma ** (T - 1 - t)) for t in range(T)]
 
     def state_dict(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the base state plus gamma.
         """Serialize configuration."""
         state = super().state_dict()
         state["gamma"] = self.gamma
         return state
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Restores base state and gamma if present (no range validation).
         """Load configuration from checkpoint."""
         super().load_state_dict(state)
         if "gamma" in state:

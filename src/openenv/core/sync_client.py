@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Synchronous wrapper (SyncEnvClient) around an async EnvClient. All async operations run
+# on a dedicated background event loop thread owned by the wrapper, so the async client's
+# connection state stays bound to one loop; calls block on the result. Unknown attributes
+# and coroutine methods are delegated to the async client.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -41,6 +46,11 @@ ObsT = TypeVar("ObsT")
 
 
 class SyncEnvClient(Generic[ActT, ObsT, StateT]):
+    # [CLASS DOC]
+    # Sync facade over an async EnvClient. State: the wrapped client, the lazily started
+    # background loop and its thread, a readiness event and init lock, a cache of sync
+    # wrappers for delegated coroutine methods, and child session wrappers created by
+    # new_session (closed with the parent).
     """
     Synchronous wrapper around an async EnvClient.
 
@@ -73,6 +83,9 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
     """
 
     def __init__(self, async_client: "EnvClient[ActT, ObsT, StateT]"):
+        # [FUNCTION DOC]
+        # Stores the async client and initializes loop/thread state, caches and child list.
+        # Starts nothing.
         """
         Initialize sync wrapper around an async client.
 
@@ -89,6 +102,9 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         self._child_clients: list[SyncEnvClient[ActT, ObsT, StateT]] = []
 
     def _run_loop_forever(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Thread target: creates and installs a new event loop, signals readiness, runs it
+        # forever, and closes it after it stops.
         """Run a dedicated event loop for this sync client."""
         loop = asyncio.new_event_loop()
         self._loop = loop
@@ -98,6 +114,10 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         loop.close()
 
     def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        # [FUNCTION DOC]
+        # HELPER: Returns the running background loop, starting a daemon thread
+        # ("openenv-sync-client-loop") under a lock on first use or if the previous thread died.
+        # Raises: RuntimeError if the loop is not ready within 5 seconds.
         """Start background loop thread on first use."""
         if (
             self._loop is not None
@@ -128,10 +148,16 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
             return self._loop
 
     def _claim_sync_mode(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Calls the async client's _claim_execution_mode("sync") when it has one (marks
+        # the client as used synchronously).
         if hasattr(self._async, "_claim_execution_mode"):
             self._async._claim_execution_mode("sync")
 
     def _run(self, coro: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Claims sync mode, submits the coroutine to the background loop and blocks for its
+        # result (exceptions propagate).
         """Run coroutine on dedicated loop and block for result."""
         self._claim_sync_mode()
         loop = self._ensure_loop()
@@ -141,6 +167,9 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         return future.result()
 
     def _stop_loop(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stops the background loop (if running), joins its thread for up to 5s, and clears
+        # loop/thread references. No-op if no loop exists.
         """Stop and join background loop thread."""
         loop = self._loop
         thread = self._loop_thread
@@ -157,10 +186,14 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
 
     @property
     def async_client(self) -> "EnvClient[ActT, ObsT, StateT]":
+        # [FUNCTION DOC]
+        # Returns the wrapped async client.
         """Access the underlying async client."""
         return self._async
 
     def connect(self) -> "SyncEnvClient[ActT, ObsT, StateT]":
+        # [FUNCTION DOC]
+        # Connects the async client on the background loop and returns self.
         """
         Establish connection to the server.
 
@@ -172,11 +205,15 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         return self
 
     def disconnect(self) -> None:
+        # [FUNCTION DOC]
+        # Disconnects the async client on the background loop.
         """Close the connection."""
         self._claim_sync_mode()
         self._run(self._async._disconnect_async())
 
     def reset(self, **kwargs: Any) -> StepResult[ObsT]:
+        # [FUNCTION DOC]
+        # Runs the async reset with kwargs and returns its StepResult.
         """
         Reset the environment.
 
@@ -191,6 +228,8 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         return self._run(self._async._reset_async(**kwargs))
 
     def step(self, action: ActT, **kwargs: Any) -> StepResult[ObsT]:
+        # [FUNCTION DOC]
+        # Runs the async step with the action and kwargs and returns its StepResult.
         """
         Execute an action in the environment.
 
@@ -207,6 +246,8 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         return self._run(self._async._step_async(action, **kwargs))
 
     def state(self) -> StateT:
+        # [FUNCTION DOC]
+        # Runs the async state request and returns the State.
         """
         Get the current environment state.
 
@@ -217,6 +258,9 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         return self._run(self._async._state_async())
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes child sessions (errors suppressed), then runs the async client's close, and always
+        # stops the background loop.
         """Close the connection and clean up resources."""
         try:
             for child in list(self._child_clients):
@@ -229,6 +273,12 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
             self._stop_loop()
 
     def new_session(self) -> "SyncEnvClient[ActT, ObsT, StateT]":
+        # [FUNCTION DOC]
+        # Creates a child async client for the same server via _create_session_client, wraps it in
+        # a new SyncEnvClient, connects it, tracks it for closing, and returns it.
+        # Raises: connection errors (e.g. when the server is at capacity).
+        # KNOWN ISSUE: if the child's connect() fails, the child's background loop thread is never
+        # stopped and the child is not tracked for cleanup.
         """
         Create a new synchronous session against the same environment server.
 
@@ -249,15 +299,21 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
         return client
 
     def __enter__(self) -> "SyncEnvClient[ActT, ObsT, StateT]":
+        # [FUNCTION DOC]
+        # Connects and returns self.
         """Enter context manager, establishing connection."""
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        # [FUNCTION DOC]
+        # Calls close().
         """Exit context manager, closing connection."""
         self.close()
 
     def __del__(self) -> None:
+        # [FUNCTION DOC]
+        # Best-effort: stops the background loop, ignoring any exception.
         """
         Best-effort cleanup for background loop thread.
 
@@ -270,6 +326,10 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
             pass
 
     def __getattr__(self, name: str) -> Any:
+        # [FUNCTION DOC]
+        # Delegates attribute lookup to the async client; coroutine-function attributes are
+        # returned as cached sync wrappers that run the coroutine on the background loop. Raises
+        # AttributeError if the async client lacks the attribute.
         """
         Delegate unknown attributes to the async client.
 
@@ -283,6 +343,8 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
                 return cached
 
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                # [FUNCTION DOC]
+                # HELPER: Looks up the method on the async client at call time and runs it synchronously.
                 method = getattr(self._async, name)
                 return self._run(method(*args, **kwargs))
 
@@ -293,13 +355,19 @@ class SyncEnvClient(Generic[ActT, ObsT, StateT]):
 
     # Delegate abstract method implementations to the wrapped client
     def _step_payload(self, action: ActT) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Delegates to the async client's _step_payload.
         """Delegate to async client's _step_payload."""
         return self._async._step_payload(action)
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[ObsT]:
+        # [FUNCTION DOC]
+        # Delegates to the async client's _parse_result.
         """Delegate to async client's _parse_result."""
         return self._async._parse_result(payload)
 
     def _parse_state(self, payload: Dict[str, Any]) -> StateT:
+        # [FUNCTION DOC]
+        # Delegates to the async client's _parse_state.
         """Delegate to async client's _parse_state."""
         return self._async._parse_state(payload)

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 9): gather of 16M values from a 1M-element source by
+# random indices.
 """
 Gather Operation
 
@@ -16,14 +19,20 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference gather model. No parameters.
     """
     Gather values from indices.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(self, source: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns source[indices], shape of indices.
         """
         Gather values from source at indices.
 
@@ -43,10 +52,15 @@ num_gathers = 16 * 1024 * 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a uniform random source (source_size,) and random int64 indices in
+    # [0, source_size) of length num_gathers.
     source = torch.rand(source_size)
     indices = torch.randint(0, source_size, (num_gathers,))
     return [source, indices]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []
