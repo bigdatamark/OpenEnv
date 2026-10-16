@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for native Anthropic provider support in the capture proxy:
+# converting requests/responses between chat and Anthropic Messages formats
+# (anthropic_request/anthropic_response) while preserving tool ids, signed
+# reasoning and semantics, SSE replay (replay_anthropic), native wire headers,
+# validate_llm classifying native endpoints as text-level (never trainable),
+# logprob permission fixes, explicit eval sessions and sampling policies.
 """Native provider semantics and honest capability classification."""
 
 import copy
@@ -15,6 +22,9 @@ from openenv.core.harness.capture.validate_llm import validate_llm
 
 
 def native_message():
+    # [FUNCTION DOC]
+    # HELPER: returns a fresh Anthropic message with a signed thinking block, a
+    # tool_use block, stop reason tool_use and usage including cache reads.
     return {
         "id": "msg_test",
         "type": "message",
@@ -40,6 +50,9 @@ def native_message():
 
 
 def test_native_history_and_signatures_are_preserved_without_mutation():
+    # [FUNCTION DOC]
+    # A native request passed through is copied (original not mutated) with the
+    # pinned model, overridden max_tokens and stream forced off.
     original = {
         "model": "alias",
         "max_tokens": 200,
@@ -60,6 +73,9 @@ def test_native_history_and_signatures_are_preserved_without_mutation():
 
 
 def test_chat_tool_roundtrip_keeps_ids_and_json():
+    # [FUNCTION DOC]
+    # Converting a native response to chat and back keeps tool ids and JSON input;
+    # usage counts cache reads as prompt tokens; no token ids or logprobs.
     response = anthropic_response(native_message())
     assistant = response["choices"][0]["message"]
     assistant.pop("reasoning_content")
@@ -86,6 +102,8 @@ def test_chat_tool_roundtrip_keeps_ids_and_json():
 
 
 def test_unsigned_reasoning_is_rejected():
+    # [FUNCTION DOC]
+    # Assistant reasoning without a signature raises UpstreamRequestError "signed".
     with pytest.raises(UpstreamRequestError, match="signed"):
         anthropic_request(
             {"messages": [{"role": "assistant", "reasoning_content": "thought"}]}, "m"
@@ -94,7 +112,14 @@ def test_unsigned_reasoning_is_rejected():
 
 @pytest.mark.asyncio
 async def test_native_wire_uses_messages_and_native_headers():
+    # [FUNCTION DOC]
+    # Async: an anthropic InferenceClient with an httpx MockTransport posts to
+    # /v1/messages with the real key, version and forwarded beta header (a
+    # caller-supplied x-api-key cannot replace it), no token/logprob params, and
+    # returns the native response at capture level text.
     def respond(request):
+        # [FUNCTION DOC]
+        # Mock transport handler asserting path, headers and body; returns the native message.
         assert request.url.path == "/v1/messages"
         assert request.headers["x-api-key"] == "test-secret"
         assert request.headers["anthropic-version"] == "2023-06-01"
@@ -134,6 +159,9 @@ async def test_native_wire_uses_messages_and_native_headers():
 
 
 def test_sse_preserves_real_signature():
+    # [FUNCTION DOC]
+    # replay_anthropic emits message_start..message_stop with the original
+    # signature in a signature_delta.
     events = [
         json.loads(frame.split("data: ", 1)[1])
         for frame in replay_anthropic(native_message())
@@ -148,14 +176,25 @@ def test_sse_preserves_real_signature():
 
 
 def test_probe_native_tools_never_certifies_training(monkeypatch):
+    # [FUNCTION DOC]
+    # With urllib urlopen patched, validate_llm on an anthropic provider reports
+    # reachable with tool support ok but text level, not trainable and not ok.
     class Response:
+        # [CLASS DOC]
+        # Context-manager response stub returning a tool_use message body.
         def __enter__(self):
+            # [FUNCTION DOC]
+            # Returns self.
             return self
 
         def __exit__(self, *args):
+            # [FUNCTION DOC]
+            # No-op.
             pass
 
         def read(self):
+            # [FUNCTION DOC]
+            # Returns JSON bytes of a native message containing a report_ok tool call.
             payload = native_message()
             payload["content"] = [
                 {
@@ -168,6 +207,8 @@ def test_probe_native_tools_never_certifies_training(monkeypatch):
             return json.dumps(payload).encode()
 
     def urlopen(request, timeout):
+        # [FUNCTION DOC]
+        # Fake urlopen asserting the messages URL and API key header; returns Response.
         assert request.full_url == "https://test/v1/messages"
         assert request.get_header("X-api-key") == "key"
         return Response()
@@ -181,6 +222,9 @@ def test_probe_native_tools_never_certifies_training(monkeypatch):
 
 
 def test_logprob_permission_fix_removes_dependent_top_logprobs():
+    # [FUNCTION DOC]
+    # The diagnosed fix for a logprob permission error removes logprobs and
+    # top_logprobs once; a second apply reports no change.
     from openenv.core.harness.capture.compat import diagnose
 
     body = {
@@ -210,11 +254,17 @@ def test_logprob_permission_fix_removes_dependent_top_logprobs():
     ],
 )
 def test_native_conversion_rejects_sampling_semantics_it_cannot_preserve(key, value):
+    # [FUNCTION DOC]
+    # Penalty and min_p parameters raise UpstreamRequestError naming the key.
     with pytest.raises(UpstreamRequestError, match=key):
         anthropic_request({"messages": [], key: value}, "model")
 
 
 def test_explicit_eval_keeps_capability_but_disables_supervision():
+    # [FUNCTION DOC]
+    # An eval-purpose tokens session exports as eval and not trainable;
+    # rollout_type_for auto/tokens is train; train purpose on text and sampling on
+    # eval sessions raise ValueError.
     from openenv.core.harness.capture.export import export_session
     from openenv.core.harness.capture.sessions import rollout_type_for, SessionRegistry
 
@@ -234,10 +284,15 @@ def test_explicit_eval_keeps_capability_but_disables_supervision():
 
 @pytest.mark.asyncio
 async def test_native_stream_is_consumable_by_anthropic_sdk():
+    # [FUNCTION DOC]
+    # Async: the anthropic SDK reconstructs the original message (signature, tool
+    # id/input, stop reason) from replay_anthropic SSE. Skipped without anthropic.
     anthropic = pytest.importorskip("anthropic")
     message = native_message()
 
     def respond(request):
+        # [FUNCTION DOC]
+        # Mock transport handler returning the replayed SSE stream.
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
@@ -259,6 +314,9 @@ async def test_native_stream_is_consumable_by_anthropic_sdk():
 
 
 def test_eval_sampling_requires_explicit_eval_and_preserves_requested_policy():
+    # [FUNCTION DOC]
+    # eval_sampling is stored only for explicit eval sessions (else ValueError);
+    # native conversion keeps temperature but drops top_p/top_k.
     from openenv.core.harness.capture.sessions import SessionRegistry
 
     registry = SessionRegistry()
@@ -277,6 +335,8 @@ def test_eval_sampling_requires_explicit_eval_and_preserves_requested_policy():
 
 
 def test_strict_tools_preserve_constraint_on_native_anthropic():
+    # [FUNCTION DOC]
+    # strict on a function tool is carried to the native tool.
     request = {
         "messages": [],
         "tools": [
@@ -310,6 +370,9 @@ def test_strict_tools_preserve_constraint_on_native_anthropic():
     ],
 )
 def test_response_semantics_are_not_silently_dropped_across_protocols(block):
+    # [FUNCTION DOC]
+    # Redacted thinking, server tool use or citations raise ProviderConversionError
+    # unless native passthrough is used, which attaches an independent copy.
     from openenv.core.harness.capture.providers import ProviderConversionError
 
     native = native_message()
@@ -323,6 +386,8 @@ def test_response_semantics_are_not_silently_dropped_across_protocols(block):
 
 
 def test_native_pause_is_not_translated_to_successful_stop():
+    # [FUNCTION DOC]
+    # pause_turn raises ProviderConversionError "stop reason" unless passthrough.
     from openenv.core.harness.capture.providers import ProviderConversionError
 
     native = native_message()

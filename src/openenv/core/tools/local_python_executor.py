@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# PyExecutor: a wrapper around smolagents' LocalPythonExecutor that registers small helper
+# tools (format_exc, safe_json_dumps) and converts execution results of varying
+# smolagents versions into a CodeExecResult (stdout, stderr, exit code). Requires smolagents.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Local Python Executor (enhanced).
@@ -29,6 +33,8 @@ logger.addHandler(logging.NullHandler())
 
 
 class PyExecutor:
+    # [CLASS DOC]
+    # Wraps a LocalPythonExecutor configured with additional authorized imports.
     """Wrapper around smolagents LocalPythonExecutor.
 
     The wrapper registers a few non-privileged helper tools to the
@@ -38,6 +44,9 @@ class PyExecutor:
     """
 
     def __init__(self, additional_imports: list[str] | None = None):
+        # [FUNCTION DOC]
+        # Creates the executor with additional_imports (default none) and tries to register the
+        # format_exc and safe_json_dumps helpers via send_tools (failures are logged at debug).
         if additional_imports is None:
             additional_imports = []
 
@@ -69,6 +78,12 @@ class PyExecutor:
             )
 
     def run(self, code: str) -> CodeExecResult:
+        # [FUNCTION DOC]
+        # Executes code and returns a CodeExecResult. stdout joins the result's logs and output
+        # (JSON-encoded, or repr when not serializable); stderr joins any error/exception
+        # attributes; exit_code comes from exit_code (None -> 0), else success (False -> 1), else
+        # 1 when stderr is non-empty. Any exception raised by the executor yields stdout "", the
+        # full traceback as stderr and exit_code 1 (also logged). Never raises.
         """Execute Python code and return a CodeExecResult.
 
         This method is intentionally defensive: it attempts to extract

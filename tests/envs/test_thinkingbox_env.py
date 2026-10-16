@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# Offline tests for the thinkingbox_env adapter around the ThinkingBox benchmark: client/server import
+# boundaries, runtime provenance (PEP 610 identity), strict action/observation schemas, client
+# serialization, the WebSocket app and readiness endpoint, ThinkingBoxEnvironment episodes against a
+# fake session proxy and user simulator (privacy of reset, tool allowlist, direct responses, parallel
+# tool batches, end-turn tools, grading, infrastructure-failure latching, idempotent teardown),
+# benchmark data bundles (manifest validation, pinned cache stamps, publication locking, safe archive
+# extraction), packaging/Docker files, native config forwarding, framework hashing, and the
+# evaluation CLI (canonical result payloads, provenance checks, retries/resume, coverage validation,
+# custom policies, native agent proxying and turn submission). Skipped without thinkingbox. Side
+# effect at import: prepends the repo root and envs to sys.path. Several tests spawn Python
+# subprocesses.
 """Exercise the ThinkingBox adapter without requiring live benchmark services.
 
 The suite covers wire contracts, native-runtime fidelity, provenance, data
@@ -105,6 +117,9 @@ UID = "demo.py:test_case"
 
 
 class FakeProxyClient:
+    # [CLASS DOC]
+    # HELPER: In-memory ThinkingBox session proxy recording session creation/destruction, tool calls and
+    # effects reads, with switches to fail calls, effects or destroy (raising errors containing secrets).
     def __init__(
         self,
         *,
@@ -114,6 +129,9 @@ class FakeProxyClient:
         tools: list[ToolDef] | None = None,
         results: dict[str, str] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stores failure switches, optional tool list and per-tool results; initialises counters and
+        # logs; session_id is a fixed secret-looking string.
         self.session_id = "proxy-secret-session"
         self.fail_call = fail_call
         self.fail_effects = fail_effects
@@ -130,12 +148,17 @@ class FakeProxyClient:
     async def session_create(
         self, server_config: dict[str, Any], available_tools: list[str]
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Counts the creation, records server config and allowed tools, returns an init result with a
+        # tenant and a private secret.
         self.created += 1
         self.server_config = server_config
         self.available_tools = available_tools
         return {"tenant": "Contoso", "private": "private-secret"}
 
     async def list_tools(self) -> list[ToolDef]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the configured tools or a single "lookup" tool requiring a string key.
         return self.tools or [
             ToolDef(
                 name="lookup",
@@ -149,30 +172,45 @@ class FakeProxyClient:
         ]
 
     async def call_tool(self, tool_name: str, /, **kwargs: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Records the call; raises RuntimeError if fail_call, else returns the configured result or
+        # a default JSON value 42.
         self.tool_calls.append((tool_name, kwargs))
         if self.fail_call:
             raise RuntimeError("proxy credential=do-not-expose")
         return self.results.get(tool_name, '{"value":"42"}')
 
     async def get_effects(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Counts the read; raises if fail_effects, else returns a saved-effects dict.
         self.effects_calls += 1
         if self.fail_effects:
             raise RuntimeError("effects token=do-not-expose")
         return {"demo": {"saved": True}}
 
     async def session_destroy(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Counts the destroy; raises if fail_destroy.
         self.destroyed += 1
         if self.fail_destroy:
             raise RuntimeError("destroy secret=do-not-expose")
 
 
 class FakeSimulator:
+    # [CLASS DOC]
+    # HELPER: Fake user simulator recording calls and returning "simulated reply", optionally marking it
+    # done or raising.
     def __init__(self, *, fail: bool = False, done: bool = False) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stores fail/done flags and an empty call log.
         self.fail = fail
         self.done = done
         self.calls: list[tuple[list[Any], str]] = []
 
     async def generate(self, chat_history: list[Any], user_context: str) -> Text:
+        # [FUNCTION DOC]
+        # HELPER: Records (history copy, user context); raises if failing; returns a user Text, with
+        # is_done metadata if configured.
         self.calls.append((list(chat_history), user_context))
         if self.fail:
             raise RuntimeError("user-model key=do-not-expose")
@@ -183,6 +221,9 @@ class FakeSimulator:
 
 
 def _test_code(assertions: str = "assert True") -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns Python source defining the benchmark test function with the given assertion lines
+    # indented as its body.
     body = "\n".join(f"    {line}" for line in assertions.splitlines())
     return f"def __tb_test_fn(x, judge):\n{body}\n"
 
@@ -193,6 +234,10 @@ def _case(
     user_context: str | None = None,
     format_query: bool = True,
 ) -> HydratedTestCase:
+    # [FUNCTION DOC]
+    # HELPER: Builds a HydratedTestCase with uid UID, an agent with an end-turn builtin tool, a scenario
+    # with secret world state and a "lookup" override rendering a direct response, a formatted query
+    # using the init tenant, the given assertions and optional user context.
     return HydratedTestCase(
         uid=UID,
         agent=AgentConfig(
@@ -227,6 +272,9 @@ def _case(
 
 
 def _settings(*, user_model: Any = None, user_can_end: bool = False) -> RuntimeSettings:
+    # [FUNCTION DOC]
+    # HELPER: Returns RuntimeSettings with a dummy proxy endpoint, fixed config hash, optional user model
+    # and user-can-end flag.
     return RuntimeSettings(
         proxy=SessionProxyConfig(endpoint_url="http://proxy.invalid"),
         config_sha256="config-sha256",
@@ -246,6 +294,10 @@ def _environment(
     case_loader: Any = None,
     agent: str | None = None,
 ) -> ThinkingBoxEnvironment:
+    # [FUNCTION DOC]
+    # HELPER: Builds a ThinkingBoxEnvironment with injected fakes: a fixed DataBundle, a one-UID manifest,
+    # a case loader returning a deep copy of the case (or a custom loader), settings, the proxy factory,
+    # identity user-model factory, optional simulator factory and evaluator, and an optional agent.
     bundle = DataBundle(
         root=Path("bundle"),
         dataset_dir=Path("bundle/dataset"),
@@ -273,6 +325,8 @@ def _environment(
 
 
 def test_server_import_does_not_load_client() -> None:
+    # [FUNCTION DOC]
+    # In a subprocess, importing the server app does not import thinkingbox_env.client.
     """Importing server code must not cross the client-server boundary."""
     completed = subprocess.run(
         [
@@ -298,6 +352,8 @@ def test_server_import_does_not_load_client() -> None:
 
 
 def test_client_and_evaluator_imports_do_not_load_server_modules() -> None:
+    # [FUNCTION DOC]
+    # In a subprocess, importing the client and evaluation modules loads no server modules.
     """Client-side package entry points must not cross into trusted server code."""
     completed = subprocess.run(
         [
@@ -325,6 +381,8 @@ def test_client_and_evaluator_imports_do_not_load_server_modules() -> None:
 
 
 def test_examples_and_client_have_no_server_imports() -> None:
+    # [FUNCTION DOC]
+    # Client, evaluation and example sources do not mention thinkingbox_env.server.
     paths = (
         _ROOT / "envs/thinkingbox_env/client.py",
         _ROOT / "envs/thinkingbox_env/evaluation.py",
@@ -336,6 +394,9 @@ def test_examples_and_client_have_no_server_imports() -> None:
 
 
 def test_runtime_provenance_uses_installed_pep610_identity() -> None:
+    # [FUNCTION DOC]
+    # Runtime provenance has a 64-char source hash; VCS installs use the commit and are canonical,
+    # others use a source hash identity and fail the canonical check; obsolete constants are absent.
     """Runtime identity must reflect the actual VCS or local package source."""
     provenance = load_thinkingbox_runtime_provenance()
 
@@ -366,6 +427,10 @@ def test_editable_runtime_records_deterministic_source_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # With a patched editable distribution and source root, provenance is deterministic, editable,
+    # content-hashed, leaks no path, is non-canonical, and changes when the source changes. Clears the
+    # provenance cache around each load.
     """Editable installs use content identity without leaking or faking a commit."""
     package_root = tmp_path / "thinkingbox"
     package_root.mkdir()
@@ -373,10 +438,14 @@ def test_editable_runtime_records_deterministic_source_identity(
     source.write_text("VALUE = 1\n", encoding="utf-8")
 
     class EditableDistribution:
+        # [CLASS DOC]
+        # HELPER: Fake importlib metadata distribution for an editable install.
         version = "0.1.0"
 
         @staticmethod
         def read_text(name: str) -> str | None:
+            # [FUNCTION DOC]
+            # HELPER: Returns direct_url.json content marking an editable local install, else None.
             if name != "direct_url.json":
                 return None
             return json.dumps(
@@ -422,6 +491,10 @@ def test_editable_runtime_records_deterministic_source_identity(
 
 
 def test_action_and_observation_schema_is_public_and_strict() -> None:
+    # [FUNCTION DOC]
+    # ThinkingBoxAction validates into list_tools, call_tool (single or parallel) and submit_message
+    # types; rejects non-dict arguments and mixed single/parallel modes; the schema has three variants and
+    # hides _finish and user_context.
     assert isinstance(
         ThinkingBoxAction.model_validate({"type": "list_tools"}), ListToolsAction
     )
@@ -482,6 +555,9 @@ def test_action_and_observation_schema_is_public_and_strict() -> None:
 
 
 def test_client_serializes_actions_and_terminal_envelopes() -> None:
+    # [FUNCTION DOC]
+    # The client uses the default message timeout, serializes a call_tool payload and parses a terminal
+    # result.
     client = ThinkingBoxEnv(base_url="http://127.0.0.1:8000")
     assert client._message_timeout == DEFAULT_MESSAGE_TIMEOUT_S
     payload = client._step_payload(
@@ -520,9 +596,13 @@ def test_client_serializes_actions_and_terminal_envelopes() -> None:
 def test_client_reset_omits_none_agent_and_other_server_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # ThinkingBoxEnv.reset forwards only explicitly given options (no None agent) to EnvClient.reset.
     calls: list[dict[str, Any]] = []
 
     def capture_reset(_: EnvClient[Any, Any, Any], **kwargs: Any) -> object:
+        # [FUNCTION DOC]
+        # HELPER: Records reset kwargs and returns a sentinel.
         calls.append(kwargs)
         return object()
 
@@ -547,6 +627,9 @@ def test_client_reset_omits_none_agent_and_other_server_defaults(
 
 
 def test_standard_app_schema_does_not_advertise_finish() -> None:
+    # [FUNCTION DOC]
+    # The app's /schema omits _finish and includes submit_message; only /ws exists (no HTTP reset/step/
+    # state routes).
     from thinkingbox_env.server.app import app
 
     response = TestClient(app).get("/schema")
@@ -563,6 +646,9 @@ def test_standard_app_schema_does_not_advertise_finish() -> None:
 
 
 def test_supported_websocket_path_retains_one_episode() -> None:
+    # [FUNCTION DOC]
+    # Over /ws, reset then list_tools work in one episode, close disconnects, and the proxy session is
+    # created and destroyed once.
     proxy = FakeProxyClient()
     test_app = create_thinkingbox_app(
         lambda: _environment(_case(), proxy),
@@ -605,20 +691,36 @@ def test_readiness_reports_required_components_and_typesense_limitation(
     judge_model: Any,
     expected_status: int,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized: /ready returns 200 only when config, user model and judge model are all present;
+    # reports data/proxy readiness and that Typesense is not observable. Patches config, data readiness,
+    # httpx client and settings loader.
     class FakeResponse:
+        # [CLASS DOC]
+        # HELPER: Response stub with is_success True.
         is_success = True
 
     class FakeAsyncClient:
+        # [CLASS DOC]
+        # HELPER: Async context-manager httpx client stub.
         def __init__(self, **_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Ignores arguments.
             pass
 
         async def __aenter__(self) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Returns itself.
             return self
 
         async def __aexit__(self, *_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: No-op.
             pass
 
         async def get(self, _: str) -> FakeResponse:
+            # [FUNCTION DOC]
+            # HELPER: Returns a successful FakeResponse.
             return FakeResponse()
 
     monkeypatch.setattr(
@@ -654,6 +756,9 @@ def test_readiness_reports_required_components_and_typesense_limitation(
 
 @pytest.mark.asyncio
 async def test_reset_is_private_and_proxy_allowlist_is_scenario_only() -> None:
+    # [FUNCTION DOC]
+    # reset formats the task with the init tenant, lists builtin plus scenario tools, allowlists only
+    # scenario tools at the proxy, and leaks no init/world/session secrets or test code.
     case = _case(user_context=None)
     proxy = FakeProxyClient()
     env = _environment(case, proxy)
@@ -685,11 +790,15 @@ async def test_reset_is_private_and_proxy_allowlist_is_scenario_only() -> None:
 async def test_reset_none_agent_uses_server_default_and_explicit_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # agent=None loads the case for the server's configured agent; an explicit agent overrides it.
     selected_agents: list[str] = []
     monkeypatch.setattr(server_config, "AGENT", "server-agent")
     case = _case()
 
     def load_case(_uid: str, _base_dir: str, agent: str) -> HydratedTestCase:
+        # [FUNCTION DOC]
+        # HELPER: Records the agent and returns a copy of the case.
         selected_agents.append(agent)
         return case.model_copy(deep=True)
 
@@ -708,6 +817,11 @@ async def test_reset_none_agent_uses_server_default_and_explicit_override(
 
 @pytest.mark.asyncio
 async def test_allowlist_unknown_tool_and_native_direct_response_context() -> None:
+    # [FUNCTION DOC]
+    # An unknown tool returns tool_not_found without calling the proxy; a known tool returns its result
+    # and rendered direct response; the final message passes grading assertions over the native context
+    # (response, direct responses, effects, tool calls, init result, session id, uid), reads effects once
+    # and destroys the session.
     assertions = """
 assert x.response == "Finished <DONE>"
 assert x.tool_direct_responses == ["Rendered 42"]
@@ -751,6 +865,9 @@ assert x.metadata["uid"] == "demo.py:test_case"
 
 @pytest.mark.asyncio
 async def test_direct_response_counts_toward_native_agent_limit() -> None:
+    # [FUNCTION DOC]
+    # With an agent turn limit of 2, a direct-response tool call consumes a turn so the next message
+    # ends the episode with agent_limit after 1 step.
     case = _case()
     case.max_agent_sim_turns = 2
     proxy = FakeProxyClient()
@@ -771,9 +888,15 @@ async def test_direct_response_counts_toward_native_agent_limit() -> None:
 
 @pytest.mark.asyncio
 async def test_parallel_batch_preserves_all_direct_responses_and_agent_turns() -> None:
+    # [FUNCTION DOC]
+    # A three-call parallel batch returns ordered results and direct responses, calls the proxy in order,
+    # counts as one agent turn, and the graded context records one ParallelToolCall followed by tool
+    # responses and direct texts.
     captured: dict[str, Any] = {}
 
     async def evaluator(_case: Any, context: Any, _settings: Any) -> NativeTestResult:
+        # [FUNCTION DOC]
+        # HELPER: Captures the grading context and returns a pass.
         captured["context"] = context
         return NativeTestResult(result=True, reward=1.0)
 
@@ -895,6 +1018,9 @@ async def test_parallel_batch_preserves_all_direct_responses_and_agent_turns() -
 
 @pytest.mark.asyncio
 async def test_parallel_batch_records_parse_error_without_executing_call() -> None:
+    # [FUNCTION DOC]
+    # A batch child with a parse_error is not executed and yields an invalid_args result while siblings
+    # run; messages record the error.
     case = _case()
     case.scenario.tools.append(ToolDefOverride(name="lookup_two"))
     proxy = FakeProxyClient(
@@ -964,8 +1090,15 @@ async def test_parallel_batch_records_parse_error_without_executing_call() -> No
 
 @pytest.mark.asyncio
 async def test_parallel_batch_stops_siblings_after_proxy_failure() -> None:
+    # [FUNCTION DOC]
+    # A proxy failure on the second call ends the episode with a system error, skips the third call and
+    # records no tool responses.
     class FailSecondProxy(FakeProxyClient):
+        # [CLASS DOC]
+        # HELPER: Proxy fake failing for lookup_two.
         async def call_tool(self, tool_name: str, /, **kwargs: Any) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Records the call; raises for lookup_two, else returns ok JSON.
             self.tool_calls.append((tool_name, kwargs))
             if tool_name == "lookup_two":
                 raise RuntimeError("proxy failed")
@@ -1034,6 +1167,8 @@ async def test_parallel_batch_stops_siblings_after_proxy_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_terminal_parallel_call_action_executes_no_siblings() -> None:
+    # [FUNCTION DOC]
+    # A batch containing an end-turn tool ends the episode (end_turn_tool) without executing any call.
     proxy = FakeProxyClient()
     env = _environment(_case(), proxy)
     await env.reset_async(test_uid=UID)
@@ -1063,6 +1198,8 @@ async def test_terminal_parallel_call_action_executes_no_siblings() -> None:
 
 @pytest.mark.asyncio
 async def test_assertion_failure_is_valid_binary_zero() -> None:
+    # [FUNCTION DOC]
+    # A failing assertion yields reward 0, reward_type fail, no system error and a graded summary.
     proxy = FakeProxyClient()
     env = _environment(_case(assertions="assert x.response == 'different'"), proxy)
     await env.reset_async(test_uid=UID)
@@ -1084,9 +1221,14 @@ async def test_assertion_failure_is_valid_binary_zero() -> None:
 async def test_parallel_terminal_turn_preserves_native_order_without_execution() -> (
     None
 ):
+    # [FUNCTION DOC]
+    # A submit_message with terminal tool calls before content is graded with the ParallelToolCall
+    # before the text, executes nothing, and records only the end-turn call with empty response.
     captured: dict[str, Any] = {}
 
     async def evaluator(_case: Any, context: Any, _settings: Any) -> NativeTestResult:
+        # [FUNCTION DOC]
+        # HELPER: Captures the context and returns a pass.
         captured["context"] = context
         return NativeTestResult(result=True, reward=1.0)
 
@@ -1125,6 +1267,9 @@ async def test_parallel_terminal_turn_preserves_native_order_without_execution()
 
 @pytest.mark.asyncio
 async def test_private_user_simulation_preserves_visible_history() -> None:
+    # [FUNCTION DOC]
+    # The private user context is hidden from reset, formatted with init values for the simulator, the
+    # simulated reply is appended to visible history, and finishing grades successfully.
     simulator = FakeSimulator()
     proxy = FakeProxyClient()
     case = _case(
@@ -1163,9 +1308,14 @@ assert x.messages[-1].content == "simulated reply"
 async def test_reset_failure_logs_structured_redacted_diagnostics(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    # [FUNCTION DOC]
+    # A data-stage reset failure returns an error observation and logs a structured, redacted
+    # infrastructure_failure record with stage, task and episode ids.
     secret = "credential=reset-secret"
 
     def fail_bundle(_: str | None) -> DataBundle:
+        # [FUNCTION DOC]
+        # HELPER: Raises RuntimeError containing a secret.
         raise RuntimeError(secret)
 
     env = ThinkingBoxEnvironment(bundle_resolver=fail_bundle)
@@ -1196,9 +1346,14 @@ async def test_reset_failure_logs_structured_redacted_diagnostics(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["proxy", "effects", "simulator"])
 async def test_infrastructure_failures_latch_and_skip_grader(failure: str) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over proxy, effects and simulator failures: the episode ends with reward 0,
+    # system_error, an infrastructure stage, no secret leakage, no grading and the session destroyed.
     grader_calls = 0
 
     async def evaluator(*_: Any) -> NativeTestResult:
+        # [FUNCTION DOC]
+        # HELPER: Counts grader calls and returns a pass.
         nonlocal grader_calls
         grader_calls += 1
         return NativeTestResult(result=True, reward=1.0)
@@ -1246,9 +1401,14 @@ async def test_infrastructure_failures_latch_and_skip_grader(failure: str) -> No
 
 @pytest.mark.asyncio
 async def test_finalize_once_and_teardown_failure_cannot_return_success() -> None:
+    # [FUNCTION DOC]
+    # Concurrent finish actions share one finalisation; a destroy failure turns the result into a system
+    # error with reward 0; repeated finish returns the same object without re-grading.
     grader_calls = 0
 
     async def evaluator(*_: Any) -> NativeTestResult:
+        # [FUNCTION DOC]
+        # HELPER: Counts grader calls and returns a pass.
         nonlocal grader_calls
         grader_calls += 1
         return NativeTestResult(result=True, reward=1.0)
@@ -1276,9 +1436,13 @@ async def test_finalize_once_and_teardown_failure_cannot_return_success() -> Non
 
 @pytest.mark.asyncio
 async def test_reset_and_close_teardown_are_idempotent() -> None:
+    # [FUNCTION DOC]
+    # A second reset destroys the first session and creates a new one; double aclose destroys once.
     proxies = [FakeProxyClient(), FakeProxyClient()]
 
     def factory(_: RuntimeSettings) -> FakeProxyClient:
+        # [FUNCTION DOC]
+        # HELPER: Returns the next prepared proxy.
         return proxies.pop(0)
 
     first, second = proxies
@@ -1295,6 +1459,9 @@ async def test_reset_and_close_teardown_are_idempotent() -> None:
 
 
 def _write_local_bundle(root: Path, marker: str) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Creates a local benchmark bundle layout (dataset, servers, support, release manifest with
+    # three UIDs, LICENSE, a marker content file) under root; returns the UIDs.
     for relative in (
         "dataset/agent",
         "dataset/scenario",
@@ -1321,6 +1488,8 @@ def _write_local_bundle(root: Path, marker: str) -> list[str]:
 
 
 def test_canonical_uid_identity_is_complete_ordered_and_stable() -> None:
+    # [FUNCTION DOC]
+    # CANONICAL_TEST_UIDS has 507 unique entries with known first/last values and a fixed JSON hash.
     assert len(CANONICAL_TEST_UIDS) == 507
     assert len(CANONICAL_TEST_UIDS) == len(set(CANONICAL_TEST_UIDS))
     assert CANONICAL_TEST_UIDS[0] == (
@@ -1333,6 +1502,9 @@ def test_canonical_uid_identity_is_complete_ordered_and_stable() -> None:
 
 
 def _write_runtime_config(path: Path, model: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes a runtime YAML config with a proxy endpoint and custom agent/judge models named after
+    # the given model.
     path.write_text(
         f"""
 mcp_proxy:
@@ -1356,6 +1528,9 @@ judge_model:
 async def test_reset_exposes_exact_selected_config_and_data_fingerprints(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Reset with a selected dataset and config reports execution provenance matching the selected bundle
+    # and config hashes (not the defaults) without leaking paths or model names.
     default_root = tmp_path / "default-data"
     selected_root = tmp_path / "selected-data"
     _write_local_bundle(default_root, "default")
@@ -1413,6 +1588,9 @@ async def test_reset_exposes_exact_selected_config_and_data_fingerprints(
 def test_local_bundle_requires_exact_manifest_and_derives_task_count(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A local bundle resolves with ordered UIDs, derived task count and "local" revision; changing a
+    # server file changes the bundle hash but not the manifest hash.
     root = tmp_path / DATASET_NAME
     for relative in (
         "dataset/agent",
@@ -1459,6 +1637,10 @@ def test_concurrent_bundle_validation_ignores_bytecode_without_mutation(
     monkeypatch: pytest.MonkeyPatch,
     pinned: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized explicit/pinned: concurrent validations ignore generated bytecode and stray __pycache__
+    # files, never delete them (rmtree patched to fail) and yield the baseline hash. Runs a subprocess
+    # import to create bytecode.
     root = tmp_path / DATASET_NAME
     _write_local_bundle(root, "source")
     module = root / "servers/generated_module.py"
@@ -1490,6 +1672,8 @@ def test_concurrent_bundle_validation_ignores_bytecode_without_mutation(
     }
 
     def reject_deletion(*_args: Any, **_kwargs: Any) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Raises AssertionError if called.
         raise AssertionError("bundle validation must not delete generated bytecode")
 
     monkeypatch.setattr(data_loader.shutil, "rmtree", reject_deletion)
@@ -1506,6 +1690,8 @@ def test_concurrent_bundle_validation_ignores_bytecode_without_mutation(
 
 
 def test_local_bundle_rejects_obsolete_manifest_fallback(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A bundle with only the old manifest path raises DatasetError naming the required path.
     """Only the pinned release manifest path may define adapter task identity."""
     root = tmp_path / DATASET_NAME
     for relative in (
@@ -1539,6 +1725,8 @@ def test_manifest_requires_nonempty_unique_string_uids(
     payload: str,
     message: str,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized: empty, duplicate or non-string manifests raise DatasetError.
     """Manifest validation derives count only from valid ordered string UIDs."""
     root = tmp_path / DATASET_NAME
     _write_valid_cached_bundle(root)
@@ -1551,6 +1739,8 @@ def test_manifest_requires_nonempty_unique_string_uids(
 
 
 def _write_valid_cached_bundle(root: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Creates a valid bundle layout with a three-UID manifest and a content file.
     for relative in (
         "dataset/agent",
         "dataset/scenario",
@@ -1581,6 +1771,9 @@ def _pin_fixture_bundle(
     root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Validates the bundle unstamped, patches the module's pinned bundle hash to it, and writes
+    # the canonical stamp file into root.
     bundle = data_loader._validate_root(root, require_stamp=False)
     monkeypatch.setattr(
         data_loader,
@@ -1597,6 +1790,8 @@ def test_explicit_pinned_cache_preserves_data_revision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # A pinned explicit cache reports the release name and data commit.
     root = tmp_path / DATASET_NAME
     _write_valid_cached_bundle(root)
     _pin_fixture_bundle(root, monkeypatch)
@@ -1611,6 +1806,8 @@ def test_pinned_cache_rejects_mutated_content_with_unchanged_stamp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # Modifying content (with preserved mtime) in a pinned cache raises DatasetError ("pinned release").
     root = tmp_path / DATASET_NAME
     _write_valid_cached_bundle(root)
     _pin_fixture_bundle(root, monkeypatch)
@@ -1628,6 +1825,9 @@ def test_cache_publication_revalidates_after_interprocess_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # If another process publishes a valid cache while waiting on the file lock, ensure_data reuses it
+    # without downloading.
     cache_root = tmp_path / "cache"
     template = tmp_path / "template"
     _write_valid_cached_bundle(template)
@@ -1636,14 +1836,22 @@ def test_cache_publication_revalidates_after_interprocess_lock(
     lock_paths: list[str] = []
 
     class PublishingLock:
+        # [CLASS DOC]
+        # HELPER: FileLock stand-in that copies the template into the destination on enter.
         def __init__(self, path: str) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Records the lock path.
             lock_paths.append(path)
 
         def __enter__(self) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Copies the template bundle into the destination and returns itself.
             shutil.copytree(template, destination)
             return self
 
         def __exit__(self, *_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: No-op.
             pass
 
     monkeypatch.setattr(data_loader, "FileLock", PublishingLock)
@@ -1666,17 +1874,26 @@ def test_first_download_validates_content_before_stamping_or_publishing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # On first download, canonical content validation runs before stamping; a rejection raises and nothing
+    # is published.
     cache_root = tmp_path / "cache"
     destination = data_loader._cache_destination(cache_root)
     validations: list[tuple[Path, bool]] = []
 
     def fake_download(_url: str, archive: Path, _timeout: float) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Writes placeholder archive bytes.
         archive.write_bytes(b"archive")
 
     def fake_extract(_archive: Path, extracted: Path) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Writes a valid bundle at the extraction path.
         _write_valid_cached_bundle(extracted)
 
     def reject_content(bundle: DataBundle) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Records whether a stamp existed, then raises DatasetError.
         validations.append((bundle.root, (bundle.root / data_loader._STAMP).exists()))
         raise DatasetError("noncanonical fixture")
 
@@ -1693,6 +1910,8 @@ def test_first_download_validates_content_before_stamping_or_publishing(
 
 
 def test_archive_extraction_rejects_path_traversal(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A tar member with ".." raises DatasetError ("unsafe path") and writes nothing outside.
     archive = tmp_path / "bad.tar.gz"
     payload = b"bad"
     with tarfile.open(archive, "w:gz") as output:
@@ -1719,6 +1938,8 @@ def test_archive_extraction_rejects_windows_paths_portably(
     tmp_path: Path,
     member_name: str,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized: drive, UNC and backslash-traversal member names are rejected.
     archive = tmp_path / "windows-path.tar.gz"
     payload = b"bad"
     with tarfile.open(archive, "w:gz") as output:
@@ -1733,6 +1954,8 @@ def test_archive_extraction_rejects_windows_paths_portably(
 def test_archive_extraction_keeps_safe_members_beneath_destination(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Safe members under dataset are extracted with the root prefix stripped; non-bundle files are ignored.
     archive = tmp_path / "safe.tar.gz"
     payload = b"safe"
     with tarfile.open(archive, "w:gz") as output:
@@ -1754,6 +1977,8 @@ def test_archive_extraction_keeps_safe_members_beneath_destination(
 
 
 def test_archive_extraction_rejects_resolved_target_escape(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A destination subdirectory symlinked outside makes extraction raise; skipped if symlinks fail.
     archive = tmp_path / "symlink-parent.tar.gz"
     payload = b"bad"
     with tarfile.open(archive, "w:gz") as output:
@@ -1776,6 +2001,9 @@ def test_archive_extraction_rejects_resolved_target_escape(tmp_path: Path) -> No
 
 
 def test_dockerfile_uses_canonical_python311_base_and_frozen_sync() -> None:
+    # [FUNCTION DOC]
+    # The server Dockerfile uses the openenv base image twice, uv frozen syncs, copies the env and sets
+    # PATH, and installs git.
     dockerfile = (_ROOT / "envs/thinkingbox_env/server/Dockerfile").read_text(
         encoding="utf-8"
     )
@@ -1794,6 +2022,9 @@ def test_dockerfile_uses_canonical_python311_base_and_frozen_sync() -> None:
 
 
 def test_docker_context_excludes_local_and_result_artifacts_but_keeps_lock() -> None:
+    # [FUNCTION DOC]
+    # .dockerignore excludes local and result artifacts but not uv.lock; SKIP_HF_DEPLOYMENT has the
+    # expected text.
     """The image context should remain reproducible and omit local run artifacts."""
     env_root = _ROOT / "envs/thinkingbox_env"
     patterns = (env_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
@@ -1820,6 +2051,9 @@ def test_docker_context_excludes_local_and_result_artifacts_but_keeps_lock() -> 
 
 
 def test_python311_metadata_pin_and_packaged_cli_are_canonical() -> None:
+    # [FUNCTION DOC]
+    # pyproject requires Python >=3.11, exposes thinkingbox-eval, pins thinkingbox to a commit (also in
+    # uv.lock) without file URLs; runtime.py avoids copy import and reasoning_effort.
     env_root = _ROOT / "envs/thinkingbox_env"
     project = tomllib.loads((env_root / "pyproject.toml").read_text(encoding="utf-8"))
     lock = (env_root / "uv.lock").read_text(encoding="utf-8")
@@ -1844,6 +2078,9 @@ def test_python311_metadata_pin_and_packaged_cli_are_canonical() -> None:
 
 
 def test_examples_and_packaged_cli_run_from_repository_root() -> None:
+    # [FUNCTION DOC]
+    # The eval wrapper is at most 4 code lines; the example, wrapper and module CLI each run --help
+    # successfully in subprocesses.
     wrapper = _ROOT / "examples/thinkingbox/eval_testlist.py"
     wrapper_lines = [
         line
@@ -1876,6 +2113,10 @@ def test_native_config_forwards_agent_user_and_judge_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # A native YAML config forwards the orchestrator to the agent session factory, keeps agent model
+    # options, loads user/judge models and flags into RuntimeSettings with the config hash, and provenance
+    # omits secrets and endpoints.
     path = tmp_path / "thinkingbox.yaml"
     path.write_text(
         """
@@ -1943,6 +2184,8 @@ user_can_end_conversation: true
 def test_native_runtime_accepts_aoai_responses_xhigh_directly(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A top-level aoai_responses agent model with reasoning_effort xhigh loads into the orchestrator.
     path = tmp_path / "thinkingbox-xhigh.yaml"
     path.write_text(
         """
@@ -1983,6 +2226,9 @@ def test_framework_hash_uses_only_tracked_runtime_sources_and_lockfiles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # _framework_sha256 ignores venv, build, generated and untracked files but changes when a tracked
+    # lockfile changes (git listing patched).
     tracked = [
         Path("examples/thinkingbox/eval_testlist.py"),
         Path("envs/thinkingbox_env/evaluation.py"),
@@ -2034,6 +2280,9 @@ def test_runtime_framework_hash_uses_actual_imported_sources(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # _framework_checkout_root returns None for installed packages and the checkout for source packages;
+    # _runtime_framework_sha256 hashes the imported module roots, not same-named checkout files.
     package_root = tmp_path / "installed/thinkingbox_env"
     openenv_root = tmp_path / "installed/openenv/core"
     checkout_root = tmp_path / "checkout"
@@ -2070,6 +2319,9 @@ def test_runtime_framework_hash_uses_actual_imported_sources(
 
 
 def _eval_provenance() -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a complete schema-3 evaluation provenance dict (runtime, data, config, manifest,
+    # framework, python and run parameters) with placeholder values.
     return {
         "schema_version": 3,
         "thinkingbox_revision": "runtime-revision",
@@ -2112,6 +2364,9 @@ def _eval_provenance() -> dict[str, Any]:
 
 
 def _eval_outcome(passed: bool, provenance: dict[str, Any]) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Builds an _EpisodeOutcome with a terminal pass/fail observation carrying matching execution
+    # provenance and an execution trace of two public messages with usage.
     messages = [
         Text(role="user", content="public task"),
         Text(role="assistant", content="public answer"),
@@ -2160,6 +2415,9 @@ def _fixture_decode_result(
     passed: bool,
     provenance: dict[str, Any],
 ) -> DecodeResult:
+    # [FUNCTION DOC]
+    # HELPER: Builds a DecodeResult for a UID/repetition with pass/fail result, test tags and full
+    # metadata (repetition id, attempt, zero step counts, execution provenance and provenance).
     return DecodeResult(
         uid=uid,
         messages=[],
@@ -2194,6 +2452,8 @@ def _fixture_decode_result(
 
 
 def _write_fixture_results(path: Path, results: list[DecodeResult]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes the results as canonical JSONL lines to path.
     with path.open("w", encoding="utf-8") as stream:
         for result in results:
             thinkingbox_eval._write_canonical(stream, result)
@@ -2202,6 +2462,10 @@ def _write_fixture_results(path: Path, results: list[DecodeResult]) -> None:
 def test_eval_canonical_fixture_validates_and_native_tb_agg_is_exact(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Canonical results omit private fields, validate as DecodeResult with exact test_result keys, pass
+    # coverage, and ThinkingBox's own "agg" CLI (subprocess) computes the expected metrics; a payload with
+    # user_context raises CoverageError ("forbidden").
     provenance = _eval_provenance()
     results = [
         thinkingbox_eval._canonical_decode_result(
@@ -2283,6 +2547,8 @@ def test_eval_canonical_fixture_validates_and_native_tb_agg_is_exact(
 
 
 def test_eval_canonical_payload_allows_agent_tool_argument_field_names() -> None:
+    # [FUNCTION DOC]
+    # Credential-like names inside agent tool arguments are preserved in the canonical payload.
     provenance = _eval_provenance()
     result = _fixture_decode_result(UID, 0, True, provenance)
     result.messages = [
@@ -2315,6 +2581,9 @@ def test_eval_canonical_payload_allows_agent_tool_argument_field_names() -> None
 
 
 def test_eval_rejects_mismatched_or_mutating_server_execution_provenance() -> None:
+    # [FUNCTION DOC]
+    # A server execution provenance differing from expected, or changing between trace and result, raises
+    # _OperationalResultError ("did not exactly match").
     provenance = _eval_provenance()
     outcome = _eval_outcome(True, provenance)
     outcome.result.observation.metadata["execution_provenance"]["config_sha256"] = (
@@ -2357,6 +2626,9 @@ def test_eval_rejects_mismatched_or_mutating_server_execution_provenance() -> No
 def test_eval_strict_raw_validation_rejects_discarded_and_forbidden_fields(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Coverage validation rejects extra raw fields ("raw shape") and forbidden effects or credential
+    # fields.
     provenance = _eval_provenance()
     canonical = thinkingbox_eval._canonical_decode_result(
         uid=UID,
@@ -2406,6 +2678,10 @@ def test_eval_strict_raw_validation_rejects_discarded_and_forbidden_fields(
 def test_eval_botdesigner_failure_is_canonical_but_system_errors_are_quarantined(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A BotDesignerActivityError becomes a canonical failed result (agent_error); other errors re-raise
+    # and are written as redacted operational error records whose attempts are readable; an exception
+    # chained from a BotDesigner error is not classified as one.
     provenance = _eval_provenance()
     botdesigner_error = type(
         "BotDesignerActivityError",
@@ -2502,6 +2778,10 @@ async def test_eval_run_retries_to_dual_outputs_and_resume_skips_canonical(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # _run with patched loaders retries after an operational error and a canonical encoding failure,
+    # writing one canonical line (attempt 3) and two redacted error lines; resume skips completed
+    # repetitions; a result write OSError propagates without writing error records.
     output = tmp_path / "results.jsonl"
     errors = tmp_path / "errors.jsonl"
     config = tmp_path / "config.yaml"
@@ -2562,6 +2842,8 @@ async def test_eval_run_retries_to_dual_outputs_and_resume_skips_canonical(
     ]
 
     async def fake_run_episode(*_args: Any, **_kwargs: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Pops and returns the next prepared outcome.
         return outcomes.pop(0)
 
     monkeypatch.setattr(thinkingbox_eval, "_run_episode", fake_run_episode)
@@ -2569,6 +2851,8 @@ async def test_eval_run_retries_to_dual_outputs_and_resume_skips_canonical(
     encode_attempts = 0
 
     def fail_first_canonical_encoding(result: DecodeResult) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Raises CoverageError on the first call, then delegates to the real encoder.
         nonlocal encode_attempts
         encode_attempts += 1
         if encode_attempts == 1:
@@ -2629,6 +2913,8 @@ async def test_eval_run_retries_to_dual_outputs_and_resume_skips_canonical(
     assert "trusted-sidecar" not in canonical_lines[0]
 
     async def should_not_run(*_args: Any, **_kwargs: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Raises AssertionError if an episode is run.
         raise AssertionError("valid canonical repetition should be resumed")
 
     monkeypatch.setattr(thinkingbox_eval, "_run_episode", should_not_run)
@@ -2642,6 +2928,8 @@ async def test_eval_run_retries_to_dual_outputs_and_resume_skips_canonical(
     args.resume = False
 
     def fail_result_write(_stream: Any, _encoded: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Raises OSError("result stream unavailable").
         raise OSError("result stream unavailable")
 
     monkeypatch.setattr(
@@ -2657,6 +2945,9 @@ async def test_eval_run_retries_to_dual_outputs_and_resume_skips_canonical(
 def test_eval_resume_rejects_malformed_duplicate_unexpected_and_stale_records(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # _load_resume_state accepts a valid record and rejects malformed, duplicate, unexpected uid/index,
+    # and stale provenance or execution provenance records with CoverageError.
     provenance = _eval_provenance()
     expected = thinkingbox_eval._expected_repetition_ids([UID], [0])
     valid = _fixture_decode_result(UID, 0, True, provenance)
@@ -2756,6 +3047,8 @@ def test_eval_resume_rejects_malformed_duplicate_unexpected_and_stale_records(
 def test_eval_resume_rejects_non_newline_terminated_canonical_and_error_jsonl(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Results and error files lacking a terminal newline raise CoverageError and are not modified.
     provenance = _eval_provenance()
     expected = thinkingbox_eval._expected_repetition_ids([UID], [0])
     canonical = thinkingbox_eval._canonical_payload(
@@ -2796,6 +3089,8 @@ def test_eval_resume_rejects_non_newline_terminated_canonical_and_error_jsonl(
 def test_eval_coverage_rejects_missing_duplicate_and_system_error(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # validate_coverage accepts complete results and rejects incomplete, duplicate and system-error ones.
     provenance = _eval_provenance()
     uids = [UID, "demo.py:test_case_2"]
     repetitions = [0, 1]
@@ -2847,6 +3142,8 @@ def test_eval_coverage_rejects_missing_duplicate_and_system_error(
 def test_eval_coverage_combines_matching_shards_and_rejects_stale_assignment(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Two consistent shards combine into full coverage; a shard with a wrong shard index is rejected.
     uids = [f"demo.py:test_case_{index}" for index in range(4)]
     paths: list[Path] = []
     for shard_index in range(2):
@@ -2880,6 +3177,8 @@ def test_eval_coverage_combines_matching_shards_and_rejects_stale_assignment(
 def test_eval_limited_shards_reject_modulo_match_outside_post_limit_uids(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # With limit 1, shard files containing UIDs beyond the limited selection raise "stale shard".
     uids = [f"demo.py:test_case_{index}" for index in range(4)]
     paths: list[Path] = []
     for shard_index in range(2):
@@ -2922,6 +3221,9 @@ def test_eval_coverage_profiles_use_manifest_count_and_required_repetitions(
     repetitions: tuple[int, ...],
     expected_count: int,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized canary/full profiles validate coverage against the canonical identity with the
+    # expected uid count and result total.
     uids = [f"fixture.py:test_case_{index:03d}" for index in range(3)]
     provenance = _eval_provenance()
     manifest_uids_sha256 = thinkingbox_eval._sha256_json(uids)
@@ -2974,6 +3276,9 @@ def test_eval_coverage_profiles_reject_unrelated_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # A profile run over UIDs not matching the canonical manifest raises ("authoritative benchmark
+    # manifest").
     canonical_uids = ["canonical.py:test_one", "canonical.py:test_two"]
     uids = ["unrelated.py:test_one", "unrelated.py:test_two"]
     identity = {
@@ -3019,6 +3324,8 @@ def test_eval_strict_profile_rejects_noncanonical_expected_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # An expected provenance with a non-canonical bundle hash raises ("noncanonical benchmark content").
     uids = [f"fixture.py:test_case_{index:03d}" for index in range(3)]
     provenance = _eval_provenance()
     provenance["task_count"] = len(uids)
@@ -3069,15 +3376,22 @@ def test_eval_strict_profile_rejects_noncanonical_expected_provenance(
 async def test_eval_episode_discards_timed_out_client_before_next_repetition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # After a reset timeout the client is closed and a fresh one used for the next repetition; both use
+    # the default (>=1800s) message timeout.
     clients: list[Any] = []
 
     class FakeClient:
+        # [CLASS DOC]
+        # HELPER: Async context-manager client fake; the first instance's reset times out.
         def __init__(
             self,
             *,
             base_url: str,
             message_timeout_s: float,
         ) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Records base URL, timeout, index and registers itself.
             self.base_url = base_url
             self.message_timeout_s = message_timeout_s
             self.index = len(clients)
@@ -3085,12 +3399,18 @@ async def test_eval_episode_discards_timed_out_client_before_next_repetition(
             clients.append(self)
 
         async def __aenter__(self) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Returns itself.
             return self
 
         async def __aexit__(self, *_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Marks closed.
             self.closed = True
 
         async def reset(self, *_: Any, **__: Any) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Raises TimeoutError for the first client, else returns a done result.
             if self.index == 0:
                 raise TimeoutError("delayed response")
             return SimpleNamespace(done=True, observation=SimpleNamespace())
@@ -3138,6 +3458,9 @@ async def test_eval_episode_discards_timed_out_client_before_next_repetition(
 async def test_custom_policy_receives_only_public_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # A custom policy receives only the env, reset result and repetition id (no kwargs) and never the
+    # private config or test case.
     reset_result = SimpleNamespace(
         done=False,
         observation=SimpleNamespace(metadata={}),
@@ -3156,16 +3479,26 @@ async def test_custom_policy_receives_only_public_context(
     received: dict[str, Any] = {}
 
     class FakeClient:
+        # [CLASS DOC]
+        # HELPER: Client fake returning a prepared reset result.
         def __init__(self, **_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Ignores arguments.
             pass
 
         async def __aenter__(self) -> FakeClient:
+            # [FUNCTION DOC]
+            # HELPER: Returns itself.
             return self
 
         async def __aexit__(self, *_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: No-op.
             pass
 
         async def reset(self, *_: Any, **__: Any) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Returns the reset result.
             return reset_result
 
     def policy(
@@ -3174,6 +3507,8 @@ async def test_custom_policy_receives_only_public_context(
         repetition_id: str,
         **kwargs: Any,
     ) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Records what it received and returns the policy result.
         received.update(
             {
                 "env": env,
@@ -3223,6 +3558,8 @@ async def test_custom_policy_receives_only_public_context(
 
 @pytest.mark.asyncio
 async def test_custom_policy_supports_async_callbacks() -> None:
+    # [FUNCTION DOC]
+    # _invoke_policy awaits an async policy and returns its result.
     env = object()
     reset_result = object()
     policy_result = object()
@@ -3232,6 +3569,8 @@ async def test_custom_policy_supports_async_callbacks() -> None:
         received_reset_result: Any,
         repetition_id: str,
     ) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Asserts the received arguments and returns the result.
         assert received_env is env
         assert received_reset_result is reset_result
         assert repetition_id == "repeat-async"
@@ -3252,17 +3591,30 @@ async def test_custom_policy_supports_async_callbacks() -> None:
 async def test_custom_policy_none_result_remains_an_episode_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # A policy returning None yields an outcome with RuntimeError "configured policy returned no episode
+    # result".
     class FakeClient:
+        # [CLASS DOC]
+        # HELPER: Client fake returning a not-done reset.
         def __init__(self, **_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Ignores arguments.
             pass
 
         async def __aenter__(self) -> FakeClient:
+            # [FUNCTION DOC]
+            # HELPER: Returns itself.
             return self
 
         async def __aexit__(self, *_: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: No-op.
             pass
 
         async def reset(self, *_: Any, **__: Any) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Returns a not-done reset result.
             return SimpleNamespace(
                 done=False,
                 observation=SimpleNamespace(metadata={}),
@@ -3293,10 +3645,17 @@ async def test_custom_policy_none_result_remains_an_episode_error(
 
 @pytest.mark.asyncio
 async def test_native_agent_proxy_submits_one_provider_parallel_batch() -> None:
+    # [FUNCTION DOC]
+    # _OpenEnvProxy bound to an agent whose last message is a provider parallel batch submits both calls
+    # as one batch and returns each call's own result.
     batches: list[list[SubmittedToolCall]] = []
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             batches.append(calls)
             return SimpleNamespace(
                 done=False,
@@ -3338,10 +3697,16 @@ async def test_native_agent_proxy_submits_one_provider_parallel_batch() -> None:
 
 @pytest.mark.asyncio
 async def test_native_agent_proxy_preserves_duplicate_parallel_call_ids() -> None:
+    # [FUNCTION DOC]
+    # Concurrent identical calls map to distinct provider call ids in one batch, in order.
     batches: list[list[SubmittedToolCall]] = []
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             batches.append(calls)
             await asyncio.sleep(0)
             return SimpleNamespace(
@@ -3388,10 +3753,16 @@ async def test_native_agent_proxy_preserves_duplicate_parallel_call_ids() -> Non
 
 @pytest.mark.asyncio
 async def test_native_agent_proxy_forwards_provider_parse_errors() -> None:
+    # [FUNCTION DOC]
+    # Provider parse errors in call metadata are forwarded as parse_error on the batched calls.
     batches: list[list[SubmittedToolCall]] = []
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             batches.append(calls)
             return SimpleNamespace(
                 done=False,
@@ -3431,9 +3802,13 @@ async def test_native_agent_proxy_forwards_provider_parse_errors() -> None:
 
 @pytest.mark.asyncio
 async def test_native_agent_proxy_allows_tool_argument_named_name() -> None:
+    # [FUNCTION DOC]
+    # An unbound proxy forwards a tool argument literally named "name" to call_tool.
     captured: list[tuple[str, dict[str, Any]]] = []
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tool(
             self,
             tool_name: str,
@@ -3441,6 +3816,8 @@ async def test_native_agent_proxy_allows_tool_argument_named_name() -> None:
             *,
             call_id: str | None = None,
         ) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records (tool name, arguments) and returns an ok tool result.
             captured.append((tool_name, arguments))
             return SimpleNamespace(
                 done=False,
@@ -3477,18 +3854,29 @@ async def test_configured_agent_submits_locally_handled_batch_and_continues(
     call: ToolCall,
     response_content: str,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized malformed/unknown calls: run_configured_agent submits the locally handled batch once,
+    # then submits the follow-up text; the trace has user, batch, response and answer messages and 2 steps.
     events: list[str] = []
     batches: list[list[SubmittedToolCall]] = []
     trace = thinkingbox_eval._ExecutionTrace()
 
     class FakeAgent:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBox agent with a Conversation whose decode_turn_iter yields scripted messages.
         def __init__(self) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Initialises the fake's state (conversation and counters or the bound proxy).
             self.conversation = Conversation()
 
         def add_messages(self, added: list[Any]) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Appends messages to the conversation.
             self.conversation.messages.extend(added)
 
         async def decode_turn_iter(self, user_message: Text | None) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Async generator; appends the user message if any, then appends and yields this test's scripted messages (tool batches, responses, texts).
             if user_message is not None:
                 self.add_messages([user_message])
             batch = ParallelToolCall(tool_calls=[call])
@@ -3506,7 +3894,11 @@ async def test_configured_agent_submits_locally_handled_batch_and_continues(
             yield answer
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             events.append("call_tools")
             batches.append(calls)
             return SimpleNamespace(
@@ -3525,6 +3917,8 @@ async def test_configured_agent_submits_locally_handled_batch_and_continues(
             )
 
         async def submit_message(self, content: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records/asserts the submitted content and returns a result (done when this test's script ends).
             events.append("submit_message")
             assert content == "Recovered and continued"
             return SimpleNamespace(
@@ -3538,6 +3932,8 @@ async def test_configured_agent_submits_locally_handled_batch_and_continues(
             )
 
         async def finish(self, reason: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Raises AssertionError for unexpected finishes, or records the reason and returns a done result where the test expects a finish.
             raise AssertionError(f"unexpected finish: {reason}")
 
     reset_result = SimpleNamespace(
@@ -3578,18 +3974,29 @@ async def test_configured_agent_submits_locally_handled_batch_and_continues(
 
 @pytest.mark.asyncio
 async def test_configured_agent_submits_mixed_batch_exactly_once() -> None:
+    # [FUNCTION DOC]
+    # A batch mixing malformed and valid calls is submitted once with parse errors preserved and the valid
+    # call's result returned to the agent.
     batches: list[list[SubmittedToolCall]] = []
     returned: list[str] = []
 
     class FakeAgent:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBox agent with a Conversation whose decode_turn_iter yields scripted messages.
         def __init__(self, proxy: Any) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Initialises the fake's state (conversation and counters or the bound proxy).
             self.proxy = proxy
             self.conversation = Conversation()
 
         def add_messages(self, added: list[Any]) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Appends messages to the conversation.
             self.conversation.messages.extend(added)
 
         async def decode_turn_iter(self, user_message: Text | None) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Async generator; appends the user message if any, then appends and yields this test's scripted messages (tool batches, responses, texts).
             if user_message is not None:
                 self.add_messages([user_message])
             malformed = ToolCall(
@@ -3628,7 +4035,11 @@ async def test_configured_agent_submits_mixed_batch_exactly_once() -> None:
             yield answer
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             batches.append(calls)
             return SimpleNamespace(
                 done=False,
@@ -3644,6 +4055,8 @@ async def test_configured_agent_submits_mixed_batch_exactly_once() -> None:
             )
 
         async def submit_message(self, content: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records/asserts the submitted content and returns a result (done when this test's script ends).
             assert content == "Batch handled"
             return SimpleNamespace(
                 done=True,
@@ -3651,6 +4064,8 @@ async def test_configured_agent_submits_mixed_batch_exactly_once() -> None:
             )
 
         async def finish(self, reason: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Raises AssertionError for unexpected finishes, or records the reason and returns a done result where the test expects a finish.
             raise AssertionError(f"unexpected finish: {reason}")
 
     reset_result = SimpleNamespace(
@@ -3685,17 +4100,27 @@ async def test_configured_agent_submits_mixed_batch_exactly_once() -> None:
 
 @pytest.mark.asyncio
 async def test_configured_agent_reports_exact_tool_only_limit() -> None:
+    # [FUNCTION DOC]
+    # An agent emitting only tool batches is finished with agent_limit after the turn limit (2 batches).
     batches: list[list[SubmittedToolCall]] = []
     finish_reasons: list[str] = []
 
     class FakeAgent:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBox agent with a Conversation whose decode_turn_iter yields scripted messages.
         def __init__(self) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Initialises the fake's state (conversation and counters or the bound proxy).
             self.conversation = Conversation()
 
         def add_messages(self, added: list[Any]) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Appends messages to the conversation.
             self.conversation.messages.extend(added)
 
         async def decode_turn_iter(self, user_message: Text | None) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Async generator; appends the user message if any, then appends and yields this test's scripted messages (tool batches, responses, texts).
             if user_message is not None:
                 self.add_messages([user_message])
             for index in range(2):
@@ -3712,7 +4137,11 @@ async def test_configured_agent_reports_exact_tool_only_limit() -> None:
                 yield batch
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             batches.append(calls)
             return SimpleNamespace(
                 done=False,
@@ -3728,9 +4157,13 @@ async def test_configured_agent_reports_exact_tool_only_limit() -> None:
             )
 
         async def submit_message(self, content: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records/asserts the submitted content and returns a result (done when this test's script ends).
             raise AssertionError(f"unexpected assistant message: {content}")
 
         async def finish(self, reason: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Raises AssertionError for unexpected finishes, or records the reason and returns a done result where the test expects a finish.
             finish_reasons.append(reason)
             return SimpleNamespace(
                 done=True,
@@ -3767,17 +4200,27 @@ async def test_configured_agent_reports_exact_tool_only_limit() -> None:
 
 @pytest.mark.asyncio
 async def test_configured_agent_counts_only_submitted_visible_text() -> None:
+    # [FUNCTION DOC]
+    # Only the last text of each agent turn is submitted, giving two submissions across two turns.
     submitted: list[str] = []
 
     class FakeAgent:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBox agent with a Conversation whose decode_turn_iter yields scripted messages.
         def __init__(self) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Initialises the fake's state (conversation and counters or the bound proxy).
             self.conversation = Conversation()
             self.turn = 0
 
         def add_messages(self, added: list[Any]) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Appends messages to the conversation.
             self.conversation.messages.extend(added)
 
         async def decode_turn_iter(self, user_message: Text | None) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Async generator; appends the user message if any, then appends and yields this test's scripted messages (tool batches, responses, texts).
             if user_message is not None:
                 self.add_messages([user_message])
             self.turn += 1
@@ -3792,7 +4235,11 @@ async def test_configured_agent_counts_only_submitted_visible_text() -> None:
                 yield message
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def submit_message(self, content: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records/asserts the submitted content and returns a result (done when this test's script ends).
             submitted.append(content)
             return SimpleNamespace(
                 done=len(submitted) == 2,
@@ -3804,6 +4251,8 @@ async def test_configured_agent_counts_only_submitted_visible_text() -> None:
             )
 
         async def finish(self, reason: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Raises AssertionError for unexpected finishes, or records the reason and returns a done result where the test expects a finish.
             raise AssertionError(f"unexpected finish: {reason}")
 
     case = _case()
@@ -3832,16 +4281,28 @@ async def _run_fake_agent_messages(
     *,
     batch_submissions: list[list[SubmittedToolCall]] | None = None,
 ) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Runs run_configured_agent with a fake agent yielding the given messages and a fake env
+    # recording batch calls (into batch_submissions if given) and message submissions; returns the
+    # submissions (content, terminal tool calls, ordering flag). The fake env's finish raises.
     submissions: list[dict[str, Any]] = []
 
     class FakeAgent:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBox agent with a Conversation whose decode_turn_iter yields scripted messages.
         def __init__(self) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Initialises the fake's state (conversation and counters or the bound proxy).
             self.conversation = Conversation()
 
         def add_messages(self, added: list[Any]) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Appends messages to the conversation.
             self.conversation.messages.extend(added)
 
         async def decode_turn_iter(self, user_message: Text | None) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Async generator; appends the user message if any, then appends and yields this test's scripted messages (tool batches, responses, texts).
             if user_message is not None:
                 self.conversation.messages.append(user_message)
             for message in messages:
@@ -3849,7 +4310,11 @@ async def _run_fake_agent_messages(
                 yield message
 
     class FakeEnv:
+        # [CLASS DOC]
+        # HELPER: Fake ThinkingBoxEnv client recording the calls made by the code under test.
         async def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records the submitted batch and returns a not-done result with one tool result per call (content derived from the call id or parse error).
             if batch_submissions is not None:
                 batch_submissions.append(calls)
             return SimpleNamespace(
@@ -3872,6 +4337,8 @@ async def _run_fake_agent_messages(
             terminal_tool_calls: list[SubmittedToolCall] | None = None,
             tool_calls_before_content: bool = False,
         ) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Records/asserts the submitted content and returns a result (done when this test's script ends).
             submissions.append(
                 {
                     "content": content,
@@ -3888,6 +4355,8 @@ async def _run_fake_agent_messages(
             )
 
         async def finish(self, reason: str) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Raises AssertionError for unexpected finishes, or records the reason and returns a done result where the test expects a finish.
             raise AssertionError(f"unexpected finish: {reason}")
 
     reset_result = SimpleNamespace(
@@ -3908,6 +4377,8 @@ async def _run_fake_agent_messages(
 
 @pytest.mark.asyncio
 async def test_ordered_tail_ignores_earlier_end_turn_before_later_text() -> None:
+    # [FUNCTION DOC]
+    # An end-turn batch followed by text submits only the text, with no batches or terminal calls.
     end_call = ToolCall(
         name="InjectionAttackInToolResponse",
         arguments={},
@@ -3939,6 +4410,9 @@ async def test_ordered_tail_ignores_earlier_end_turn_before_later_text() -> None
 async def test_ordered_tail_submits_only_actual_terminal_batch_and_adjacent_text() -> (
     None
 ):
+    # [FUNCTION DOC]
+    # An earlier normal batch is executed; the final end-turn batch is submitted as terminal calls with
+    # the adjacent text before it.
     earlier = ParallelToolCall(
         tool_calls=[
             ToolCall(

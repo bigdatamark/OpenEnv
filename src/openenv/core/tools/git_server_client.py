@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Client for a shared external Gitea server used by environments needing git
+# repositories: configures isolated git credentials, checks server readiness, lists repos
+# via the Gitea API, clones repos into a local workspace at a commit, fast-resets
+# workspaces, runs arbitrary git commands and reads commit hashes. Uses curl and git
+# subprocesses.
 """
 Git Server Client for connecting to external Gitea instance.
 
@@ -22,6 +28,8 @@ from urllib.parse import urlparse
 
 @dataclass
 class RepoInfo:
+    # [CLASS DOC]
+    # Repository information: name, url, commit, clone_url. (Not produced by this module.)
     """Information about a repository."""
 
     name: str
@@ -31,6 +39,10 @@ class RepoInfo:
 
 
 class GitServerClient:
+    # [CLASS DOC]
+    # Gitea client bound to a server URL, credentials and a local workspace directory. Tracks
+    # is_ready, the parsed host (default localhost) and port (default 3000), and a git
+    # environment whose GIT_CONFIG_GLOBAL points at a private temp config.
     """
     Client for connecting to an external Gitea server.
 
@@ -72,6 +84,10 @@ class GitServerClient:
         password: str,
         workspace_dir: str = "/workspace",
     ):
+        # [FUNCTION DOC]
+        # Normalizes the URL (no trailing slash), stores credentials, parses host/port, creates the
+        # workspace directory and writes the private git config. is_ready starts False.
+        # Side effects: creates directories and temp files.
         """Initialize Git Server Client."""
         self.gitea_url = gitea_url.rstrip("/")
         self.username = username
@@ -91,6 +107,13 @@ class GitServerClient:
         self._configure_git()
 
     def _configure_git(self):
+        # [FUNCTION DOC]
+        # HELPER: Creates a temp directory (removed at interpreter exit) holding a git-credentials
+        # file (mode 600) with "http://user:password@host:port" and a gitconfig setting user
+        # name/email, default branch main and the store credential helper for that file; sets
+        # self._git_env to os.environ plus GIT_CONFIG_GLOBAL.
+        # KNOWN ISSUE: the stored credential always uses the http scheme and defaults the port to
+        # 3000, so it will not match an https Gitea URL (or https on its default port).
         """
         Configure git identity and credentials for automatic authentication.
 
@@ -124,6 +147,10 @@ class GitServerClient:
         self._git_env = {**os.environ, "GIT_CONFIG_GLOBAL": str(gitconfig_path)}
 
     def wait_for_ready(self, timeout: int = 30) -> bool:
+        # [FUNCTION DOC]
+        # Polls "curl -sf <gitea_url>/" every second (5s per attempt) until it succeeds or timeout
+        # seconds (default 30) elapse. Sets is_ready True on success.
+        # Returns: True if ready, else False. Never raises.
         """
         Wait for Gitea server to be ready.
 
@@ -155,6 +182,12 @@ class GitServerClient:
         return False
 
     def list_repositories(self) -> list[dict[str, str]]:
+        # [FUNCTION DOC]
+        # Returns repos from GET /api/v1/user/repos (basic auth via curl) as dicts with name,
+        # full_name, clone_url and description; [] if curl fails or the JSON is invalid/missing keys.
+        # Raises: RuntimeError if the server is not marked ready.
+        # KNOWN ISSUE: curl runs without -f, so an HTTP error returns a JSON object; iterating it
+        # yields strings and indexing them raises TypeError, which is not caught.
         """
         List all repositories in Gitea.
 
@@ -196,6 +229,12 @@ class GitServerClient:
     def clone_to_workspace(
         self, repo_name: str, target_dir: str | None = None, commit: str = "main"
     ) -> str:
+        # [FUNCTION DOC]
+        # Clones <gitea_url>/<username>/<repo_name>.git into workspace/<target_dir or repo_name>
+        # (removing any existing directory first) and checks out commit unless it is "main".
+        # Returns: the clone path as a string.
+        # Raises: RuntimeError if not ready, or clone/checkout fails.
+        # Side effects: deletes and writes workspace files; runs git.
         """
         Clone a repository to the workspace at a specific commit.
 
@@ -254,6 +293,11 @@ class GitServerClient:
         return str(target_path)
 
     def reset_workspace(self, repo_name: str, commit: str = "main") -> bool:
+        # [FUNCTION DOC]
+        # Resets workspace/<repo_name>: git fetch --all (errors ignored), checkout commit, hard
+        # reset to origin/<commit> (or "main" for main), falling back to a plain hard reset to
+        # commit, then git clean -fdx (errors ignored).
+        # Returns: True. Raises: RuntimeError if the repo directory is missing or checkout/reset fails.
         """
         Fast reset of workspace to base state (optimized for task resets).
 
@@ -337,6 +381,10 @@ class GitServerClient:
     def execute_git_command(
         self, command: str, working_dir: str = ""
     ) -> tuple[int, str, str]:
+        # [FUNCTION DOC]
+        # Runs "git <command>" (shell-split) in the workspace or a subdirectory with the private
+        # git config.
+        # Returns: (exit_code, stdout, stderr); (1, "", message) if the directory does not exist.
         """
         Execute a git command in the workspace.
 
@@ -369,6 +417,9 @@ class GitServerClient:
         return (result.returncode, result.stdout, result.stderr)
 
     def get_current_commit(self, repo_name: str) -> str:
+        # [FUNCTION DOC]
+        # Returns the HEAD commit hash of workspace/<repo_name>.
+        # Raises: RuntimeError if the repo is missing or git rev-parse fails.
         """
         Get current commit hash of a workspace repository.
 
@@ -398,5 +449,7 @@ class GitServerClient:
         return result.stdout.strip()
 
     def workspace_exists(self, repo_name: str) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if workspace/<repo_name> exists.
         """Check if a repository exists in workspace."""
         return (self.workspace_dir / repo_name).exists()

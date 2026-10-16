@@ -303,9 +303,9 @@ def test_rollout_cancellation_releases_session_and_applies_call_budget(
     observed = []
 
     class Trial:
-        @classmethod
         # [CLASS DOC]
         # HELPER: Fake harbor Trial.
+        @classmethod
         async def create(cls, config):
             # [FUNCTION DOC]
             # HELPER: Records the only session's max_model_calls and returns an instance.

@@ -441,9 +441,9 @@ def test_verifier_exclusions_survive_capture_export(monkeypatch, tmp_path):
     trial_module = pytest.importorskip("harbor.trial.trial")
 
     class Trial:
-        @classmethod
         # [CLASS DOC]
         # HELPER: Fake harbor Trial.
+        @classmethod
         async def create(cls, config):
             # [FUNCTION DOC]
             # HELPER: Async classmethod returning a new instance.

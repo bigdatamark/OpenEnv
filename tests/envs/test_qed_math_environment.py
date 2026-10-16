@@ -770,9 +770,9 @@ class TestVerifyMath:
 
 
 class TestGradeAnswerSubmission:
-    @pytest.mark.asyncio
     # [CLASS DOC]
     # _grade_answer_submission via the verifier service; each test stops the service.
+    @pytest.mark.asyncio
     async def test_correct_gives_max_reward(self):
         # [FUNCTION DOC]
         # Correct answer gives score 7, reward 1 and success.
@@ -1005,9 +1005,9 @@ class TestReasoningStripping:
 
 
 class TestSubmitProofPayload:
-    @pytest.mark.asyncio
     # [CLASS DOC]
     # submit_proof_payload with mocked grader.
+    @pytest.mark.asyncio
     async def test_no_active_problem(self):
         # [FUNCTION DOC]
         # Without reset the payload is done with score 0 and an error in metadata.
@@ -1101,9 +1101,9 @@ class TestSubmitProofPayload:
 
 
 class TestMultiStepProblems:
-    @pytest.mark.asyncio
     # [CLASS DOC]
     # Multi-attempt episodes.
+    @pytest.mark.asyncio
     async def test_first_attempt_not_done(self):
         # [FUNCTION DOC]
         # A partial first attempt leaves the episode open with attempts remaining.
@@ -1161,9 +1161,9 @@ class TestMultiStepProblems:
 
 
 class TestOriginalProblemField:
-    @pytest.mark.asyncio
     # [CLASS DOC]
     # original_problem handling.
+    @pytest.mark.asyncio
     async def test_original_problem_used_for_grading(self):
         # [FUNCTION DOC]
         # original_problem is passed to the rubric instead of the displayed problem.
@@ -1762,9 +1762,9 @@ class TestMathVerifierService:
 
 
 class TestGoldCache:
-    @pytest.mark.asyncio
     # [CLASS DOC]
     # Gold-answer cache.
+    @pytest.mark.asyncio
     async def test_answer_mode_grading_uses_cached_gold(self):
         # [FUNCTION DOC]
         # _grade_submission uses the cached gold answer rather than the reference.
