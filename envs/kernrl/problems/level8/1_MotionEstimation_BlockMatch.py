@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 8, video processing): full-search block-matching motion
+# estimation (16 x 16 blocks, +/-16 pixel search) between two 720 x 1280 frames,
+# with Python loops over blocks and offsets in the reference.
 """
 Block Matching Motion Estimation
 
@@ -20,11 +24,15 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference block-matching model storing block size and search range.
     """
     Full-search block matching motion estimation.
     """
 
     def __init__(self, block_size: int = 16, search_range: int = 16):
+        # [FUNCTION DOC]
+        # Stores block_size (default 16) and search_range (default 16).
         super(Model, self).__init__()
         self.block_size = block_size
         self.search_range = search_range
@@ -32,6 +40,14 @@ class Model(nn.Module):
     def forward(
         self, current_frame: torch.Tensor, reference_frame: torch.Tensor
     ) -> tuple:
+        # [FUNCTION DOC]
+        # Zero-pads the reference frame by the search range; for each full block of the
+        # current frame evaluates the sum of absolute differences against every offset
+        # (dx, dy) in [-sr, sr]^2 (scanning dy then dx, keeping the first strict
+        # minimum), and records the best offset and SAD. Returns the tuple
+        # (motion_x, motion_y, min_sad), each (H // bs, W // bs) float.
+        # KNOWN ISSUE: the evaluator's correctness check cannot convert a tuple of
+        # tensors, so this output format fails comparison.
         """
         Estimate motion vectors between frames.
 
@@ -107,6 +123,8 @@ frame_width = 1280
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns two independent uniform random frames (frame_height, frame_width).
     # Two consecutive frames
     current_frame = torch.rand(frame_height, frame_width)
     reference_frame = torch.rand(frame_height, frame_width)
@@ -114,4 +132,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [16, 16] (block_size, search_range).
     return [16, 16]  # block_size, search_range

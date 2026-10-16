@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Rubrics package (RFC 004) for reward computation. Re-exports the Rubric base class,
+# container rubrics (Sequential, Gate, WeightedSum, RubricList, RubricDict), trajectory
+# rubrics and LLMJudge. No side effects beyond imports.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Rubrics for reward computation.

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 8): YUV 4:2:0 to 4:4:4 chroma upsampling of a 1080p
+# frame with bilinear interpolation.
 """
 Chroma Upsampling (YUV 4:2:0 to 4:4:4)
 
@@ -20,16 +23,25 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference chroma upsampling model. No parameters.
     """
     Upsamples chroma from 4:2:0 to 4:4:4.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(
         self, y_full: torch.Tensor, u_half: torch.Tensor, v_half: torch.Tensor
     ) -> tuple:
+        # [FUNCTION DOC]
+        # Bilinearly resizes U and V (align_corners False) to the luma size and returns
+        # the tuple (y_full unchanged, u_full, v_full), each (H, W).
+        # KNOWN ISSUE: the evaluator's correctness check cannot convert a tuple of
+        # tensors, so this output format fails comparison.
         """
         Upsample chroma channels.
 
@@ -64,6 +76,8 @@ frame_width = 1920
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns uniform random Y (H, W) and U, V (H/2, W/2).
     y = torch.rand(frame_height, frame_width)
     u = torch.rand(frame_height // 2, frame_width // 2)
     v = torch.rand(frame_height // 2, frame_width // 2)
@@ -71,4 +85,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 7): 5 x 5 median filter of a 512 x 512 image with
+# salt-and-pepper noise. Note: torch.nn.functional is imported below the class
+# definition, which works because it is only used at call time.
 """
 2D Median Filter
 
@@ -18,16 +22,26 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference median filter model storing kernel size and radius.
     """
     2D median filter for noise removal.
     """
 
     def __init__(self, kernel_size: int = 5):
+        # [FUNCTION DOC]
+        # Stores kernel_size (default 5) and radius (k // 2).
         super(Model, self).__init__()
         self.kernel_size = kernel_size
         self.radius = kernel_size // 2
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Reflect-pads the (H, W) image by the radius, extracts all k x k windows with
+        # unfold, and returns the per-pixel median (the lower median for even counts)
+        # as an (H, W) tensor.
+        # KNOWN ISSUE: reflect padding of a plain 2D tensor with a 4-value pad may be
+        # rejected by some PyTorch versions.
         """
         Apply median filter.
 
@@ -67,6 +81,9 @@ image_width = 512
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (image_height, image_width) with
+    # about 5% of pixels set to 0.0 and 5% set to 1.0.
     # Image with salt-and-pepper noise
     image = torch.rand(image_height, image_width)
     # Add noise
@@ -77,4 +94,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [5] (kernel_size).
     return [5]  # kernel_size

@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Core tools package: re-exports GitServerClient and RepoInfo, and PyExecutor when its
+# optional dependency (smolagents) is installed; PyExecutor is None otherwise.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Core tools for code execution and other utilities."""

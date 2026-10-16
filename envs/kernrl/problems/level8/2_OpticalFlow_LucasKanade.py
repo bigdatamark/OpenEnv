@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 8): dense single-scale Lucas-Kanade optical flow on
+# 240 x 320 frames with a 15 x 15 window; the reference loops over pixels.
 """
 Lucas-Kanade Optical Flow
 
@@ -21,11 +24,16 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference Lucas-Kanade model with Sobel gradient kernels as buffers and a
+    # window size (default 15).
     """
     Lucas-Kanade optical flow estimation.
     """
 
     def __init__(self, window_size: int = 15):
+        # [FUNCTION DOC]
+        # Stores the window size and half-window and registers the Sobel kernels.
         super(Model, self).__init__()
         self.window_size = window_size
         self.half_win = window_size // 2
@@ -42,6 +50,14 @@ class Model(nn.Module):
         self.register_buffer("sobel_y", sobel_y.unsqueeze(0).unsqueeze(0))
 
     def forward(self, frame1: torch.Tensor, frame2: torch.Tensor) -> tuple:
+        # [FUNCTION DOC]
+        # Computes spatial gradients (Sobel, zero padding) of the average of both
+        # frames and the temporal difference frame2 - frame1, reflect-pads them, and
+        # for every pixel solves the 2x2 normal equations over its window for (u, v)
+        # when the determinant magnitude exceeds 1e-6 (otherwise 0). Returns the tuple
+        # (flow_u, flow_v), each (H, W).
+        # KNOWN ISSUE: reflect padding of plain 2D tensors may be rejected by some
+        # PyTorch versions, and the evaluator cannot compare tuple outputs.
         """
         Compute optical flow from frame1 to frame2.
 
@@ -112,10 +128,14 @@ frame_width = 320
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns two independent uniform random frames (frame_height, frame_width).
     frame1 = torch.rand(frame_height, frame_width)
     frame2 = torch.rand(frame_height, frame_width)
     return [frame1, frame2]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [15] (window_size).
     return [15]  # window_size

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 8): motion-compensated interpolation of a 720 x 1280
+# frame at t = 0.5 using bilinear backward warping of both frames along a
+# given flow and linear blending.
 """
 Frame Interpolation (Motion-Compensated)
 
@@ -17,6 +21,8 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference frame interpolation model. No parameters.
     """
     Motion-compensated frame interpolation.
 
@@ -24,6 +30,8 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(
@@ -33,6 +41,12 @@ class Model(nn.Module):
         flow_01: torch.Tensor,
         t: float = 0.5,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Builds a normalized [-1, 1] sampling grid, converts the pixel flow to
+        # normalized units (dividing by W/2 and H/2), samples frame0 at grid - t*flow
+        # and frame1 at grid + (1 - t)*flow with bilinear grid_sample (border padding,
+        # align_corners True), and returns (1 - t)*warped0 + t*warped1 in the input's
+        # shape ((H, W) or (C, H, W)).
         """
         Interpolate frame at time t between frame0 (t=0) and frame1 (t=1).
 
@@ -110,6 +124,9 @@ frame_width = 1280
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns two uniform random frames, a random normal flow field scaled by 5 of
+    # shape (H, W, 2), and t = 0.5.
     frame0 = torch.rand(frame_height, frame_width)
     frame1 = torch.rand(frame_height, frame_width)
     # Random small flow
@@ -118,4 +135,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

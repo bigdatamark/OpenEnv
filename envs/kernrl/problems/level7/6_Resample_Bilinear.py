@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 7): bilinear downscale of a 3840 x 2160 image to
+# 1080 x 1920 (align_corners False).
 """
 Bilinear Resampling (Image Resize)
 
@@ -17,16 +20,23 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference resampling model storing the output size.
     """
     Bilinear image resampling.
     """
 
     def __init__(self, output_height: int = 1080, output_width: int = 1920):
+        # [FUNCTION DOC]
+        # Stores output_height (default 1080) and output_width (default 1920).
         super(Model, self).__init__()
         self.output_height = output_height
         self.output_width = output_width
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Accepts (H, W) or (C, H, W) input, resizes with bilinear interpolation to the
+        # target size (align_corners False) and restores the input rank.
         """
         Resample image to target size.
 
@@ -66,10 +76,14 @@ input_width = 2160
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (input_height, input_width).
     # 4K image
     image = torch.rand(input_height, input_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [1080, 1920] (output height and width).
     return [1080, 1920]  # output_height, output_width (1080p)

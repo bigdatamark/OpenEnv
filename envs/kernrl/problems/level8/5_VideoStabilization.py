@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 8): homography warp of a 1080 x 1920 frame (small
+# rotation plus translation) for video stabilization.
 """
 Video Stabilization Transform
 
@@ -17,14 +20,23 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference homography warp model. No parameters.
     """
     Applies homography transformation to stabilize a frame.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(self, frame: torch.Tensor, homography: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Maps every destination pixel through the inverse homography (homogeneous
+        # divide with +1e-10), normalizes source coordinates to [-1, 1] (align_corners
+        # convention), and samples the frame bilinearly with zero padding. Returns the
+        # warped frame in the input's shape ((H, W) or (C, H, W)).
         """
         Warp frame using homography matrix.
 
@@ -93,6 +105,9 @@ frame_width = 1920
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a uniform random frame and a 3x3 homography of a 0.02 rad rotation
+    # with translation (5, 3).
     frame = torch.rand(frame_height, frame_width)
     # Small rotation + translation homography
     angle = 0.02  # Small angle
@@ -105,4 +120,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

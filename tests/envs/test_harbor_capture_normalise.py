@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for request normalisation before forwarding to the engine
+# (normalise_for_capture mutates the request in place: stream off,
+# stream_options dropped, empty tools/functions and their companions dropped)
+# and upstream normalize_response hoisting SGLang per-choice prompt ids to
+# the top level. Skipped without the capture server/upstream modules.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -21,6 +27,8 @@ normalise_for_capture = server.normalise_for_capture
 
 
 def test_stream_is_forced_off():
+    # [FUNCTION DOC]
+    # stream becomes False.
     """Capture needs one whole response; reassembling ids from SSE deltas corrupts silently."""
     request = {"messages": [], "stream": True}
     normalise_for_capture(request)
@@ -28,6 +36,8 @@ def test_stream_is_forced_off():
 
 
 def test_stream_options_is_dropped():
+    # [FUNCTION DOC]
+    # stream_options is removed.
     """vLLM 400s on `stream_options` once `stream` is False. opencode sends it on every call."""
     request = {
         "messages": [],
@@ -39,6 +49,8 @@ def test_stream_options_is_dropped():
 
 
 def test_empty_tools_is_dropped():
+    # [FUNCTION DOC]
+    # Empty tools list is removed.
     """kimi-cli sends `tools: []`, which vLLM rejects: 'must not be an empty array'."""
     request = {"messages": [], "tools": []}
     normalise_for_capture(request)
@@ -46,6 +58,8 @@ def test_empty_tools_is_dropped():
 
 
 def test_empty_functions_is_dropped():
+    # [FUNCTION DOC]
+    # Empty legacy functions list is removed.
     """The legacy spelling fails the same way."""
     request = {"messages": [], "functions": []}
     normalise_for_capture(request)
@@ -53,6 +67,8 @@ def test_empty_functions_is_dropped():
 
 
 def test_tool_choice_is_dropped_with_the_tools_it_referenced():
+    # [FUNCTION DOC]
+    # tool_choice is removed with empty tools.
     """`tool_choice` without `tools` is invalid, and means nothing once the list is gone."""
     request = {"messages": [], "tools": [], "tool_choice": "auto"}
     normalise_for_capture(request)
@@ -61,6 +77,8 @@ def test_tool_choice_is_dropped_with_the_tools_it_referenced():
 
 
 def test_populated_tools_are_left_alone():
+    # [FUNCTION DOC]
+    # Non-empty tools and tool_choice are kept.
     """The guard must be narrow: dropping real tools would change what the model can do."""
     tools = [{"type": "function", "function": {"name": "bash"}}]
     request = {"messages": [], "tools": tools, "tool_choice": "auto"}
@@ -70,6 +88,8 @@ def test_populated_tools_are_left_alone():
 
 
 def test_absent_tool_keys_are_not_invented():
+    # [FUNCTION DOC]
+    # No tool keys are added when absent.
     """A request with no tool keys must stay that way rather than gain empty ones."""
     request = {"messages": []}
     normalise_for_capture(request)
@@ -84,6 +104,8 @@ normalize_response = upstream.normalize_response
 
 
 def test_sglang_per_choice_prompt_ids_are_hoisted():
+    # [FUNCTION DOC]
+    # A choice's prompt_token_ids is copied to the top level.
     """SGLang returns the prompt ids on the choice; vLLM returns them at the top level.
 
     Every reader downstream (`check_upstream_response`, the capture server's `_ingest`, the UI) looks
@@ -106,6 +128,8 @@ def test_sglang_per_choice_prompt_ids_are_hoisted():
 
 
 def test_an_engines_own_top_level_prompt_ids_win():
+    # [FUNCTION DOC]
+    # Existing top-level prompt ids are not overwritten.
     """vLLM's value must not be overwritten by a choice that also carries one."""
     response = {
         "prompt_token_ids": [9, 9, 9],
@@ -116,15 +140,21 @@ def test_an_engines_own_top_level_prompt_ids_win():
 
 
 def test_nothing_is_invented_when_no_choice_carries_prompt_ids():
+    # [FUNCTION DOC]
+    # No prompt ids are added if no choice has them.
     response = {"choices": [{"message": {"content": "hi"}}]}
     assert "prompt_token_ids" not in normalize_response(response)
 
 
 def test_hoisting_survives_a_response_with_no_choices():
+    # [FUNCTION DOC]
+    # An empty response stays empty.
     assert normalize_response({}) == {}
 
 
 def test_parallel_tool_calls_goes_with_an_empty_tools_array():
+    # [FUNCTION DOC]
+    # parallel_tool_calls and tool_choice are removed with empty tools.
     """Found by the compatibility matrix: codex against OpenAI failed EVERY call with
 
         Invalid value for 'parallel_tool_calls': 'parallel_tool_calls' is only allowed when
@@ -147,6 +177,8 @@ def test_parallel_tool_calls_goes_with_an_empty_tools_array():
 
 
 def test_parallel_tool_calls_survives_when_tools_are_real():
+    # [FUNCTION DOC]
+    # parallel_tool_calls is kept with real tools.
     """It is only invalid without tools; a genuine manifest must keep its companions."""
     server = pytest.importorskip("openenv.core.harness.capture.server")
     body = {

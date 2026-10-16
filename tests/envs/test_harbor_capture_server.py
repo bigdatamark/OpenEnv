@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Port-ownership tests for the capture proxy's CaptureServer (start refuses a
+# port someone else holds, /health identifies the instance, stop releases the
+# port) and admin-key handling in the standalone capture server CLI. Servers
+# bind real local ports; the engine URL is a discard port never contacted.
+# Skipped without harbor runner or the capture server module.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -35,6 +41,9 @@ UNUSED_ENGINE = "http://127.0.0.1:9/v1"
 
 
 def _free_port() -> int:
+    # [FUNCTION DOC]
+    # HELPER: binds a socket to port 0 on loopback and returns the assigned port
+    # (released on return).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
@@ -42,10 +51,15 @@ def _free_port() -> int:
 
 @pytest.fixture
 def capture():
+    # [FUNCTION DOC]
+    # Fixture: yields a factory building CaptureServers on a given port for the
+    # unused engine, and stops all built servers (in reverse order) afterwards.
     """Yield a factory that tears every server it built back down."""
     built = []
 
     def make(port: int) -> CaptureServer:
+        # [FUNCTION DOC]
+        # Builds a CaptureServer on the port, records it for teardown and returns it.
         server = CaptureServer(llm_url=UNUSED_ENGINE, model="test-model", port=port)
         built.append(server)
         return server
@@ -56,6 +70,8 @@ def capture():
 
 
 def test_health_reports_this_instance(capture):
+    # [FUNCTION DOC]
+    # /health returns status ok and this app's instance id.
     """`/health` must identify which app answered, so a probe can check identity not reachability."""
     import httpx
 
@@ -68,12 +84,17 @@ def test_health_reports_this_instance(capture):
 
 
 def test_instance_ids_are_distinct(capture):
+    # [FUNCTION DOC]
+    # Two servers have different instance ids.
     """Two apps must never share an id, or the identity probe cannot tell them apart."""
     first, second = capture(_free_port()), capture(_free_port())
     assert first.app.state.instance_id != second.app.state.instance_id
 
 
 def test_start_refuses_a_port_another_server_holds(capture):
+    # [FUNCTION DOC]
+    # Starting a second server on a used port raises RuntimeError naming the port
+    # and leaves the incumbent serving.
     """The regression: a second server on a held port used to report healthy.
 
     Its own uvicorn fails to bind on a background thread where nothing observes the error, while the
@@ -95,6 +116,8 @@ def test_start_refuses_a_port_another_server_holds(capture):
 
 
 def test_start_refuses_a_port_held_by_a_non_capture_listener(capture):
+    # [FUNCTION DOC]
+    # A plain listening socket also causes RuntimeError "already in use".
     """Any listener counts, not just another capture server."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
         squatter.bind(("127.0.0.1", 0))
@@ -106,6 +129,8 @@ def test_start_refuses_a_port_held_by_a_non_capture_listener(capture):
 
 
 def test_start_succeeds_on_a_free_port_after_a_refusal(capture):
+    # [FUNCTION DOC]
+    # After a refusal, a new server on a free port starts with a live thread.
     """A refusal must leave no state behind that breaks the next attempt."""
     port = _free_port()
     capture(port).start()
@@ -119,6 +144,8 @@ def test_start_succeeds_on_a_free_port_after_a_refusal(capture):
 
 
 def test_stop_releases_the_port(capture):
+    # [FUNCTION DOC]
+    # After stop, a new server can start on the same port.
     """Otherwise a restart in the same process hits the new guard and looks like a collision."""
     port = _free_port()
     server = capture(port)
@@ -131,6 +158,10 @@ def test_stop_releases_the_port(capture):
 
 
 def run_cli(monkeypatch, *argv: str) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: patches create_app to record its kwargs, stubs uvicorn.run and sets
+    # sys.argv with the unused engine and capture level tokens plus argv; runs
+    # capture_server.main and returns the recorded kwargs.
     """Run the CLI entry point with `argv`, returning the kwargs it built the app with.
 
     `--capture-level` is forced so the CLI never probes `UNUSED_ENGINE`; `uvicorn.run` is stubbed so
@@ -141,6 +172,8 @@ def run_cli(monkeypatch, *argv: str) -> dict:
     seen: dict = {}
 
     def fake_create_app(**kwargs):
+        # [FUNCTION DOC]
+        # Records kwargs and returns a dummy object.
         seen.update(kwargs)
         return object()
 
@@ -155,6 +188,8 @@ def run_cli(monkeypatch, *argv: str) -> dict:
 
 
 def test_cli_passes_admin_key_flag_to_the_app(monkeypatch):
+    # [FUNCTION DOC]
+    # --admin-key is passed to create_app.
     monkeypatch.delenv("OPENENV_CAPTURE_ADMIN_KEY", raising=False)
 
     seen = run_cli(monkeypatch, "--admin-key", "from-flag")
@@ -163,6 +198,8 @@ def test_cli_passes_admin_key_flag_to_the_app(monkeypatch):
 
 
 def test_cli_admin_key_defaults_to_the_env_var(monkeypatch):
+    # [FUNCTION DOC]
+    # OPENENV_CAPTURE_ADMIN_KEY is used by default.
     """Same variable `serve` and `rollout` read, so one setting covers every entry point."""
     monkeypatch.setenv("OPENENV_CAPTURE_ADMIN_KEY", "from-env")
 
@@ -172,6 +209,8 @@ def test_cli_admin_key_defaults_to_the_env_var(monkeypatch):
 
 
 def test_cli_default_loopback_leaves_admin_key_unset(monkeypatch, capsys):
+    # [FUNCTION DOC]
+    # On loopback without a key, admin_key is None and nothing about it is printed.
     """Default `--host 127.0.0.1` may leave `/sessions*` ungated on a private local port."""
     monkeypatch.delenv("OPENENV_CAPTURE_ADMIN_KEY", raising=False)
 
@@ -183,6 +222,8 @@ def test_cli_default_loopback_leaves_admin_key_unset(monkeypatch, capsys):
 
 
 def test_cli_refuses_non_loopback_without_admin_key(monkeypatch):
+    # [FUNCTION DOC]
+    # Binding 0.0.0.0 without a key exits with a message naming the env var.
     """Non-loopback without a key must fail closed — never mint-and-print a credential."""
     monkeypatch.delenv("OPENENV_CAPTURE_ADMIN_KEY", raising=False)
 
@@ -191,6 +232,8 @@ def test_cli_refuses_non_loopback_without_admin_key(monkeypatch):
 
 
 def test_cli_non_loopback_accepts_explicit_admin_key(monkeypatch, capsys):
+    # [FUNCTION DOC]
+    # An explicit key on 0.0.0.0 is passed through and never printed.
     monkeypatch.delenv("OPENENV_CAPTURE_ADMIN_KEY", raising=False)
 
     seen = run_cli(monkeypatch, "--host", "0.0.0.0", "--admin-key", "explicit")

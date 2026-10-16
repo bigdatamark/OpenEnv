@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for which captured turns the trainer-facing contract exports
+# (contract._agent_nodes, to_turn_records, to_trace_entries): every agent root
+# is included once, auxiliary and discarded sequences are excluded. Skipped
+# without the capture contract/graph modules.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,6 +28,9 @@ TurnNode = graph_mod.TurnNode
 
 
 def node(node_id: str, prompt: list[int], sampled: list[int]) -> TurnNode:
+    # [FUNCTION DOC]
+    # HELPER: builds a TurnNode with given ids, logprobs -0.1 each, a user request
+    # message and an "ok" response.
     return TurnNode(
         node_id=node_id,
         prompt_ids=prompt,
@@ -35,6 +43,9 @@ def node(node_id: str, prompt: list[int], sampled: list[int]) -> TurnNode:
 
 @pytest.fixture
 def two_agent_roots():
+    # [FUNCTION DOC]
+    # Fixture: graph with a two-turn agent chain and a separate agent root, plus a
+    # document listing both agent sequences; returns (graph, document).
     """A harness that rewrote its system prompt mid-run, so the rollout has two agent roots."""
     g = RolloutGraph()
     g.add_turn(node("a1", [1], [2, 3]))
@@ -50,12 +61,16 @@ def two_agent_roots():
 
 
 def test_every_agent_root_is_exported(two_agent_roots):
+    # [FUNCTION DOC]
+    # _agent_nodes returns nodes from both agent roots in order.
     """The regression: only the first agent sequence was kept, so later roots vanished."""
     g, document = two_agent_roots
     assert [n.node_id for n in contract._agent_nodes(g, document)] == ["a1", "a2", "b1"]
 
 
 def test_turn_records_cover_every_agent_turn(two_agent_roots):
+    # [FUNCTION DOC]
+    # Three turn records, each with non-empty output ids and matching logprobs.
     g, document = two_agent_roots
     records = contract.to_turn_records(g, document)
     assert len(records) == 3
@@ -65,11 +80,15 @@ def test_turn_records_cover_every_agent_turn(two_agent_roots):
 
 
 def test_trace_entries_cover_every_agent_turn(two_agent_roots):
+    # [FUNCTION DOC]
+    # Three trace entries are produced.
     g, document = two_agent_roots
     assert len(contract.to_trace_entries(g, document)) == 3
 
 
 def test_auxiliary_sequences_are_excluded():
+    # [FUNCTION DOC]
+    # Auxiliary sequence nodes are excluded.
     """An aux call must never be credited with the reward the agent earned."""
     g = RolloutGraph()
     g.add_turn(node("agent", [1], [2]))
@@ -84,6 +103,8 @@ def test_auxiliary_sequences_are_excluded():
 
 
 def test_discarded_sequences_are_excluded():
+    # [FUNCTION DOC]
+    # Discarded sequence nodes are excluded.
     g = RolloutGraph()
     g.add_turn(node("kept", [1], [2]))
     g.add_turn(node("dead", [1], [3]))
@@ -97,6 +118,8 @@ def test_discarded_sequences_are_excluded():
 
 
 def test_a_node_shared_by_two_paths_appears_once():
+    # [FUNCTION DOC]
+    # A shared prefix node is exported once.
     """Forked paths share their prefix; the shared turn must not be exported twice."""
     g = RolloutGraph()
     g.add_turn(node("shared", [1], [2]))
@@ -114,6 +137,8 @@ def test_a_node_shared_by_two_paths_appears_once():
 
 
 def test_no_agent_sequences_is_empty_not_an_error():
+    # [FUNCTION DOC]
+    # No agent sequences yields empty lists.
     g = RolloutGraph()
     g.add_turn(node("aux", [1], [2]))
     document = {

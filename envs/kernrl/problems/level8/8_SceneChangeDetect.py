@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 8): scene-cut detection between two 480 x 640 frames
+# from a normalized SAD score and a 32-bin chi-squared histogram distance.
 """
 Scene Change Detection
 
@@ -19,16 +22,29 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference scene-change model with SAD and histogram thresholds.
     """
     Scene change detection using multiple metrics.
     """
 
     def __init__(self, sad_threshold: float = 0.3, hist_threshold: float = 0.5):
+        # [FUNCTION DOC]
+        # Stores sad_threshold (default 0.3) and hist_threshold (default 0.5).
         super(Model, self).__init__()
         self.sad_threshold = sad_threshold
         self.hist_threshold = hist_threshold
 
     def forward(self, frame1: torch.Tensor, frame2: torch.Tensor) -> tuple:
+        # [FUNCTION DOC]
+        # Computes sad_score = mean |f1 - f2| / max(mean |f1|, 1e-6); quantizes both
+        # frames to 32 bins (values times 31, clamped, truncated), normalizes their
+        # histograms and computes half the chi-squared distance; also computes a Sobel-x
+        # edge difference that is not used. Returns the tuple (is_scene_change bool
+        # tensor = sad_score > sad_threshold or chi_sq > hist_threshold, sad_score,
+        # chi_sq).
+        # KNOWN ISSUE: the edge-difference metric is computed but discarded, and the
+        # evaluator's correctness check cannot convert a tuple of tensors.
         """
         Detect if scene change occurred between frames.
 
@@ -93,10 +109,14 @@ frame_width = 640
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns two independent uniform random frames (frame_height, frame_width).
     frame1 = torch.rand(frame_height, frame_width)
     frame2 = torch.rand(frame_height, frame_width)
     return [frame1, frame2]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [0.3, 0.5] (sad_threshold, hist_threshold).
     return [0.3, 0.5]  # sad_threshold, hist_threshold

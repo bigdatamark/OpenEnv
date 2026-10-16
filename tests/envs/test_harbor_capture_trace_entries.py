@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for the capture server's GET /sessions/{id}/trace_entries endpoint
+# and the TraceEntry / LoopOwningSession contract types consumed by
+# loop-owning external agents. No engine is contacted. Skipped without
+# fastapi or the capture server module.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -39,10 +44,14 @@ UNUSED_ENGINE = "http://127.0.0.1:9/v1"
 
 @pytest.fixture
 def client() -> TestClient:
+    # [FUNCTION DOC]
+    # Fixture: TestClient for a capture app on an unused engine URL.
     return TestClient(capture_server.create_app(llm_url=UNUSED_ENGINE, model="unused"))
 
 
 def test_unknown_session_is_404_not_500(client: TestClient) -> None:
+    # [FUNCTION DOC]
+    # Unknown session ids return 404 {"error": "unknown session"}.
     # A 500 here would be read as "the capture server is broken" and send someone to the wrong
     # place; the distinction between an unknown rollout and a broken server has to survive.
     response = client.get("/sessions/no-such-session/trace_entries")
@@ -51,6 +60,8 @@ def test_unknown_session_is_404_not_500(client: TestClient) -> None:
 
 
 def test_fresh_session_returns_an_empty_entry_list(client: TestClient) -> None:
+    # [FUNCTION DOC]
+    # A new session returns its id and an empty entries list.
     session_id = client.post("/sessions", json={}).json()["session_id"]
 
     response = client.get(f"/sessions/{session_id}/trace_entries")
@@ -64,6 +75,8 @@ def test_fresh_session_returns_an_empty_entry_list(client: TestClient) -> None:
 
 
 def test_trace_entry_carries_exactly_the_documented_keys() -> None:
+    # [FUNCTION DOC]
+    # TraceEntry's annotated keys are exactly the nine documented fields.
     # Consumers index these by name to build training rows, so a rename breaks them silently --
     # the token fields simply read empty and the rollout looks like it learned nothing.
     #
@@ -85,12 +98,17 @@ def test_trace_entry_carries_exactly_the_documented_keys() -> None:
 
 
 def test_trace_entry_is_total_false_so_partial_records_are_legal() -> None:
+    # [FUNCTION DOC]
+    # TraceEntry is a non-total TypedDict.
     # An eval-tier rollout has no token fields by design. If the record required them, every
     # eval capture would be a type error rather than a legitimately partial record.
     assert TraceEntry.__total__ is False
 
 
 def test_loop_owning_session_protocol_is_structural() -> None:
+    # [FUNCTION DOC]
+    # Classes with wait_for_completion and fetch_proxy_trace satisfy the runtime
+    # protocol without inheritance; one lacking fetch_proxy_trace does not.
     """A session satisfies the protocol by shape, never by inheritance.
 
     That freedom is the whole point: opencode reads a file out of its sandbox, the capture proxy
@@ -98,24 +116,40 @@ def test_loop_owning_session_protocol_is_structural() -> None:
     """
 
     class ReadsAFile:
+        # [CLASS DOC]
+        # Protocol-shaped stub returning an empty trace.
         def wait_for_completion(self, timeout_s: float | None = None) -> int:
+            # [FUNCTION DOC]
+            # Returns exit code 0.
             return 0
 
         def fetch_proxy_trace(self) -> list[TraceEntry]:
+            # [FUNCTION DOC]
+            # Returns an empty list.
             return []
 
     class CallsAServer:
+        # [CLASS DOC]
+        # Protocol-shaped stub returning one partial entry.
         def wait_for_completion(self, timeout_s: float | None = None) -> int:
+            # [FUNCTION DOC]
+            # Returns exit code 0.
             return 0
 
         def fetch_proxy_trace(self) -> list[TraceEntry]:
+            # [FUNCTION DOC]
+            # Returns a single entry with request, response and completion ids.
             return [{"request": {}, "response": {}, "completion_token_ids": [1]}]
 
     for candidate in (ReadsAFile(), CallsAServer()):
         assert isinstance(candidate, LoopOwningSession)
 
     class MissingTheTrace:
+        # [CLASS DOC]
+        # Stub lacking fetch_proxy_trace.
         def wait_for_completion(self, timeout_s: float | None = None) -> int:
+            # [FUNCTION DOC]
+            # Returns exit code 0.
             return 0
 
     assert not isinstance(MissingTheTrace(), LoopOwningSession)

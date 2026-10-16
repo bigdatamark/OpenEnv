@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 8): flow-compensated temporal denoising of the middle
+# of 5 frames (480 x 640) with confidence-weighted averaging.
 """
 Temporal Video Denoising
 
@@ -17,6 +20,9 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference temporal denoiser storing the expected number of frames (unused in
+    # forward, which uses the input's T).
     """
     Temporal averaging denoiser for video.
 
@@ -24,10 +30,18 @@ class Model(nn.Module):
     """
 
     def __init__(self, num_frames: int = 5):
+        # [FUNCTION DOC]
+        # Stores num_frames (default 5).
         super(Model, self).__init__()
         self.num_frames = num_frames
 
     def forward(self, frames: torch.Tensor, flows: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Starts from the middle frame with weight 1. For each other frame t, sums the
+        # consecutive flows between t and the middle (added for earlier frames,
+        # subtracted for later ones), normalizes the flow by W/2 and H/2, backward-warps
+        # frame t with bilinear grid_sample (zero padding, align_corners True), weights
+        # it by exp(-|flow| / 10), and accumulates. Returns the weighted average (H, W).
         """
         Denoise the middle frame using temporal averaging.
 
@@ -105,6 +119,9 @@ frame_width = 640
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns uniform random frames (T, H, W) and random normal flows scaled by 2 of
+    # shape (T - 1, H, W, 2).
     frames = torch.rand(num_temporal_frames, frame_height, frame_width)
     # Small random flows between frames
     flows = torch.randn(num_temporal_frames - 1, frame_height, frame_width, 2) * 2
@@ -112,4 +129,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [num_temporal_frames] (5).
     return [num_temporal_frames]

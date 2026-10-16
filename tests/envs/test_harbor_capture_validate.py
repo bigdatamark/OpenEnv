@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for per-turn ingest validation (check_turn) and Harbor sandbox
+# capability checks (_missing_sdk reading backend modules' _HAS_* flags,
+# check_sandbox, Capabilities rendering and serialisation). Skipped without
+# the capture validate or harbor capabilities modules.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,16 +30,22 @@ check_turn = validate.check_turn
 
 
 def codes(report) -> set[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the set of finding codes in a report.
     return {f.code for f in report.findings}
 
 
 # --- per-turn validation ----------------------------------------------------
 def test_a_well_formed_turn_passes():
+    # [FUNCTION DOC]
+    # Aligned prompt, sampled ids and logprobs pass.
     report = check_turn([1, 2, 3], [4, 5], [-0.1, -0.2], finish_reason="stop")
     assert report.ok
 
 
 def test_missing_prompt_ids_is_fatal():
+    # [FUNCTION DOC]
+    # Empty prompt ids fail with no_prompt_ids.
     """The endpoint was started without token-id capture: every rebuilt row would be empty."""
     report = check_turn([], [4], [-0.1])
     assert not report.ok
@@ -42,12 +53,16 @@ def test_missing_prompt_ids_is_fatal():
 
 
 def test_logprob_count_must_match_sampled_count():
+    # [FUNCTION DOC]
+    # Mismatched logprob count fails.
     """Off-by-one here silently trains on the wrong token's probability."""
     report = check_turn([1], [4, 5, 6], [-0.1, -0.2])
     assert not report.ok
 
 
 def test_a_turn_that_sampled_nothing_is_reported_but_not_fatal():
+    # [FUNCTION DOC]
+    # Empty completion is ok but reports no_sampled_ids.
     """Reported, not rejected: a model can legitimately stop without emitting a token.
 
     `ok` means usable, so an empty completion warns rather than invalidating the rollout. It still
@@ -59,6 +74,8 @@ def test_a_turn_that_sampled_nothing_is_reported_but_not_fatal():
 
 
 def test_findings_name_the_turn():
+    # [FUNCTION DOC]
+    # Findings mention "turn <index>".
     """A misalignment is only actionable if you know which call produced it."""
     report = check_turn([], [1], [-0.1], index=7)
     assert any("turn 7" in str(f) for f in report.findings)
@@ -66,6 +83,10 @@ def test_findings_name_the_turn():
 
 # --- sandbox capability -----------------------------------------------------
 def _module_with(**flags):
+    # [FUNCTION DOC]
+    # HELPER: creates a module "fake_backend_module" with the given attributes and
+    # registers it in sys.modules (global side effect, overwritten per call, never
+    # removed). Returns the module.
     module = types.ModuleType("fake_backend_module")
     for key, value in flags.items():
         setattr(module, key, value)
@@ -74,6 +95,8 @@ def _module_with(**flags):
 
 
 def test_missing_sdk_is_detected_from_the_backends_own_flag():
+    # [FUNCTION DOC]
+    # _HAS_E2B False yields a detail naming e2b and an install hint.
     """Harbor guards each SDK with a module-level `_HAS_X` and raises from `__init__`.
 
     So the module imports, the class loads, and the check passes, with the failure arriving only
@@ -88,18 +111,24 @@ def test_missing_sdk_is_detected_from_the_backends_own_flag():
 
 
 def test_present_sdk_reports_nothing():
+    # [FUNCTION DOC]
+    # _HAS_E2B True yields "".
     module = _module_with(_HAS_E2B=True)
     cls = type("E2BEnvironment", (), {"__module__": module.__name__})
     assert capabilities._missing_sdk(cls) == ""
 
 
 def test_a_backend_without_flags_is_not_assumed_broken():
+    # [FUNCTION DOC]
+    # No _HAS_* flags yields "".
     module = _module_with(SOMETHING_ELSE=1)
     cls = type("Plain", (), {"__module__": module.__name__})
     assert capabilities._missing_sdk(cls) == ""
 
 
 def test_several_missing_extras_are_all_named():
+    # [FUNCTION DOC]
+    # All missing extras are named.
     module = _module_with(_HAS_MODAL=False, _HAS_DOCKERFILE_PARSE=False)
     cls = type("ModalEnvironment", (), {"__module__": module.__name__})
     detail = capabilities._missing_sdk(cls)
@@ -107,11 +136,15 @@ def test_several_missing_extras_are_all_named():
 
 
 def test_an_unimportable_module_is_not_a_crash():
+    # [FUNCTION DOC]
+    # A class whose module cannot be imported yields "".
     cls = type("Ghost", (), {"__module__": "module.that.does.not.exist"})
     assert capabilities._missing_sdk(cls) == ""
 
 
 def test_unknown_sandbox_names_are_rejected_by_name():
+    # [FUNCTION DOC]
+    # check_sandbox of an unknown name is unavailable with an explanatory detail.
     status = capabilities.check_sandbox("not-a-real-backend")
     assert status.available is False
     assert "unknown" in status.detail.lower() or "harbor" in status.detail.lower()
@@ -119,6 +152,8 @@ def test_unknown_sandbox_names_are_rejected_by_name():
 
 # --- capability reporting ---------------------------------------------------
 def test_render_says_why_a_sandbox_is_unavailable():
+    # [FUNCTION DOC]
+    # render includes the unavailability reason; available_sandboxes lists usable ones.
     """The commonest cause of a rollout dying 90s in is a missing key, so it belongs at startup."""
     caps = capabilities.Capabilities(
         sandboxes=[
@@ -132,6 +167,8 @@ def test_render_says_why_a_sandbox_is_unavailable():
 
 
 def test_render_warns_when_nothing_is_usable():
+    # [FUNCTION DOC]
+    # render includes WARNING when no sandbox is usable.
     caps = capabilities.Capabilities(
         sandboxes=[capabilities.SandboxStatus("e2b", False, "no key")]
     )
@@ -139,6 +176,8 @@ def test_render_warns_when_nothing_is_usable():
 
 
 def test_capabilities_serialise_for_the_wire():
+    # [FUNCTION DOC]
+    # to_dict has harnesses, sandboxes, datasets and llm keys.
     caps = capabilities.Capabilities(
         sandboxes=[capabilities.SandboxStatus("e2b", True)],
         llm={"model": "m", "ok": True},
@@ -149,6 +188,8 @@ def test_capabilities_serialise_for_the_wire():
 
 
 def test_the_install_hint_does_not_point_at_the_unsatisfiable_extra():
+    # [FUNCTION DOC]
+    # The hint suggests openenv[harbor], not harbor[cloud].
     """`harbor[cloud]` cannot be installed: langsmith and tensorlake demand incompatible websockets.
 
     Both pyprojects avoid it for that reason, so an error message telling someone to install it

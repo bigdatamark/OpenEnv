@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 7): frequency-domain Wiener deconvolution of a
+# 1024 x 1024 image with a 15 x 15 Gaussian PSF (sigma = kernel_size / 6).
 """
 Wiener Filter (Frequency Domain Deconvolution)
 
@@ -21,6 +24,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference Wiener filter model with a normalized Gaussian PSF buffer and a
+    # noise variance (default 0.01).
     """
     Wiener deconvolution filter.
 
@@ -28,6 +34,9 @@ class Model(nn.Module):
     """
 
     def __init__(self, kernel_size: int = 15, noise_var: float = 0.01):
+        # [FUNCTION DOC]
+        # Stores kernel size and noise variance and registers the normalized Gaussian
+        # PSF.
         super(Model, self).__init__()
         self.kernel_size = kernel_size
         self.noise_var = noise_var
@@ -43,6 +52,11 @@ class Model(nn.Module):
         self.register_buffer("blur_kernel", kernel)
 
     def forward(self, blurred: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Zero-pads the PSF to the image size, circularly shifts it to center it at the
+        # origin, FFTs image and PSF, computes the Wiener filter conj(H) /
+        # (|H|^2 + noise_var / var(image)), applies it to the image spectrum and
+        # returns the real part of the inverse FFT, shape (H, W).
         """
         Apply Wiener deconvolution.
 
@@ -89,10 +103,15 @@ image_width = 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (image_height, image_width) (not
+    # actually blurred).
     # Simulated blurred image
     image = torch.rand(image_height, image_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [15, 0.01] (kernel_size, noise_var).
     return [15, 0.01]  # kernel_size, noise_var
