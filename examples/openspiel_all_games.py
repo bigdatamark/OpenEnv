@@ -141,7 +141,7 @@ def run_cliff_walking_game(env: OpenSpielEnv, num_episodes: int = 3):
     # [FUNCTION DOC]
     # Plays num_episodes cliff-walking episodes with random actions (max 100 steps), flagging a fall when a step reward is
     # below -50; prints total reward and fell/goal/timeout.
-    # KNOWN ISSUE: a step-limit timeout is reported as reaching the goal only when done is set; but a fall that ends the episode is still classified first, so "REACHED GOAL" also prints when the episode ends for any other reason.
+    # KNOWN ISSUE: any episode that ends without a fall is reported as reaching the goal, even if it ended for another reason.
     """Run Cliff Walking game episodes."""
     print("\n" + "=" * 60)
     print("🏔️  CLIFF WALKING - Don't fall off!")

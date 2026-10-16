@@ -326,7 +326,7 @@ def main() -> None:
     # trains with GRPOTrainer using env rewards, saves the model and prints first-vs-last-fifth logged rewards; runs the after
     # probe and proxy-gap report; prints a JSON summary; optionally pushes the model and probe folder to the Hub. Always stops
     # the started providers.
-    # KNOWN ISSUE: the summary references the reward list defined only inside the training block, so an earlier failure there would surface as NameError (masked by the original exception only if it propagates first).
+    # KNOWN ISSUE: the summary reads the reward list that is only assigned inside the training block; it is always set there today, but the coupling is implicit.
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ap.add_argument(
         "--model",

@@ -176,6 +176,8 @@ def build_openai_model_step(
     """Build a white-box model step for BrowserGym inference/evaluation."""
 
     def model_step(messages, tools, sampling):
+        # [FUNCTION DOC]
+        # HELPER: The white-box model step described above. Returns a ModelStepResult with the reply text and a single BrowserGym tool call.
         del tools
         completion = client.chat.completions.create(
             model=model,

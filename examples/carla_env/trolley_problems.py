@@ -164,6 +164,8 @@ def run_trolley_no_model(
     import asyncio
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body for the no-model run: reset with merged overrides, drive straight capturing frames, return the EpisodeResult.
         env = CarlaEnv(base_url=base_url)
         async with env:
             reset_kwargs = {"scenario_name": scenario_config.scenario_name}
@@ -269,6 +271,8 @@ def run_trolley_episode(
     import asyncio
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async episode body for the LLM run described above; returns the EpisodeResult.
         env = CarlaEnv(base_url=base_url)
         async with env:
             # Reset to scenario
