@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# EvalHarness implementation that runs evaluations with the Inspect AI library
+# (imported lazily in run). Recognized eval_parameters: model (required), task
+# (defaults to the dataset argument), task_args and model_args (passed only
+# when non-empty), and max_samples, max_connections, temperature, max_tokens,
+# epochs, solver, scorer, model_base_url (passed only when not None).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Inspect AI harness integration for OpenEnv.
@@ -25,6 +31,8 @@ _OPTIONAL_EVAL_KWARGS = (
 
 
 class InspectAIHarness(EvalHarness):
+    # [CLASS DOC]
+    # Inspect AI harness with an optional log directory passed to every eval.
     """Evaluation harness wrapping Inspect AI's ``eval()`` function.
 
     All ``inspect_ai`` imports are deferred to :meth:`run` so this class is
@@ -60,6 +68,8 @@ class InspectAIHarness(EvalHarness):
         *,
         log_dir: Optional[str] = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the optional log_dir.
         self.log_dir = log_dir
 
     def run(
@@ -69,6 +79,13 @@ class InspectAIHarness(EvalHarness):
         dataset: str,
         eval_parameters: Dict[str, Any],
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Imports inspect_ai.eval (ImportError with install hint if missing), requires
+        # eval_parameters["model"] (ValueError), runs eval on the task with the model and
+        # built kwargs, and returns flattened scores from the first log.
+        # Raises: RuntimeError if no logs are returned or the first log's status is not
+        # "success". harness_version and library_versions are not used.
+        # Side effects: runs model evaluations (network/model calls), writes logs.
         """Run an Inspect AI evaluation.
 
         Args:
@@ -119,6 +136,9 @@ class InspectAIHarness(EvalHarness):
         return self._extract_scores(log)
 
     def _build_eval_kwargs(self, eval_parameters: Dict[str, Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds the keyword arguments for inspect_ai.eval from eval_parameters
+        # as described in the module doc, adding log_dir when configured.
         """Build keyword arguments passed through to ``inspect_ai.eval``."""
 
         eval_kwargs: Dict[str, Any] = {}
@@ -138,6 +158,10 @@ class InspectAIHarness(EvalHarness):
         return eval_kwargs
 
     def _extract_scores(self, log: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns {metric name: value} across all scorers in log.results.scores
+        # (empty if results is None). Later scorers overwrite metrics with the same
+        # name.
         """Parse an EvalLog's results into a flat score dictionary.
 
         Iterates over ``log.results.scores`` (a list of ``EvalScore``),

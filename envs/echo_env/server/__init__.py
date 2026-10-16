@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Echo environment server package. Re-exports EchoEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

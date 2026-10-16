@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines the abstract EvalHarness interface for running evaluations and
+# wrapping results.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Base class for evaluation harnesses."""
@@ -9,6 +12,8 @@ from openenv.core.evals.types import EvalConfig, EvalResult
 
 
 class EvalHarness(ABC):
+    # [CLASS DOC]
+    # Abstract evaluation harness; subclasses implement run.
     """Abstract base class for evaluation harnesses.
 
     Subclasses implement run() to define evaluation logic.
@@ -22,6 +27,9 @@ class EvalHarness(ABC):
         dataset: str,
         eval_parameters: Dict[str, Any],
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Abstract: run an evaluation for a harness version, library versions, dataset
+        # and parameters; return a dict of scores.
         """Run the evaluation and return scores.
 
         Args:
@@ -36,6 +44,9 @@ class EvalHarness(ABC):
         raise NotImplementedError
 
     def run_from_config(self, config: EvalConfig) -> EvalResult:
+        # [FUNCTION DOC]
+        # Calls run with the config's fields (harness_name is not passed) and returns
+        # an EvalResult pairing the config with the scores.
         """Run evaluation from an EvalConfig and return an EvalResult.
 
         Args:
@@ -54,5 +65,7 @@ class EvalHarness(ABC):
 
     @property
     def name(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the harness class name.
         """Return the name of the harness (class name)."""
         return self.__class__.__name__

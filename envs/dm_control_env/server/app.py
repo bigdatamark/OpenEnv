@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI app for the dm_control environment (class as session factory; MAX_CONCURRENT_ENVS default 8). Imports
+# through several fallbacks, possibly inserting the env directory into sys.path.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -64,6 +67,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     """
     Entry point for direct execution via uv run or python -m.
 

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Tests for the grid world environment client payloads and web playground.
 # SPDX-License-Identifier: BSD-3-Clause
 
 import pytest
@@ -9,6 +11,12 @@ from envs.grid_world_env.server.grid_world_environment import GridWorldEnvironme
 
 
 def test_grid_world_flow():
+    # [FUNCTION DOC]
+    # Constructs a GridWorldEnv client for a dummy URL (no connection is made),
+    # checks GridWorldAction enum values, and that _step_payload serializes the
+    # action to {"action": "UP"}. Prints a success message.
+    # KNOWN ISSUE: docstring says it tests the full WebSocket flow, but no
+    # reset/step over the network is performed.
     """
     Test the full flow of the Grid World environment using the WebSocket client.
     """
@@ -37,6 +45,9 @@ def test_grid_world_flow():
 
 
 def test_grid_world_web_playground():
+    # [FUNCTION DOC]
+    # web_actions lists the four arrow moves; after moving down render_web draws
+    # the labelled SVG board (see assertions for details).
     env = GridWorldEnvironment()
     obs = env.reset().model_dump()
     assert env.web_actions(obs) == [

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for sophistry_bench_sprint_env: models, client parsing (on uninitialised instances), the
+# single-step advocacy environment (prompt construction, deterministic reset, component metadata with
+# hidden correctness reward unless opted in, env-var validation, weights validation, step-before-reset
+# error), parity with the canonical sophistry_bench_sprint verifiers reward, and wire serialization
+# round trips. Skipped without sophistry_bench_sprint. Side effect at import: prepends the repo root
+# to sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the sophistry-bench sprint OpenEnv environment."""
@@ -43,15 +50,21 @@ _WIRE_KEYS = _ALL_KEYS - {"correctness_reward"}
 
 def _env():
     # Small dataset keeps the test fast; reads the bundled QuALITY split.
+    # [FUNCTION DOC]
+    # HELPER: Builds a SophistryBenchSprintEnvironment with 2 items, 500-character passages and seed 0.
     return SophistryBenchSprintEnvironment(n_items=2, passage_chars=500, seed=0)
 
 
 def test_advocacy_action_carries_text():
+    # [FUNCTION DOC]
+    # AdvocacyAction stores its text.
     a = AdvocacyAction(text="<claim>x</claim>")
     assert a.text == "<claim>x</claim>"
 
 
 def test_advocacy_observation_defaults():
+    # [FUNCTION DOC]
+    # AdvocacyObservation keeps given fields with reward None, not done and empty metadata.
     o = AdvocacyObservation(prompt="P", answer_to_defend="A", item_id="id1")
     assert o.prompt == "P"
     assert o.answer_to_defend == "A"
@@ -63,6 +76,9 @@ def test_advocacy_observation_defaults():
 
 def test_client_parses_step_result():
     # Exercise the pure parsing hooks without a live server.
+    # [FUNCTION DOC]
+    # _step_payload carries the text and _parse_result builds a typed observation with metadata, reward
+    # and done.
     client = SophistryBenchSprintEnv.__new__(SophistryBenchSprintEnv)
     payload = client._step_payload(AdvocacyAction(text="<claim>x</claim>"))
     assert payload["text"] == "<claim>x</claim>"
@@ -90,6 +106,8 @@ def test_client_parses_step_result():
 def test_parse_result_rejects_malformed_payload():
     # A missing/null "observation" is a protocol error: fail loudly, don't build
     # a silently-empty observation.
+    # [FUNCTION DOC]
+    # A missing or null observation raises ValueError.
     client = SophistryBenchSprintEnv.__new__(SophistryBenchSprintEnv)
     with pytest.raises(ValueError):
         client._parse_result({"reward": 0.0, "done": True})
@@ -100,10 +118,15 @@ def test_parse_result_rejects_malformed_payload():
 def test_step_text_is_async():
     # Must be a coroutine function so `await env.step_text(...)` yields a
     # StepResult (not a coroutine) and `.sync()` auto-wraps it like base step().
+    # [FUNCTION DOC]
+    # step_text is a coroutine function.
     assert inspect.iscoroutinefunction(SophistryBenchSprintEnv.step_text)
 
 
 def test_reset_returns_task_observation():
+    # [FUNCTION DOC]
+    # reset gives a non-done observation, no reward, a prompt containing "DEFEND THIS ANSWER" and the
+    # answer, and an item id.
     env = _env()
     obs = env.reset(seed=0)
     assert obs.done is False
@@ -115,6 +138,8 @@ def test_reset_returns_task_observation():
 
 
 def test_reset_is_deterministic_for_fixed_seed():
+    # [FUNCTION DOC]
+    # Two environments reset with the same seed give identical item, answer and prompt.
     a = _env().reset(seed=3)
     b = _env().reset(seed=3)
     assert (a.item_id, a.answer_to_defend, a.prompt) == (
@@ -125,6 +150,9 @@ def test_reset_is_deterministic_for_fixed_seed():
 
 
 def test_step_returns_all_components_and_is_done():
+    # [FUNCTION DOC]
+    # Eight claims and no citations yield done, the wire component keys, n_claims 8, n_citations 0,
+    # aggregate 0.5 and reward 0.5.
     env = _env()
     env.reset(seed=0)
     text = "".join(f"<claim>point {i}</claim>" for i in range(8))  # 8 claims, 0 cites
@@ -144,6 +172,8 @@ def test_step_returns_all_components_and_is_done():
 
 def test_correctness_reward_exposed_only_when_opted_in():
     # Default: hidden ground truth absent from the wire observation.
+    # [FUNCTION DOC]
+    # correctness_reward is hidden by default and present with expose_correctness=True.
     default_env = _env()
     default_env.reset(seed=0)
     obs = default_env.step(AdvocacyAction(text="<claim>x</claim>"))
@@ -162,6 +192,8 @@ def test_correctness_reward_exposed_only_when_opted_in():
 
 def test_malformed_env_vars_raise_with_context(monkeypatch):
     # Bad env-var values should raise a message naming the var, not a bare ValueError.
+    # [FUNCTION DOC]
+    # Non-numeric SPRINT_WEIGHTS or SPRINT_N_ITEMS raise ValueError naming the variable.
     monkeypatch.setenv("SPRINT_WEIGHTS", "1,two,3,4,5,6,7,8")
     with pytest.raises(ValueError, match="SPRINT_WEIGHTS"):
         SophistryBenchSprintEnvironment(n_items=2, passage_chars=500, seed=0)
@@ -174,6 +206,8 @@ def test_malformed_env_vars_raise_with_context(monkeypatch):
 
 def test_wrong_length_weights_rejected():
     # A mis-sized weight vector must raise, not silently truncate via zip.
+    # [FUNCTION DOC]
+    # A weights list of the wrong length raises ValueError.
     with pytest.raises(ValueError):
         SophistryBenchSprintEnvironment(
             n_items=2, passage_chars=500, seed=0, weights=[1.0, 0.0]
@@ -181,6 +215,8 @@ def test_wrong_length_weights_rejected():
 
 
 def test_step_before_reset_errors_gracefully():
+    # [FUNCTION DOC]
+    # step before reset returns a done observation with reward 0 and an error in metadata.
     env = _env()
     obs = env.step(AdvocacyAction(text="<claim>x</claim>"))
     assert obs.done is True
@@ -189,6 +225,10 @@ def test_step_before_reset_errors_gracefully():
 
 
 def test_aggregate_matches_canonical_verifiers_reward():
+    # [FUNCTION DOC]
+    # The environment's passage equals the canonical dataset's first row and its aggregate reward equals
+    # the canonical aggregate_reward function's value for the same completion (unwrapping a RubricGroup
+    # if present).
     """Anti-drift: the OpenEnv aggregate must equal the PI Hub aggregate_reward
     for the passage selected at the same seed (dataset + formula parity)."""
     env = _env()
@@ -225,6 +265,9 @@ def test_aggregate_matches_canonical_verifiers_reward():
 
 
 def test_metadata_survives_wire_serialization_round_trip():
+    # [FUNCTION DOC]
+    # serialize_observation drops metadata but keeps components; the client's _parse_result restores the
+    # wire component keys into metadata and the reward.
     """Lock in the wire contract: the framework strips base ``metadata`` from the
     serialized observation, but the declared ``components`` field survives and the
     typed client re-populates ``metadata`` from it on the way back."""
@@ -255,6 +298,8 @@ def test_metadata_survives_wire_serialization_round_trip():
 
 
 def test_error_survives_wire_serialization_round_trip():
+    # [FUNCTION DOC]
+    # The step-before-reset error is carried in an error field and restored into metadata by the client.
     """The error path declares an ``error`` field so the step-before-reset
     message survives the framework's metadata-stripping serialization and is
     restored into ``metadata`` by the typed client on the way back."""

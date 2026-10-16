@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 5, scientific computing): direct O(N^2) softened
+# gravitational acceleration for 4096 particles.
 """
 N-Body Gravitational Simulation
 
@@ -16,6 +19,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference N-body model with a softening length (default 0.01).
     """
     Computes gravitational acceleration on each particle due to all other particles.
 
@@ -24,11 +29,17 @@ class Model(nn.Module):
     """
 
     def __init__(self, softening: float = 0.01):
+        # [FUNCTION DOC]
+        # Stores softening and its square.
         super(Model, self).__init__()
         self.softening = softening
         self.softening_sq = softening * softening
 
     def forward(self, positions: torch.Tensor, masses: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Builds the (N, N, 3) displacement tensor (entry [i, j] = r_j - r_i), the
+        # softened inverse cubed distance (|d|^2 + eps^2)^-1.5, multiplies by m_j and
+        # sums over j. Returns (N, 3) accelerations (G = 1; self terms contribute zero).
         """
         Compute gravitational accelerations.
 
@@ -71,6 +82,8 @@ num_particles = 4096  # O(N^2) = 16M interactions
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns random normal positions (N, 3) and masses uniform in [0.1, 1.1).
     # Random positions in unit cube
     positions = torch.randn(num_particles, 3)
     # Random masses (positive)
@@ -79,4 +92,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [0.01] (softening).
     return [0.01]  # softening parameter

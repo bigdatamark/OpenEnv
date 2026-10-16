@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models describing an evaluation run's configuration and result
+# (strict: unknown fields rejected, assignment validated).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Pydantic models for eval configuration and results."""
@@ -8,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvalConfig(BaseModel):
+    # [CLASS DOC]
+    # Evaluation configuration: harness name and version, library versions map,
+    # dataset name and free-form evaluation parameters (all required).
     """Configuration for running an evaluation."""
 
     model_config = ConfigDict(
@@ -25,6 +31,8 @@ class EvalConfig(BaseModel):
 
 
 class EvalResult(BaseModel):
+    # [CLASS DOC]
+    # Evaluation result: the EvalConfig used and a scores dict.
     """Result of running an evaluation."""
 
     model_config = ConfigDict(

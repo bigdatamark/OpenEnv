@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the dm_control environment plus AVAILABLE_ENVIRONMENTS, a static list of known
+# (domain, task) pairs from dm_control.suite.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -22,6 +25,8 @@ except ImportError:
 
 
 class DMControlAction(Action):
+    # [CLASS DOC]
+    # Action: list of continuous action values matching the loaded task's action_spec.
     """
     Action for dm_control environments.
 
@@ -47,6 +52,9 @@ class DMControlAction(Action):
 
 
 class DMControlObservation(Observation):
+    # [CLASS DOC]
+    # Observation: mapping of observation names to flattened float lists, and an optional base64 PNG frame
+    # (when rendering is requested); inherits reward, done, metadata.
     """
     Observation from dm_control environments.
 
@@ -77,6 +85,9 @@ class DMControlObservation(Observation):
 
 
 class DMControlState(State):
+    # [CLASS DOC]
+    # State: domain and task names, action_spec (shape, dtype, minimum, maximum, name), observation_spec
+    # (name -> shape, dtype), physics and control timesteps.
     """
     Extended state for dm_control environments.
 

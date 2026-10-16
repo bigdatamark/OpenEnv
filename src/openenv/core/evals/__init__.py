@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Evaluation harness package: re-exports the abstract EvalHarness, the Inspect
+# AI harness, and the EvalConfig / EvalResult models.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Evaluation harness support for OpenEnv."""

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Static check that every envs/*/server/app.py main() takes no parameters and, if it mentions
+# --port, parses argv itself. Builds the APPS list at import by globbing.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -19,6 +22,11 @@ APPS = sorted(ENVS_DIR.glob("*/server/app.py"))
 
 @pytest.mark.parametrize("path", APPS, ids=lambda p: p.parent.parent.name)
 def test_server_main_parses_port(path: pathlib.Path) -> None:
+    # [FUNCTION DOC]
+    # Parametrized per app.py: parses it with ast, finds the top-level main function, asserts it has no
+    # positional parameters and that parse_args appears in it when "--port" does.
+    # KNOWN ISSUE: an app.py without a top-level main raises StopIteration from next() instead of a
+    # clear assertion failure.
     tree = ast.parse(path.read_text(encoding="utf-8"))
     main_def = next(
         node

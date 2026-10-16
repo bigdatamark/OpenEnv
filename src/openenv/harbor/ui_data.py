@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# HELPER: data layer for the Harbor UI: reads inside task directories (task.toml,
+# instruction.md, file tree) to build task list rows and task detail pages, with a
+# process-wide per-dataset row cache; serves single task files safely; decides whether a
+# task would read the server's environment or host files (task.toml and compose-file
+# analysis); searches Harbor datasets and Inference Providers models on the Hub; and adds
+# or removes Hub datasets from the page (background job: layout/size check, bucket copy or
+# download, symlink refusal, indexing). Never runs a sandbox or model.
 """What the Harbor UI shows about a dataset: its tasks, what is in each one, and what a task runs with.
 
 Discovery (`tasks.py`) lists task directories and deliberately reads nothing inside them, because it
@@ -38,6 +46,8 @@ _ROWS_LOCK = threading.Lock()
 
 
 def _hub_not_found(exc: Exception) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the exception is FileNotFoundError or carries an HTTP 404 response.
     """Whether a Hub exception specifically says the requested entry does not exist."""
     if isinstance(exc, FileNotFoundError):
         return True
@@ -46,6 +56,8 @@ def _hub_not_found(exc: Exception) -> bool:
 
 
 def _first_link(root: Path) -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: walks root without following links and returns the first symlink found (file or folder), or None.
     """A symbolic link under `root`, file or folder, without following any; `None` if there is none."""
     folders = [root]
     while folders:
@@ -59,6 +71,9 @@ def _first_link(root: Path) -> Path | None:
 
 
 def _links_a_task(dataset: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if dataset/tasks is a symlink or any direct entry in it is. Raises OSError
+    # if the tasks folder cannot be listed.
     """Whether `dataset/tasks`, or a task folder in it, is a link: what discovery would follow.
 
     One directory listing, so it is cheap enough to ask of every added dataset at startup; links
@@ -72,6 +87,9 @@ def _links_a_task(dataset: Path) -> bool:
 
 
 def _toml(task_dir: Path | None) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: parses the task's task.toml (via the containment-checked own_file); returns {}
+    # on missing/unreadable/invalid files or a None task dir.
     try:
         return tomllib.loads(_own(task_dir, "task.toml").read_text(errors="replace"))
     except (OSError, tomllib.TOMLDecodeError):
@@ -79,6 +97,9 @@ def _toml(task_dir: Path | None) -> dict[str, Any]:
 
 
 def _first_line(task_dir: Path | None, limit: int = 160) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first non-empty line of instruction.md with leading "#" stripped,
+    # truncated to limit; "" if unavailable.
     """The first meaningful line of the instruction, used as a title when a task declares none."""
     try:
         with _own(task_dir, "instruction.md").open(errors="replace") as fh:
@@ -97,6 +118,10 @@ _MD = re.compile(
 
 
 def _paragraphs(task_dir: Path | None, limit: int = 3, chars: int = 360) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: reads the first 6000 chars of instruction.md and returns up to limit prose
+    # paragraphs (skipping headings and fenced code), with basic markdown syntax stripped and
+    # each truncated to chars. Empty list if unreadable.
     """The instruction's first few prose paragraphs as plain text, headings and code left out.
 
     Only the start of the file is read: a brief is two lines on a card.
@@ -127,6 +152,8 @@ def _paragraphs(task_dir: Path | None, limit: int = 3, chars: int = 360) -> list
 
 
 def _strings(value: Any) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns [value] for a string, stringified str/int/float items for a list/tuple, else [].
     if isinstance(value, str):
         return [value]
     if isinstance(value, (list, tuple)):
@@ -135,6 +162,12 @@ def _strings(value: Any) -> list[str]:
 
 
 def task_row(index: int, task_dir: Path, spec: str | None = None) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds a task list row: index, directory name, title (metadata title, task description,
+    # first instruction line, or directory name; max 240 chars), category (category/domain),
+    # difficulty (difficulty/difficulty_tier), up to 8 deduplicated keywords from [task] and
+    # [metadata] (excluding the category), and instruction paragraphs (used for briefs and
+    # removed later). Reads only within the dataset (task_root).
     """One task as the task list shows it.
 
     Harbor's schema fixes `[task]` (name, description, keywords) but leaves `[metadata]` free-form,
@@ -177,6 +210,9 @@ def task_row(index: int, task_dir: Path, spec: str | None = None) -> dict[str, A
 
 
 def _briefs(rows: list[dict[str, Any]]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: in place, replaces each row's paragraphs with a "brief": its first paragraph
+    # (max 220 chars) that is not shared by at least max(3, n/5) rows and does not repeat the title.
     """Give each row a `brief`: its first paragraph that says something about this task.
 
     Many datasets open every instruction with the same preamble ("You are an agent, your working
@@ -205,6 +241,10 @@ def _briefs(rows: list[dict[str, Any]]) -> None:
 
 
 def task_rows(spec: str) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Returns cached rows for a dataset, or resolves its task dirs and builds rows in a thread
+    # pool (OPENENV_UI_INDEX_WORKERS, default 16), adds briefs, and caches them unless the
+    # dataset was invalidated (removed) during indexing. Errors propagate and clear the in-flight marker.
     """Every task in a dataset as the task list shows it, cached per dataset.
 
     Reading one small `task.toml` per task is milliseconds on local disk but far slower on a
@@ -245,6 +285,9 @@ def task_rows(spec: str) -> list[dict[str, Any]]:
 
 
 def common_tags(spec: str) -> set[str]:
+    # [FUNCTION DOC]
+    # Returns keywords carried by at least 90% of a dataset's cached rows; empty when rows are
+    # not cached or there are 3 or fewer tasks.
     """Tags nine in ten of a dataset's tasks carry (`terminal` on a terminal dataset): they tell no two
     tasks apart. Empty until the dataset's rows are cached, and for datasets of three tasks or fewer."""
     with _ROWS_LOCK:
@@ -259,12 +302,20 @@ def common_tags(spec: str) -> set[str]:
 
 
 def _config_sections(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: summarizes task.toml as labelled sections of key/value rows: Environment (image
+    # or "built from Dockerfile", workdir, CPUs, memory, storage, GPUs, network, build timeout),
+    # Agent and Verifier (timeout, user, network), Setup (healthcheck command length and
+    # timeout), MCP servers, and names (not values) of environment/verifier env variables.
+    # Empty values are omitted; times shown in s or min.
     """`task.toml` as the settings a person checks before running: where, with what, for how long."""
     env = doc.get("environment") or {}
     agent = doc.get("agent") or {}
     verifier = doc.get("verifier") or {}
 
     def secs(value: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: formats seconds as "N s", or "N min" when >= 120; "" if not numeric.
         try:
             s = float(value)
         except (TypeError, ValueError):
@@ -368,6 +419,9 @@ def _config_sections(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _row(key: str, value: Any) -> dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: builds a settings row; digest-pinned images are shortened to 12 hex chars with
+    # the full value kept under "full".
     """A settings row. A digest-pinned image is shortened for reading; `full` keeps it for hover."""
     text = str(value)
     if "@sha256:" in text:
@@ -377,6 +431,9 @@ def _row(key: str, value: Any) -> dict[str, str]:
 
 
 def _metadata(doc: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
+    # [FUNCTION DOC]
+    # HELPER: splits [metadata] into shown {key, value} rows (lists joined, dicts skipped,
+    # values truncated to 300, empty skipped) and the names of answer-like keys withheld.
     """Free-form `[metadata]` fields to show, and the answer-like ones withheld from the summary."""
     shown, hidden = [], []
     for key, value in (doc.get("metadata") or {}).items():
@@ -394,6 +451,10 @@ def _metadata(doc: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
 
 
 def file_tree(task_dir: Path) -> tuple[list[dict[str, Any]], bool]:
+    # [FUNCTION DOC]
+    # Walks the resolved task directory (sorted, hidden entries skipped) and returns
+    # ({path, size} for each file, truncated flag), stopping at 2000 files. Symlinks pointing
+    # outside the task and unreadable files are omitted.
     """Files under a task directory as `(path, size)`, capped so a vendored repo cannot flood the page.
 
     Returns:
@@ -421,6 +482,11 @@ def file_tree(task_dir: Path) -> tuple[list[dict[str, Any]], bool]:
 
 
 def task_detail(spec: str, index: int) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds everything the task page shows: the task row (without paragraphs) plus dataset,
+    # description, full instruction text, config sections, shown metadata, withheld keys,
+    # file list and truncation flag. Reads are confined to the dataset; a task outside it has
+    # no files/instruction. Raises IndexError/ValueError for bad split/index.
     """Everything the task view shows for one task. Reads files, runs nothing.
 
     Args:
@@ -459,6 +525,13 @@ def task_detail(spec: str, index: int) -> dict[str, Any]:
 
 
 def reads_environment(spec: str, index: int) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the task could read this server's environment variables or host files:
+    # task folder outside its dataset; task.toml or environment/ resolving outside the task;
+    # unreadable/invalid task.toml or any "${" in it (raw or parsed strings); any path under
+    # environment/ escaping the task; any YAML file there that is too large (> 1 MB),
+    # unparsable, matches a compose text pattern (variables, env_file/include/extends, host
+    # bind mounts) or whose parsed content reads the host (_compose_reads). False otherwise.
     """Whether a task would read this server's environment variables or files.
 
     Harbor resolves `${VAR}` in `task.toml` (`[verifier.env]`, `[environment.env]`) from the process
@@ -557,6 +630,8 @@ _NAMESPACES = {"pid", "ipc", "network_mode", "userns_mode", "uts", "cgroup", "ne
 
 
 def _outside(path: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if a compose path is absolute, under ~, a Windows drive path, or normalizes to climb out of its folder.
     """Whether a path in a compose file points outside its own folder: absolute, under `~`, a
     Windows drive, or climbing out once normalised (`foo/../../etc` is `../etc`)."""
     p = path.strip().replace("\\", "/")
@@ -567,6 +642,8 @@ def _outside(path: str) -> bool:
 
 
 def _every_string(node: Any):
+    # [FUNCTION DOC]
+    # HELPER: generator yielding every string (keys and values) in a parsed document.
     """Every string in a parsed document, keys included."""
     if isinstance(node, str):
         yield node
@@ -580,6 +657,9 @@ def _every_string(node: Any):
 
 
 def _passes_host_env(value: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if an environment/args entry passes host values: a bare string, a list
+    # entry without "=" (or non-string), or a mapping entry with a null value.
     """An `environment:` / `args:` entry that takes its value from the host.
 
     A bare name in the list form (`- HF_TOKEN`) or an empty value in the map form (`HF_TOKEN:`)
@@ -595,6 +675,13 @@ def _passes_host_env(value: Any) -> bool:
 
 
 def _compose_reads(node: Any, seen: set[int]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: recursively decides whether a parsed compose node reads host variables or files:
+    # any string containing "$"; keys env_file/include/extends/devices; host-passing
+    # environment/args; truthy host-access settings (privileged, cap_add, etc.); external
+    # resources; host or container namespaces; named volumes with settings; networks with a
+    # name or non-bridge/overlay driver; local build caches; volume entries or path keys
+    # pointing outside; outside additional_contexts. Each dict/list is visited once (alias-bomb safe).
     """Whether a parsed compose document reads the host's variables or files.
 
     YAML aliases share nodes, so each container is walked once: an alias bomb that is tiny on disk
@@ -674,6 +761,10 @@ def _compose_reads(node: Any, seen: set[int]) -> bool:
 
 
 def read_task_file(spec: str, index: int, path: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a task file for the viewer: refuses (error dict) paths resolving outside the task
+    # or not regular files; reads up to 256 KiB; returns binary True when a NUL byte appears
+    # in the first 8 KiB, else UTF-8 text (with replacement) and whether it was truncated, plus size.
     """One file from a task directory, for the file viewer.
 
     The path comes from the browser, so it is resolved and checked to stay inside the task
@@ -709,6 +800,10 @@ def read_task_file(spec: str, index: int, path: str) -> dict[str, Any]:
 
 
 def search_hub(query: str = "", limit: int = 40) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Lists Hub datasets tagged "harbor" anonymously, optionally filtered by query, sorted by
+    # downloads, limit clamped to 1-100. Returns id, downloads, likes and rl-environment tag
+    # flag. Network call; Hub errors propagate.
     """Harbor datasets on the Hugging Face Hub, most downloaded first.
 
     Harbor datasets carry the `harbor` tag (and usually `rl-environment`), which is what makes them
@@ -749,6 +844,12 @@ _MODELS_LOCK = threading.Lock()
 
 
 def hf_models(ttl: float = 600.0) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Returns the Inference Providers chat model list from the HF router (cached for ttl
+    # seconds, process-wide): per model id, live providers with tool support, context length
+    # and prices, whether any provider supports tools, and max context; non-text-output and
+    # provider-less models skipped; sorted tool-capable first then by provider count.
+    # Network errors propagate.
     """Chat models on Hugging Face Inference Providers, for the model picker.
 
     The router's model list is public and says, per provider, whether it is live, whether it calls
@@ -817,6 +918,8 @@ MAX_ADDS_AT_ONCE = 2
 
 
 def _max_add_bytes() -> int:
+    # [FUNCTION DOC]
+    # HELPER: returns the add size cap in bytes from OPENENV_HARBOR_UI_MAX_ADD_GB (default 5 GB; invalid -> 5 GB).
     try:
         return int(float(os.environ.get("OPENENV_HARBOR_UI_MAX_ADD_GB") or 5) * 1e9)
     except ValueError:
@@ -824,6 +927,11 @@ def _max_add_bytes() -> int:
 
 
 def hub_summary(spec: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Anonymously inspects a Hub dataset: tasks = number of tasks/<name>/ folders whose first
+    # contains task.toml, or (grouped layout) the count of task.toml files found in a bounded
+    # recursive listing (None if zero or no tasks folder); bytes = the repo's used storage.
+    # Non-404 Hub errors propagate.
     """What adding a Hub dataset would bring: `tasks` held as `tasks/<name>/`, the layout Harbor
     loads (`None` when it has none), and the repository's size in `bytes`.
 
@@ -872,6 +980,9 @@ def hub_summary(spec: str) -> dict[str, Any]:
 
 
 def _tasks_bytes(spec: str, cap: int, max_files: int = 500_000) -> int | None:
+    # [FUNCTION DOC]
+    # HELPER: sums file sizes in the dataset's tasks/ listing, returning early once above cap;
+    # None if the listing fails or exceeds max_files entries.
     """The size of a Hub dataset's `tasks/` folder from its file listing, or `None` if unknown.
 
     Stops counting once the total passes `cap`, since that already settles the question; a listing
@@ -899,6 +1010,9 @@ def _tasks_bytes(spec: str, cap: int, max_files: int = 500_000) -> int | None:
 
 
 def _progress(job: dict[str, Any]) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: returns a tqdm subclass that writes to a buffer and records the Hub download's
+    # file-count progress (total, done) into job, ignoring byte-unit bars.
     """A silent tqdm that records the Hub download's file count in `job`.
 
     The Hub client uses the same class for each large file's byte counter (`unit="B"`), so only the
@@ -909,7 +1023,12 @@ def _progress(job: dict[str, Any]) -> Any:
     from tqdm import tqdm
 
     class Progress(tqdm):
+        # [CLASS DOC]
+        # HELPER: silent tqdm recording file counts into the job dict.
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            # [FUNCTION DOC]
+            # Redirects output to a StringIO, forces enabled, notes whether this bar counts files,
+            # and stores its total in the job.
             kwargs["file"] = io.StringIO()
             kwargs.pop("disable", None)
             self._files = kwargs.get("unit", "it") != "B"
@@ -918,6 +1037,8 @@ def _progress(job: dict[str, Any]) -> Any:
                 job["total"] = int(self.total)
 
         def update(self, n: float | None = 1) -> bool | None:
+            # [FUNCTION DOC]
+            # Updates the bar and, for the file bar, stores the current count in the job.
             out = super().update(n)
             if self._files:
                 job["done"] = int(self.n)
@@ -927,6 +1048,9 @@ def _progress(job: dict[str, Any]) -> Any:
 
 
 def added_spec(spec: str, settings: Any) -> str:
+    # [FUNCTION DOC]
+    # Returns the loader spec for a dataset added from the page: the bucket mount folder
+    # (<mount>/<org>__<name>) when a bucket is mounted, else the Hub id.
     """What the loader is given for a Hub dataset added from the page.
 
     With the Space's bucket mounted, the dataset's folder on the mount, the same place `push` puts
@@ -938,12 +1062,17 @@ def added_spec(spec: str, settings: Any) -> str:
 
 
 def hub_id(spec: str) -> str:
+    # [FUNCTION DOC]
+    # Converts a "/.../org__name" mount path back to "org/name"; other specs are returned unchanged.
     """The Hub id a dataset spec stands for: `org/name` for a `/data/org__name` mount folder."""
     name = Path(spec).name if spec.startswith("/") else ""
     return name.replace("__", "/", 1) if "__" in name else spec
 
 
 def added_in_bucket(settings: Any, served: list[str]) -> list[str]:
+    # [FUNCTION DOC]
+    # Lists bucket mount folders named org__name with a tasks/ directory that are not served
+    # datasets (by path or Hub id) and contain no linked task folders. Empty without a mounted bucket.
     """Datasets on the mounted bucket that the server was not started with: the ones added from the
     page. The bucket itself is the list, so it survives restarts and needs no file of its own."""
     mount = settings.bucket_mount
@@ -968,6 +1097,8 @@ def added_in_bucket(settings: Any, served: list[str]) -> list[str]:
 
 
 def _forget(spec: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: drops a dataset from the task-dir cache and the UI row caches.
     from . import tasks
 
     with tasks._LOCK:
@@ -978,6 +1109,11 @@ def _forget(spec: str) -> None:
 
 
 def remove_added(spec: str, settings: Any) -> None:
+    # [FUNCTION DOC]
+    # Deletes a dataset added from the page: for a bucket mount folder (must sit directly in
+    # the mount and be named org__name, else ValueError) deletes all its bucket files in
+    # batches of 1000 via the Hub API; otherwise removes the local download folder in the
+    # dataset cache (must sit directly in it, else ValueError). Then clears caches.
     """Delete a dataset added from the page: its folder in the bucket, or its local download.
 
     Only ever a folder this module put there: one under the bucket mount named `org__name`, or one in
@@ -1016,6 +1152,10 @@ def remove_added(spec: str, settings: Any) -> None:
 def _copy_to_bucket(
     spec: str, settings: Any, job: dict[str, Any], expected: int
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: server-side copies the dataset's tasks/ into the bucket under org__name/tasks/,
+    # then polls the mount every 3s for up to 180s until it shows at least the expected number
+    # of tasks; returns the folder path or raises ValueError on timeout. Updates job state.
     """Copy a Hub dataset into the Space's bucket, server side, and wait for the mount to show it.
 
     The same copy `push` makes for the datasets it serves: by content hash, so nothing is downloaded
@@ -1053,6 +1193,13 @@ def _copy_to_bucket(
 
 
 def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Starts (or returns the in-progress) background add of a Hub dataset. Refuses with an
+    # error dict when MAX_ADDS_AT_ONCE adds are running. The thread checks the layout (error
+    # without tasks), size (Hub size or measured; error if unknown or above the cap), copies
+    # into the bucket or downloads with progress, refuses and removes the copy if it contains
+    # any symlink, indexes the tasks, calls on_added(target) and marks done; any exception is
+    # recorded in the job as an error (message max 240 chars). Returns a copy of the job dict.
     """Start adding `spec` in the background, or return the add already under way.
 
     `on_added(loader_spec)` is called once its tasks are read. The caller has checked that `spec` is a
@@ -1084,6 +1231,8 @@ def start_add(spec: str, on_added: Any, settings: Any = None) -> dict[str, Any]:
         _JOBS[spec] = job
 
     def run() -> None:
+        # [FUNCTION DOC]
+        # HELPER: thread body performing the add steps described above.
         try:
             summary = hub_summary(spec)
             expected = summary["tasks"]
@@ -1153,6 +1302,8 @@ _NO_BUCKET = type("NoBucket", (), {"bucket": None, "bucket_mount": None})()
 
 
 def add_status(spec: str) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # Returns a copy of the add job for spec, or None.
     with _JOBS_LOCK:
         job = _JOBS.get(spec)
         return dict(job) if job else None

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# MCP client for the echo environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,6 +32,8 @@ from openenv.core.mcp_client import MCPToolClient
 
 
 class EchoEnv(MCPToolClient):
+    # [CLASS DOC]
+    # MCPToolClient subclass with no additions (list_tools, call_tool, reset, step come from the base).
     """
     Client for the Echo Environment.
 

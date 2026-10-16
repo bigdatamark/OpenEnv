@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests that Harbor code paths reachable from a server's running event loop
+# never call asyncio.run (they must use run_async_safely), that
+# run_async_safely works inside a running loop, and that the cloudflare
+# forwarder builds a "cloudflared tunnel --url" command. Skipped without
+# openenv.harbor.tasks.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -24,6 +30,10 @@ pytest.importorskip("openenv.harbor.tasks")
 
 
 def sources_reachable_from_a_server() -> dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: returns a mapping from a label to the source text (via
+    # inspect.getsource) of HarborEnvironment._run_rollout, tasks._registry_task_dirs
+    # and HarborEnv._call. Also called at collection time for parametrization.
     """Source of the functions a request can reach, where a loop is already running."""
     from openenv.harbor import environment, tasks
     from openenv.harbor.client import HarborEnv
@@ -39,6 +49,8 @@ def sources_reachable_from_a_server() -> dict[str, str]:
 
 @pytest.mark.parametrize("name", sorted(sources_reachable_from_a_server()))
 def test_no_bare_asyncio_run_on_a_server_reachable_path(name):
+    # [FUNCTION DOC]
+    # Asserts the named function's source has no "asyncio.run(" call.
     """`asyncio.run` here is a runtime error under ASGI, not a style preference."""
     source = sources_reachable_from_a_server()[name]
     assert "asyncio.run(" not in source, (
@@ -48,14 +60,20 @@ def test_no_bare_asyncio_run_on_a_server_reachable_path(name):
 
 
 def test_run_async_safely_works_with_a_loop_already_running():
+    # [FUNCTION DOC]
+    # run_async_safely called inside a coroutine run by asyncio.run returns "ok".
     """The property the helper exists for, exercised the way a server would hit it."""
     from openenv.core.utils import run_async_safely
 
     async def inner() -> str:
+        # [FUNCTION DOC]
+        # Async: yields once and returns "ok".
         await asyncio.sleep(0)
         return "ok"
 
     async def outer() -> str:
+        # [FUNCTION DOC]
+        # Async: returns run_async_safely(inner()).
         # A loop is running right now, which is exactly when asyncio.run would raise.
         return run_async_safely(inner())
 
@@ -63,12 +81,18 @@ def test_run_async_safely_works_with_a_loop_already_running():
 
 
 def test_bare_asyncio_run_would_have_failed_here():
+    # [FUNCTION DOC]
+    # Nested asyncio.run raises RuntimeError "cannot be called from a running event loop".
     """Pins the failure mode, so the test above cannot be mistaken for a tautology."""
 
     async def inner() -> str:
+        # [FUNCTION DOC]
+        # Async: returns "ok".
         return "ok"
 
     async def outer() -> str:
+        # [FUNCTION DOC]
+        # Async: calls asyncio.run(inner()), which raises.
         return asyncio.run(inner())
 
     with pytest.raises(
@@ -79,6 +103,11 @@ def test_bare_asyncio_run_would_have_failed_here():
 
 # --- port forwarding --------------------------------------------------------
 def test_cloudflare_quick_forward_uses_the_tunnel_subcommand():
+    # [FUNCTION DOC]
+    # Replaces subprocess.Popen globally (restored in finally) with a recorder that
+    # raises, disables preflight, calls CloudflareForwarder.start, and asserts the
+    # command uses "tunnel --url" and not "forward". Skipped without the
+    # forwarding module.
     """`cloudflared forward` is an alias for `cloudflared access`, a different feature entirely.
 
     Invoked that way the process prints `Incorrect Usage. flag provided but not defined: -url` and
@@ -90,18 +119,26 @@ def test_cloudflare_quick_forward_uses_the_tunnel_subcommand():
     recorded: list[list[str]] = []
 
     class _Proc:
+        # [CLASS DOC]
+        # Unused fake process stub with poll returning None and a no-op terminate.
         stdout = None
 
         def poll(self):
+            # [FUNCTION DOC]
+            # Returns None (still running).
             return None
 
         def terminate(self):
+            # [FUNCTION DOC]
+            # No-op.
             pass
 
     forwarder = forwarding.CloudflareForwarder()
     forwarder.preflight = lambda *_a, **_k: None
 
     def fake_popen(cmd, **_kwargs):
+        # [FUNCTION DOC]
+        # Records the command and raises RuntimeError.
         recorded.append(cmd)
         raise RuntimeError("stop here; the command line is what matters")
 

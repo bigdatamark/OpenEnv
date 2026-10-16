@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# kernrl problem (level 5): ray versus bounding-volume-hierarchy traversal
+# (65536 rays, 1023-node complete binary tree of random boxes) returning the
+# closest leaf-box entry distance per ray. The reference loops over rays in
+# Python with an explicit stack.
 """
 Bounding Volume Hierarchy (BVH) Traversal for Ray-Box Intersection
 
@@ -18,6 +23,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference BVH traversal model storing the node count.
     """
     BVH traversal for ray-AABB intersection testing.
 
@@ -26,6 +33,8 @@ class Model(nn.Module):
     """
 
     def __init__(self, num_nodes: int = 1023):
+        # [FUNCTION DOC]
+        # Stores num_nodes (default 1023).
         super(Model, self).__init__()
         self.num_nodes = num_nodes  # 2^10 - 1 for 10 levels
 
@@ -39,6 +48,12 @@ class Model(nn.Module):
         bvh_right: torch.Tensor,
         bvh_is_leaf: torch.Tensor,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # For each ray, computes the inverse direction (direction + 1e-10), pops nodes
+        # from a stack starting at the root, applies the slab test to the node's box,
+        # and if hit (t_near <= t_far, t_far >= 0, t_near closer than the best so far)
+        # either records max(0, t_near) for a leaf or pushes valid children. Returns a
+        # (N,) tensor of closest hit distances (inf if none).
         """
         Traverse BVH for each ray and return closest intersection.
 
@@ -109,6 +124,11 @@ num_bvh_nodes = 1023  # Binary tree with 10 levels
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns random rays (normal origins, normalized normal directions), random
+    # boxes (min corner normal - 1, extent uniform up to 2 per axis) and implicit
+    # heap-ordered child indices (children of i are 2i+1 and 2i+2; nodes without
+    # children are leaves with -1 children).
     # Random rays
     ray_origins = torch.randn(num_rays, 3)
     ray_directions = torch.randn(num_rays, 3)
@@ -146,4 +166,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [num_bvh_nodes].
     return [num_bvh_nodes]

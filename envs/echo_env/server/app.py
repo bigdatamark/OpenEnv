@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI app for the echo environment using MCP call-tool action/observation types, a plain Observation for
+# reset, and MAX_CONCURRENT_ENVS (default 8) sessions. Supports in-repo and standalone imports.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -54,6 +57,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     """
     Entry point for direct execution via uv run or python -m.
 

@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# dm_control environment server package. Re-exports DMControlEnvironment.
 """dm_control OpenEnv server module."""
 
 from .dm_control_environment import DMControlEnvironment

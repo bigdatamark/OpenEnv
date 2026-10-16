@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 5): one Conjugate Gradient iteration on a dense
+# 4096 x 4096 symmetric positive definite system.
 """
 Conjugate Gradient Solver Step
 
@@ -18,6 +21,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference CG step model. No parameters.
     """
     One iteration of the Conjugate Gradient method.
 
@@ -35,6 +40,8 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(
@@ -45,6 +52,13 @@ class Model(nn.Module):
         p: torch.Tensor,
         rsold: torch.Tensor,
     ) -> tuple:
+        # [FUNCTION DOC]
+        # Computes Ap = A @ p, alpha = rsold / (p . Ap), x_new = x + alpha p,
+        # r_new = r - alpha Ap, rsnew = r_new . r_new, p_new = r_new + (rsnew/rsold) p.
+        # Returns the tuple (x_new, r_new, p_new, rsnew).
+        # KNOWN ISSUE: the evaluator compares outputs by converting non-tensor outputs
+        # with torch.tensor, which fails for a tuple of tensors, so this problem's
+        # correctness check cannot pass as written.
         """
         Perform one CG iteration.
 
@@ -86,6 +100,10 @@ matrix_size = 4096
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Builds an SPD matrix A = Q D Q^T (Q orthogonal via QR, eigenvalues in
+    # [0.1, 1.1)), random x and b, residual r = b - A x, p = r and rsold = r . r.
+    # Returns [A, x, r, p, rsold].
     # Create a symmetric positive definite matrix
     # A = Q @ D @ Q.T where D has positive eigenvalues
     Q = torch.randn(matrix_size, matrix_size)
@@ -104,4 +122,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

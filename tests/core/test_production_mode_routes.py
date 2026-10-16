@@ -724,9 +724,13 @@ class TestHTTPMCPEndpoint:
 
 
 class TestHTTPMCPSessionLifecycle:
+    # [CLASS DOC]
+    # Tests openenv/session/create and openenv/session/close over /mcp and WebSockets.
     """Tests for openenv/session/create and openenv/session/close methods."""
 
     def test_session_create_returns_session_id(self, app):
+        # [FUNCTION DOC]
+        # session/create returns a non-empty string session id.
         """Test openenv/session/create returns a non-empty session_id."""
         from starlette.testclient import TestClient
 
@@ -749,6 +753,8 @@ class TestHTTPMCPSessionLifecycle:
         assert len(data["result"]["session_id"]) > 0
 
     def test_session_tools_call_with_session_id(self, app):
+        # [FUNCTION DOC]
+        # tools/call with an explicit session id works.
         """Test tools/call works with an explicit session_id."""
         from starlette.testclient import TestClient
 
@@ -787,6 +793,8 @@ class TestHTTPMCPSessionLifecycle:
         assert "5" in str(data["result"]) or data["result"] == 5
 
     def test_session_close_returns_closed_true(self, app):
+        # [FUNCTION DOC]
+        # session/close returns the session id with closed true.
         """Test openenv/session/close returns closed: true."""
         from starlette.testclient import TestClient
 
@@ -822,6 +830,8 @@ class TestHTTPMCPSessionLifecycle:
         assert data["result"]["closed"] is True
 
     def test_session_close_unknown_id_returns_error(self, app):
+        # [FUNCTION DOC]
+        # Closing an unknown id returns error -32602.
         """Test closing a bogus session_id returns an error."""
         from starlette.testclient import TestClient
 
@@ -842,6 +852,8 @@ class TestHTTPMCPSessionLifecycle:
         assert data["error"]["code"] == -32602  # INVALID_PARAMS
 
     def test_session_create_from_websocket_is_idempotent(self, app):
+        # [FUNCTION DOC]
+        # session/create over a WebSocket returns the connection's existing session id every time.
         """Test openenv/session/create over WebSocket returns the existing session id."""
         from starlette.testclient import TestClient
 
@@ -895,6 +907,9 @@ class TestHTTPMCPSessionLifecycle:
             assert response2["data"]["result"]["session_id"] == ws_session_id
 
     def test_websocket_can_attach_to_http_session_without_destroying_it(self, app):
+        # [FUNCTION DOC]
+        # A WebSocket attached via the session_id query parameter shares the HTTP session; closing it over
+        # HTTP while attached reports closing (not closed), and the session is gone after the socket closes.
         """An attached WebSocket shares and preserves an HTTP-created session."""
         client = TestClient(app)
         create_response = client.post(
@@ -962,6 +977,8 @@ class TestHTTPMCPSessionLifecycle:
         )
 
     def test_http_session_allows_only_one_attached_websocket(self, app):
+        # [FUNCTION DOC]
+        # A second WebSocket attaching to the same session gets an "already has an attached WebSocket" error.
         """A second WebSocket cannot concurrently mutate the same session."""
         client = TestClient(app)
         create_response = client.post(
@@ -998,6 +1015,8 @@ class TestHTTPMCPSessionLifecycle:
         assert close_response.json()["result"]["closed"] is True
 
     def test_websocket_still_destroys_its_own_session(self, app):
+        # [FUNCTION DOC]
+        # A session created by a WebSocket is destroyed when that socket closes.
         """A WebSocket-created session is destroyed when the socket closes."""
         client = TestClient(app)
 
@@ -1028,6 +1047,8 @@ class TestHTTPMCPSessionLifecycle:
         assert tools_response.json()["error"]["code"] == -32602
 
     def test_session_close_missing_session_id_param(self, app):
+        # [FUNCTION DOC]
+        # session/close without session_id returns -32602 mentioning session_id.
         """Test openenv/session/close without session_id returns INVALID_PARAMS."""
         from starlette.testclient import TestClient
 
@@ -1049,6 +1070,8 @@ class TestHTTPMCPSessionLifecycle:
         assert "session_id" in data["error"]["message"].lower()
 
     def test_session_double_close_returns_error(self, app):
+        # [FUNCTION DOC]
+        # A second close of the same session returns -32602.
         """Test closing the same session twice returns an error on the second close."""
         from starlette.testclient import TestClient
 
@@ -1093,6 +1116,8 @@ class TestHTTPMCPSessionLifecycle:
         assert data2["error"]["code"] == -32602  # INVALID_PARAMS
 
     def test_tools_call_after_close_returns_error(self, app):
+        # [FUNCTION DOC]
+        # tools/call on a closed session returns an error.
         """Test tools/call with a closed session_id returns an error."""
         from starlette.testclient import TestClient
 
@@ -1143,6 +1168,8 @@ class TestHTTPMCPSessionLifecycle:
 
 
 class TestMCPSessionTransportPersistence:
+    # [CLASS DOC]
+    # Tests that FastMCP per-session state persists across calls within one OpenEnv session.
     """Tests for MCP transport persistence across HTTP calls.
 
     After the lifecycle fix, HTTP MCP paths hold mcp_session() open for the
@@ -1156,6 +1183,8 @@ class TestMCPSessionTransportPersistence:
 
     @pytest.fixture
     def stateful_mcp_app(self):
+        # [FUNCTION DOC]
+        # Fixture creating an app whose MCP tool inc_counter increments a counter kept in FastMCP context state.
         """App with a stateful MCP tool that uses ctx.set_state/get_state."""
         from fastmcp import Context, FastMCP
         from openenv.core.env_server.http_server import create_fastapi_app
@@ -1165,25 +1194,37 @@ class TestMCPSessionTransportPersistence:
 
         @mcp.tool
         async def inc_counter(ctx: Context) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Reads the per-session counter from context state (default 0), stores counter+1 and returns it as a string.
             """Increment a per-session counter and return the new value."""
             count = (await ctx.get_state("counter")) or 0
             await ctx.set_state("counter", count + 1)
             return str(count + 1)
 
         class StatefulMCPEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the stateful FastMCP server.
                 super().__init__(mcp)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 return State(step_count=0)
 
         return create_fastapi_app(
@@ -1193,6 +1234,8 @@ class TestMCPSessionTransportPersistence:
         )
 
     async def test_http_session_mcp_state_persists_across_calls(self, stateful_mcp_app):
+        # [FUNCTION DOC]
+        # Two HTTP tools/call requests in one session (via an async ASGI client) return "1" then "2".
         """Two HTTP tool calls in the same session should share MCP session state.
 
         inc_counter uses ctx.set_state() to track a per-session counter.
@@ -1267,6 +1310,8 @@ class TestMCPSessionTransportPersistence:
             )
 
     def test_websocket_mcp_state_persists_across_calls(self, stateful_mcp_app):
+        # [FUNCTION DOC]
+        # Two WebSocket tools/call messages return "1" then "2".
         """WebSocket correctly persists MCP session state (control test).
 
         Should PASS: the WebSocket path holds mcp_session() open for the
@@ -1320,6 +1365,8 @@ class TestMCPSessionTransportPersistence:
             )
 
     async def test_concurrent_close_during_tool_call(self, stateful_mcp_app):
+        # [FUNCTION DOC]
+        # Concurrent tools/call (slow tool) and session/close both return well-formed 200 JSON-RPC responses.
         """Concurrent session/close during active tool call returns clean responses.
 
         Fires tools/call and session/close concurrently on the same session.
@@ -1339,24 +1386,36 @@ class TestMCPSessionTransportPersistence:
 
         @mcp.tool
         async def slow_add(a: int, b: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Sleeps 0.3s then returns a+b.
             """Add two numbers with a delay to widen the race window."""
             await asyncio.sleep(0.3)
             return a + b
 
         class SlowMCPEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the slow FastMCP server.
                 super().__init__(mcp)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 return State(step_count=0)
 
         app = create_fastapi_app(
@@ -1383,6 +1442,8 @@ class TestMCPSessionTransportPersistence:
 
             # Fire tool call and close concurrently
             async def delayed_close():
+                # [FUNCTION DOC]
+                # HELPER: Waits 0.05s then posts session/close for the session.
                 await asyncio.sleep(0.05)  # ensure tool call starts first
                 return await http.post(
                     "/mcp",
@@ -1428,6 +1489,8 @@ class TestMCPSessionTransportPersistence:
 
 
 class TestMCPSessionResourceLeaks:
+    # [CLASS DOC]
+    # Tests resource cleanup for session creation failures.
     """Tests for resource cleanup on session creation failures and edge cases.
 
     These tests verify the fixes for:
@@ -1438,6 +1501,9 @@ class TestMCPSessionResourceLeaks:
     """
 
     async def test_create_session_cleans_up_on_mcp_transport_failure(self):
+        # [FUNCTION DOC]
+        # If mcp_session raises during _create_session, the error propagates and no session, executor or
+        # exit stack remains; active session count is 0.
         """If mcp_session() throws during _create_session, the session slot,
         env, and executor must all be cleaned up — not leaked permanently
         against _max_concurrent_envs.
@@ -1453,23 +1519,35 @@ class TestMCPSessionResourceLeaks:
 
         @mcp.tool
         def noop() -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool returning "ok".
             """A tool that does nothing."""
             return "ok"
 
         class BrokenTransportEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the FastMCP server.
                 super().__init__(mcp)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 return State(step_count=0)
 
         server = HTTPEnvServer(
@@ -1485,6 +1563,8 @@ class TestMCPSessionResourceLeaks:
         # Patch mcp_session to simulate an unreachable MCP server
 
         async def failing_mcp_session(self_env):
+            # [FUNCTION DOC]
+            # HELPER: Async generator that raises ConnectionError immediately (wrapped as a failing context manager).
             raise ConnectionError("MCP server unreachable")
             yield  # make it a generator (never reached)
 
@@ -1512,6 +1592,12 @@ class TestMCPSessionResourceLeaks:
         assert status.active_sessions == 0
 
     async def test_close_during_init_preserves_executor(self):
+        # [FUNCTION DOC]
+        # Simulates closing a still-initializing session (None placeholder) and checks the executor is
+        # re-inserted with the placeholder.
+        # KNOWN ISSUE: the test re-implements the pop/re-insert logic inline instead of exercising the
+        # server's close handler; the built JsonRpcRequest and app are unused and SlowInitEnv is never
+        # instantiated, so it does not verify server behavior.
         """When session/close fires for a still-initializing session (env is
         None), the executor must be re-inserted alongside the None placeholder
         so it remains tracked for eventual shutdown.
@@ -1527,6 +1613,8 @@ class TestMCPSessionResourceLeaks:
 
         @mcp.tool
         def ping() -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool returning "pong".
             """Ping."""
             return "pong"
 
@@ -1534,9 +1622,13 @@ class TestMCPSessionResourceLeaks:
         asyncio.Event()
 
         class SlowInitEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the server, signals init_event, then blocks up to 5s on a threading event that is never set.
                 super().__init__(mcp)
                 # Signal that init has started, then block until released
                 init_event.set()
@@ -1547,13 +1639,19 @@ class TestMCPSessionResourceLeaks:
                 self._threading_event.wait(timeout=5)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 return State(step_count=0)
 
         server = HTTPEnvServer(
@@ -1624,11 +1722,17 @@ class TestMCPSessionResourceLeaks:
 
 
 class TestHTTPMCPSessionReaper:
+    # [CLASS DOC]
+    # Tests the idle-session reaper.
     """Tests for the idle-session reaper (originally in TestHTTPMCPSessionLifecycle)."""
 
     async def test_idle_session_reaper_destroys_stale_sessions(
         self, mock_fastmcp_server
     ):
+        # [FUNCTION DOC]
+        # A session idle beyond the timeout is destroyed.
+        # KNOWN ISSUE: the test reimplements the reaper's stale-session loop inline rather than calling
+        # the server's reaper method, so it only exercises _destroy_session.
         """Test that _reap_idle_sessions destroys sessions past the timeout."""
         import asyncio
         import time as _time
@@ -1638,19 +1742,29 @@ class TestHTTPMCPSessionReaper:
         from openenv.core.env_server.types import ConcurrencyConfig
 
         class ReaperTestEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the fixture FastMCP server.
                 super().__init__(mock_fastmcp_server)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 from openenv.core.env_server.types import State
 
                 return State(step_count=0)
@@ -1693,25 +1807,37 @@ class TestHTTPMCPSessionReaper:
         assert session_id not in server._sessions
 
     async def test_reaper_stop_cancels_task(self, mock_fastmcp_server):
+        # [FUNCTION DOC]
+        # With a timeout, _start_reaper creates a running task and _stop_reaper clears it.
         """Test that _stop_reaper cancels the running reaper task."""
         from openenv.core.env_server.http_server import HTTPEnvServer
         from openenv.core.env_server.mcp_environment import MCPEnvironment
         from openenv.core.env_server.types import ConcurrencyConfig
 
         class ReaperTestEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the fixture FastMCP server.
                 super().__init__(mock_fastmcp_server)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 from openenv.core.env_server.types import State
 
                 return State(step_count=0)
@@ -1734,25 +1860,37 @@ class TestHTTPMCPSessionReaper:
         assert server._reaper_task is None
 
     async def test_reaper_noop_when_no_timeout(self, mock_fastmcp_server):
+        # [FUNCTION DOC]
+        # With no timeout, _start_reaper creates no task.
         """Test that _start_reaper is a no-op when session_timeout is None."""
         from openenv.core.env_server.http_server import HTTPEnvServer
         from openenv.core.env_server.mcp_environment import MCPEnvironment
         from openenv.core.env_server.types import ConcurrencyConfig
 
         class ReaperTestEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Wraps the fixture FastMCP server.
                 super().__init__(mock_fastmcp_server)
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 from openenv.core.env_server.types import State
 
                 return State(step_count=0)
@@ -1773,9 +1911,13 @@ class TestHTTPMCPSessionReaper:
 
 
 class TestWebSocketMCP:
+    # [CLASS DOC]
+    # Tests "mcp" messages on /ws.
     """Tests for WebSocket MCP message handling."""
 
     def test_websocket_mcp_message_type(self, app):
+        # [FUNCTION DOC]
+        # An "mcp" message gets an "mcp" JSON-RPC 2.0 response.
         """Test WebSocket accepts 'mcp' message type."""
         from starlette.testclient import TestClient
 
@@ -1799,6 +1941,8 @@ class TestWebSocketMCP:
             assert response["data"]["jsonrpc"] == "2.0"
 
     def test_websocket_mcp_tools_list(self, app):
+        # [FUNCTION DOC]
+        # tools/list over WebSocket returns tools.
         """Test tools/list via WebSocket MCP message."""
         from starlette.testclient import TestClient
 
@@ -1821,6 +1965,8 @@ class TestWebSocketMCP:
             assert "tools" in response["data"]["result"]
 
     def test_websocket_mcp_tools_call(self, app):
+        # [FUNCTION DOC]
+        # tools/call greet returns a greeting with the name.
         """Test tools/call via WebSocket MCP message."""
         from starlette.testclient import TestClient
 
@@ -1851,6 +1997,8 @@ class TestWebSocketMCP:
             assert "Production" in str(response["data"]["result"])
 
     def test_websocket_mcp_interleaved_with_step(self, app):
+        # [FUNCTION DOC]
+        # reset and MCP messages can be mixed on one connection.
         """Test WebSocket can handle both MCP and step() messages."""
         from starlette.testclient import TestClient
 
@@ -1884,15 +2032,21 @@ class TestWebSocketMCP:
 
 
 class TestReservedToolNames:
+    # [CLASS DOC]
+    # Tests reserved tool names.
     """Tests for reserved tool name validation."""
 
     def test_reserved_names_constant_exists(self):
+        # [FUNCTION DOC]
+        # RESERVED_TOOL_NAMES is a frozenset.
         """Test RESERVED_TOOL_NAMES is defined."""
         # This should PASS as it's already defined in mcp_types.py
         assert RESERVED_TOOL_NAMES is not None
         assert isinstance(RESERVED_TOOL_NAMES, frozenset)
 
     def test_reserved_names_include_env_methods(self):
+        # [FUNCTION DOC]
+        # It includes reset, step, state and close.
         """Test reserved names include environment methods."""
         # This should PASS as it's already defined
         assert "reset" in RESERVED_TOOL_NAMES
@@ -1901,6 +2055,8 @@ class TestReservedToolNames:
         assert "close" in RESERVED_TOOL_NAMES
 
     def test_mcp_server_rejects_reserved_tool_names(self):
+        # [FUNCTION DOC]
+        # An MCPEnvironment over a server with a "reset" tool raises ValueError.
         """Test MCP server validation rejects reserved tool names."""
         from fastmcp import FastMCP
 
@@ -1908,6 +2064,8 @@ class TestReservedToolNames:
 
         @mcp.tool
         def reset() -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool deliberately using the reserved name.
             """This uses a reserved name."""
             return "should not work"
 
@@ -1915,14 +2073,22 @@ class TestReservedToolNames:
 
         # Use a concrete subclass to test validation
         class TestMCPEnv(MCPEnvironment):
+            # [CLASS DOC]
+            # HELPER: Minimal concurrent-session MCPEnvironment for this test; reset and non-MCP steps return empty observations.
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             def _step_impl(self, action, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty observation with reward 0.
                 return Observation(done=False, reward=0.0)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns a State with step_count 0.
                 from openenv.core.env_server.types import State
 
                 return State(step_count=0)
@@ -1940,9 +2106,13 @@ class TestReservedToolNames:
 
 
 class TestProductionModePerformance:
+    # [CLASS DOC]
+    # Tests that direct MCP calls skip rewards and state tracking.
     """Tests verifying production mode is optimized for inference."""
 
     def test_production_mode_no_reward_in_response(self, app):
+        # [FUNCTION DOC]
+        # A /mcp tools/call response has no reward field.
         """Test production MCP mode returns tool result without reward."""
         from starlette.testclient import TestClient
 
@@ -1964,6 +2134,8 @@ class TestProductionModePerformance:
         assert "reward" not in data
 
     def test_production_mode_no_state_tracking(self, app):
+        # [FUNCTION DOC]
+        # A /mcp tools/call does not change /state step_count.
         """Test production MCP mode doesn't track episode state."""
         from starlette.testclient import TestClient
 
@@ -1997,9 +2169,14 @@ class TestProductionModePerformance:
 
 
 class TestMCPClientProductionMode:
+    # [CLASS DOC]
+    # Tests MCPToolClient production endpoint use.
     """Tests for MCP client using production mode."""
 
     async def test_mcp_client_can_use_production_endpoints(self):
+        # [FUNCTION DOC]
+        # list_tools in production mode does not call step.
+        # KNOWN ISSUE: the final assertion (length >= 0) is always true, and no HTTP transport is mocked.
         """Test MCPToolClient can use production MCP endpoints directly."""
         from openenv.core.mcp_client import MCPToolClient
 
@@ -2020,6 +2197,8 @@ class TestMCPClientProductionMode:
 
     @pytest.mark.skip(reason="Implementation detail - httpx is now imported locally")
     async def test_client_production_mode_uses_http_mcp_endpoint(self):
+        # [FUNCTION DOC]
+        # Skipped placeholder with no body.
         """Test client in production mode uses HTTP /mcp endpoint."""
         pass
 
@@ -2030,9 +2209,13 @@ class TestMCPClientProductionMode:
 
 
 class TestMCPErrorResponses:
+    # [CLASS DOC]
+    # Tests /mcp error responses.
     """Tests for proper MCP JSON-RPC error responses."""
 
     def test_invalid_json_returns_parse_error(self, app):
+        # [FUNCTION DOC]
+        # Malformed JSON returns 400 or error -32700.
         """Test malformed JSON returns JSON-RPC parse error."""
         from starlette.testclient import TestClient
 
@@ -2046,6 +2229,8 @@ class TestMCPErrorResponses:
             assert data["error"]["code"] == -32700  # Parse error
 
     def test_missing_params_returns_invalid_params(self, app):
+        # [FUNCTION DOC]
+        # tools/call without a name returns -32602.
         """Test missing required params returns invalid params error."""
         from starlette.testclient import TestClient
 
@@ -2068,6 +2253,9 @@ class TestMCPErrorResponses:
         assert data["error"]["code"] == -32602  # Invalid params
 
     def test_nonexistent_tool_returns_error(self, app):
+        # [FUNCTION DOC]
+        # Calling an unknown tool returns a JSON-RPC response.
+        # KNOWN ISSUE: accepts either error or result, so it cannot detect a missing error.
         """Test calling non-existent tool returns proper error."""
         from starlette.testclient import TestClient
 

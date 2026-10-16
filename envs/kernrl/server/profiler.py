@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# GPU profiling suite for kernel submissions. Runs external NVIDIA tools (nsys, ncu, compute-sanitizer)
+# and generated Python helper scripts (torch.profiler, Triton PTX extraction) as subprocesses, parses
+# their output into dataclasses, derives roofline metrics from a table of GPU peak specs, and renders
+# each result as an agent-readable Markdown summary with optimisation hints. Side effects: spawns
+# subprocesses, writes helper scripts and reports into the given working directory, prints warnings
+# for missing tools.
 """
 GPU Profiling for KernelBench
 
@@ -30,6 +37,8 @@ from typing import Optional
 
 
 class ProfilerType(Enum):
+    # [CLASS DOC]
+    # Enumeration of profiler kinds: NSYS, NCU, SANITIZER, TORCH, ASSEMBLY. Not referenced elsewhere in this module.
     """Available profilers."""
 
     NSYS = auto()  # NSight Systems - system-level
@@ -41,6 +50,9 @@ class ProfilerType(Enum):
 
 @dataclass
 class KernelInfo:
+    # [CLASS DOC]
+    # Mutable per-kernel metrics from ncu: name, duration, grid/block sizes, registers, shared memory,
+    # compute/memory throughput and occupancy percentages, and memory/compute/latency-bound flags.
     """Information about a single kernel invocation."""
 
     name: str
@@ -61,6 +73,9 @@ class KernelInfo:
 
 @dataclass
 class NsysProfile:
+    # [CLASS DOC]
+    # Mutable NSight Systems result: success/error, GPU kernel, CUDA API and memory times (microseconds),
+    # launch/memory/sync operation counts, per-kernel mappings (name, time_us, time_pct, instances) and insights.
     """NSight Systems profile - system-level view."""
 
     success: bool = False
@@ -83,6 +98,8 @@ class NsysProfile:
     insights: list[str] = field(default_factory=list)
 
     def to_agent_summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a Markdown summary (timings, counts, top 5 kernels, hints), or a failure line when unsuccessful.
         """Format as actionable summary for the agent."""
         if not self.success:
             return f"NSight Systems: Failed - {self.error}"
@@ -120,6 +137,10 @@ class NsysProfile:
 
 @dataclass
 class NcuProfile:
+    # [CLASS DOC]
+    # Mutable NSight Compute result: success/error, average throughput and occupancy percentages, max
+    # registers and shared memory, total DRAM bytes read/written, bottleneck label and limiting factor,
+    # per-kernel KernelInfo list and insights.
     """NSight Compute profile - kernel-level view."""
 
     success: bool = False
@@ -148,6 +169,8 @@ class NcuProfile:
     insights: list[str] = field(default_factory=list)
 
     def to_agent_summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a Markdown summary (performance, resources, top 3 kernels, hints), or a failure line.
         """Format as actionable summary for the agent."""
         if not self.success:
             return f"NSight Compute: Failed - {self.error}"
@@ -198,6 +221,9 @@ class NcuProfile:
 
 @dataclass
 class SanitizerResult:
+    # [CLASS DOC]
+    # Mutable compute-sanitizer result: success/error, error counts per tool (memcheck, racecheck,
+    # initcheck, synccheck), error detail mappings and per-category flags.
     """Compute Sanitizer results - correctness checking."""
 
     success: bool = False
@@ -219,6 +245,9 @@ class SanitizerResult:
     has_sync_errors: bool = False
 
     def to_agent_summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a pass line when no errors were counted, otherwise a Markdown list of error categories with
+        # fix hints and up to 5 error details; a failure line when unsuccessful.
         """Format as actionable summary for the agent."""
         if not self.success:
             return f"Compute Sanitizer: Failed - {self.error}"
@@ -271,6 +300,9 @@ class SanitizerResult:
 
 @dataclass
 class TorchProfile:
+    # [CLASS DOC]
+    # Mutable torch.profiler result: success/error, total CPU and CUDA times, top operator mappings and
+    # peak/current allocated memory in bytes.
     """torch.profiler results - PyTorch-level view."""
 
     success: bool = False
@@ -290,6 +322,8 @@ class TorchProfile:
     memory_allocated_bytes: int = 0
 
     def to_agent_summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a Markdown summary with times, up to 10 operators and memory, or a failure line.
         """Format as actionable summary for the agent."""
         if not self.success:
             return f"torch.profiler: Failed - {self.error}"
@@ -323,6 +357,9 @@ class TorchProfile:
 
 @dataclass
 class AssemblyAnalysis:
+    # [CLASS DOC]
+    # Mutable PTX/SASS analysis result: instruction and register counts, instruction mix counts, detected
+    # patterns and assembly snippets. SASS fields are never filled by this module.
     """PTX/SASS assembly analysis."""
 
     success: bool = False
@@ -350,6 +387,9 @@ class AssemblyAnalysis:
     sass_snippet: str = ""
 
     def to_agent_summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a Markdown summary of counts, instruction mix percentages, patterns and the SASS snippet
+        # (first 1000 characters), or a failure line.
         """Format as actionable summary for the agent."""
         if not self.success:
             return f"Assembly Analysis: Failed - {self.error}"
@@ -403,6 +443,9 @@ class AssemblyAnalysis:
 
 @dataclass
 class RooflineMetrics:
+    # [CLASS DOC]
+    # Mutable roofline result: arithmetic intensity, peak and achieved compute/bandwidth, efficiencies,
+    # bound classification, ridge point and warp-level metrics.
     """Roofline model metrics for performance analysis."""
 
     success: bool = False
@@ -433,6 +476,9 @@ class RooflineMetrics:
     active_warps_per_sm: float = 0.0
 
     def to_agent_summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a Markdown summary of intensity versus ridge point, theoretical versus achieved figures,
+        # warp efficiency and guidance lines, or a failure line.
         """Format as actionable summary for the agent."""
         if not self.success:
             return f"Roofline Analysis: Failed - {self.error}"
@@ -504,6 +550,10 @@ GPU_SPECS = {
 
 
 class GPUProfiler:
+    # [CLASS DOC]
+    # Profiler orchestrator. Holds enable flags and timeouts per tool, resolved tool paths and the detected
+    # GPU's peak specs.
+    # KNOWN ISSUE: the docstring's usage mentions an enable_all argument and a profile_all method, neither of which exists.
     """
     Comprehensive GPU profiler with all metrics.
 
@@ -524,6 +574,10 @@ class GPUProfiler:
         ncu_timeout: int = 120,
         sanitizer_timeout: int = 60,
     ):
+        # [FUNCTION DOC]
+        # Stores flags and timeouts, locates nsys, ncu, compute-sanitizer, cuobjdump and nvdisasm on PATH,
+        # disables (with a printed warning) any enabled tool whose binary is missing, and looks up GPU specs
+        # for the detected device.
         self.enable_nsys = enable_nsys
         self.enable_ncu = enable_ncu
         self.enable_sanitizer = enable_sanitizer
@@ -563,6 +617,9 @@ class GPUProfiler:
         self.gpu_specs = GPU_SPECS.get(self.gpu_name, GPU_SPECS["default"])
 
     def _detect_gpu(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the first GPU_SPECS key contained (case-insensitively) in the name of CUDA device 0,
+        # else "default". All errors are swallowed.
         """Detect GPU name for specs lookup."""
         try:
             import torch
@@ -581,6 +638,10 @@ class GPUProfiler:
     # =========================================================================
 
     def run_nsys(self, script_path: Path, workdir: Path) -> NsysProfile:
+        # [FUNCTION DOC]
+        # Runs "nsys profile" with stats and sqlite export on the script (Python interpreter, cwd workdir,
+        # timeout nsys_timeout) and parses the combined output. Returns an NsysProfile; failures, timeouts or
+        # a disabled tool yield success False with an error message.
         """Run NSight Systems profiling."""
         if not self.enable_nsys:
             return NsysProfile(success=False, error="nsys disabled")
@@ -616,6 +677,12 @@ class GPUProfiler:
             return NsysProfile(success=False, error=str(e))
 
     def _parse_nsys_output(self, raw_output: str, output_base: Path) -> NsysProfile:
+        # [FUNCTION DOC]
+        # HELPER: Parses nsys stats text: tracks the current report section (CUDA API, GPU kernels, GPU memory
+        # time) and accumulates API time and launch/memcpy/memset/synchronize counts, per-kernel times, and
+        # memory time/operation counts from rows with at least 9 columns (nanoseconds converted to
+        # microseconds). Sorts kernels by time, adds insights and returns the profile (always marked success).
+        # output_base is unused.
         """Parse nsys output to extract metrics."""
         profile = NsysProfile(success=True)
         lines = raw_output.split("\n")
@@ -705,6 +772,9 @@ class GPUProfiler:
         return profile
 
     def _generate_nsys_insights(self, profile: NsysProfile) -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns hints for more than 10 launches, API time over half of GPU time, memory time over
+        # 30% of GPU time, more than 5 syncs, or a no-bottleneck message.
         """Generate actionable insights from nsys profile."""
         insights = []
 
@@ -746,6 +816,9 @@ class GPUProfiler:
     # =========================================================================
 
     def run_ncu(self, script_path: Path, workdir: Path) -> NcuProfile:
+        # [FUNCTION DOC]
+        # Runs ncu with a fixed metric list in CSV mode across all processes on the script and parses the
+        # output. Returns an NcuProfile; failures, timeouts or a disabled tool yield success False.
         """Run NSight Compute profiling."""
         if not self.enable_ncu:
             return NcuProfile(success=False, error="ncu disabled")
@@ -788,6 +861,13 @@ class GPUProfiler:
             return NcuProfile(success=False, error=str(e))
 
     def _parse_ncu_output(self, raw_output: str) -> NcuProfile:
+        # [FUNCTION DOC]
+        # HELPER: Parses ncu CSV output starting from the header row containing "Kernel Name" (falls back to
+        # text parsing when absent): per row builds a KernelInfo with throughput, occupancy, registers, shared
+        # memory, accumulates DRAM bytes, classifies each kernel as memory/compute bound (10-point margin) or
+        # latency bound, averages the percentages and labels the overall bottleneck (memory, compute, latency
+        # when occupancy below 50, else balanced). Unparseable values are skipped; a CSV error sets the error
+        # text. Adds insights and returns the profile.
         """Parse ncu CSV output to extract metrics."""
         profile = NcuProfile(success=True)
         lines = raw_output.strip().split("\n")
@@ -921,6 +1001,9 @@ class GPUProfiler:
         return profile
 
     def _parse_ncu_text_output(self, raw_output: str) -> NcuProfile:
+        # [FUNCTION DOC]
+        # HELPER: Fallback parser for ncu text output using regexes on lines mentioning compute/memory
+        # throughput, occupancy and registers (last match wins); labels the bottleneck and adds insights.
         """Fallback parser for non-CSV ncu output."""
         profile = NcuProfile(success=True)
         lines = raw_output.split("\n")
@@ -961,6 +1044,9 @@ class GPUProfiler:
         return profile
 
     def _generate_ncu_insights(self, profile: NcuProfile) -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns hints based on the bottleneck label, occupancy (below 30 or 50), registers over 64
+        # and shared memory over 48 KiB, or a well-optimised message.
         """Generate actionable insights from ncu profile."""
         insights = []
 
@@ -1015,6 +1101,10 @@ class GPUProfiler:
     # =========================================================================
 
     def run_sanitizer(self, script_path: Path, workdir: Path) -> SanitizerResult:
+        # [FUNCTION DOC]
+        # Runs compute-sanitizer once per tool (memcheck, racecheck, initcheck, synccheck) on the script,
+        # counting parsed error lines per tool and collecting details. Timeouts and other failures for a tool
+        # are ignored. Returns a SanitizerResult (success False only when the tool is disabled).
         """Run compute-sanitizer for correctness checking."""
         if not self.enable_sanitizer:
             return SanitizerResult(success=False, error="compute-sanitizer disabled")
@@ -1064,6 +1154,11 @@ class GPUProfiler:
         return result
 
     def _parse_sanitizer_output(self, output: str, tool: str) -> list[dict]:
+        # [FUNCTION DOC]
+        # HELPER: Returns one error mapping (type, first 200 chars of the line, optional location from the
+        # next line if it contains "at") for every line containing "ERROR" or "HAZARD" (case-insensitive).
+        # KNOWN ISSUE: summary lines such as "ERROR SUMMARY: 0 errors" also match, so a clean run is counted
+        # as having errors.
         """Parse compute-sanitizer output for errors."""
         errors = []
         lines = output.split("\n")
@@ -1087,6 +1182,14 @@ class GPUProfiler:
     # =========================================================================
 
     def run_torch_profiler(self, script_path: Path, workdir: Path) -> TorchProfile:
+        # [FUNCTION DOC]
+        # Writes a wrapper script into workdir that executes the solution, builds Model from get_init_inputs
+        # and get_inputs (or a default 16x1024 random tensor), warms up, profiles 10 forward passes with CPU
+        # and CUDA activities and dumps totals, top 20 operators and memory to JSON; runs it with a 60 s timeout
+        # and returns a TorchProfile from the JSON. Returns success False when the success marker is missing
+        # (with stderr), on timeout or on errors.
+        # KNOWN ISSUE: the script path is interpolated unescaped into the generated code, and the solution is
+        # executed twice (once via exec, once as a module).
         """Run torch.profiler for PyTorch-level view."""
         if not self.enable_torch_profiler:
             return TorchProfile(success=False, error="torch.profiler disabled")
@@ -1215,6 +1318,12 @@ print("TORCH_PROFILE_OK")
     def run_assembly_analysis(
         self, script_path: Path, workdir: Path
     ) -> AssemblyAnalysis:
+        # [FUNCTION DOC]
+        # Writes and runs (30 s timeout) a script that imports the solution and collects PTX from cached
+        # Triton kernels into kernel.ptx, then counts non-comment PTX lines, classifies memory/compute/control
+        # instructions by substring, reads the register declaration count, and detects patterns (shuffles,
+        # shared memory, texture, FP16, tensor cores). Returns an AssemblyAnalysis; disabled tools give success
+        # False, and exceptions set the error text. Kernels are only cached if the solution ran them at import.
         """Extract and analyze PTX/SASS assembly."""
         if not self.enable_assembly or not self.cuobjdump_path:
             return AssemblyAnalysis(success=False, error="Assembly analysis disabled")
@@ -1336,6 +1445,14 @@ print(f"PTX_LINES:{{len(ptx_code.split(chr(10)))}}")
     def compute_roofline(
         self, ncu_profile: NcuProfile, benchmark_time_us: float
     ) -> RooflineMetrics:
+        # [FUNCTION DOC]
+        # Builds roofline metrics: peak specs from the GPU table, ridge point (peak FLOP/s over peak bytes/s),
+        # achieved FLOP/s estimated from ncu compute throughput percentage, arithmetic intensity from that
+        # estimate times benchmark time over DRAM bytes, achieved bandwidth from bytes over time, efficiencies,
+        # memory/compute classification and warp efficiency copied from occupancy (branch divergence fixed at 0).
+        # Returns success False when disabled.
+        # KNOWN ISSUE: SM throughput percentage is used as a FLOP rate, so the arithmetic intensity and the
+        # compute efficiency are rough approximations; warp execution efficiency is actually occupancy.
         """Compute roofline model metrics from NCU data."""
         if not self.enable_roofline:
             return RooflineMetrics(success=False, error="Roofline disabled")
@@ -1416,6 +1533,13 @@ def profile_kernel(
     enable_assembly: bool = True,
     enable_roofline: bool = True,
 ) -> dict:
+    # [FUNCTION DOC]
+    # One-shot profiling: writes the solution, the reference and a runner script (builds the solution Model
+    # with the reference's init inputs and inputs on the device, warms up and runs 10 passes) into a
+    # temporary directory, runs each enabled profiler (nsys, ncu, sanitizer on the runner; torch profiler
+    # and assembly analysis on the solution file) and, when ncu succeeded, roofline metrics using nsys GPU
+    # time (or 1000 us). Returns a mapping keyed nsys, ncu, sanitizer, torch_profile, assembly, roofline;
+    # disabled entries are default (unsuccessful) results. The temporary directory is deleted afterwards.
     """
     Profile a kernel solution with all available profilers.
 

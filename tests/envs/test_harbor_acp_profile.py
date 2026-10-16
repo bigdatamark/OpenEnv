@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for the Harbor ACP opencode harness profile: it produces a valid
+# Harbor AcpRegistryEntry routing primary and small-model calls through the
+# capture proxy with a per-session key, is selected per rollout without
+# mutating the generic ACP seam, and unknown profiles are rejected. Skipped
+# without harbor's ACP agent module.
 """The ACP profile uses Harbor's existing registry schema and isolates credentials."""
 
 import json
@@ -11,6 +17,11 @@ from openenv.harbor.seams import acp_opencode_config, get
 
 
 def test_acp_opencode_profile_is_valid_and_routes_primary_and_auxiliary_calls():
+    # [FUNCTION DOC]
+    # acp_opencode_config yields an npx opencode-ai@1.18.30 "acp" entry whose
+    # inline config points model and small_model at the intercepted provider
+    # (<url>/v1, session id as API key); configs for different sessions share no
+    # credentials; the generic "acp" seam has no kwargs.
     first = acp_opencode_config("https://capture.example", "session-one", "Qwen3.5-4B")
     entry = AcpRegistryEntry.model_validate(first["registry_entry"])
     assert entry.distribution.npx.package == "opencode-ai@1.18.30"
@@ -29,6 +40,9 @@ def test_acp_opencode_profile_is_valid_and_routes_primary_and_auxiliary_calls():
 
 
 def test_profile_selection_is_per_rollout_and_preserves_generic_adapter(tmp_path):
+    # [FUNCTION DOC]
+    # build_trial_config with harness_profile sets the intercepted model and the
+    # registry entry on the agent, while the shared "acp" seam object is unchanged.
     from openenv.harbor.rollout import build_trial_config
 
     generic = get("acp")
@@ -51,6 +65,9 @@ def test_profile_selection_is_per_rollout_and_preserves_generic_adapter(tmp_path
 
 
 def test_unknown_profile_is_not_silently_ignored():
+    # [FUNCTION DOC]
+    # get raises ValueError "unsupported harness profile" for unknown profiles and
+    # for a profile on a harness that does not support it.
     import pytest
 
     with pytest.raises(ValueError, match="unsupported harness profile"):

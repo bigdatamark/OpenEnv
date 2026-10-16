@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 5): one leapfrog timestep of the 2D wave equation on a
+# 1024 x 1024 grid with zero (Dirichlet) boundaries.
 """
 2D Wave Equation Finite Difference
 
@@ -21,6 +24,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference wave-equation step with wave speed c, timestep dt and spacing dx,
+    # precomputing coeff = (c dt / dx)^2.
     """
     One timestep of the 2D wave equation using finite differences.
 
@@ -28,6 +34,8 @@ class Model(nn.Module):
     """
 
     def __init__(self, c: float = 1.0, dt: float = 0.01, dx: float = 0.1):
+        # [FUNCTION DOC]
+        # Stores c, dt, dx and coeff.
         super(Model, self).__init__()
         self.c = c
         self.dt = dt
@@ -36,6 +44,10 @@ class Model(nn.Module):
         self.coeff = (c * dt / dx) ** 2
 
     def forward(self, u_curr: torch.Tensor, u_prev: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Computes the 5-point Laplacian of u_curr on the interior and returns u_next
+        # with interior 2*u_curr - u_prev + coeff * laplacian * dx^2 and all boundary
+        # cells set to 0.
         """
         Compute next timestep of wave equation.
 
@@ -77,6 +89,9 @@ grid_width = 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a Gaussian pulse centered at (0.5, 0.5) on the unit square as
+    # u_curr and an identical u_prev (zero initial velocity).
     # Initial condition: Gaussian pulse in center
     x = torch.linspace(0, 1, grid_width)
     y = torch.linspace(0, 1, grid_height)
@@ -90,4 +105,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [1.0, 0.001, 0.01] (c, dt, dx).
     return [1.0, 0.001, 0.01]  # c, dt, dx

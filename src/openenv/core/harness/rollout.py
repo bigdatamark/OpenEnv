@@ -147,7 +147,10 @@ class ModelStep(Protocol):
         messages: list[Message],
         tools: list[Tool],
         sampling: dict[str, Any],
-    ) -> ModelStepResult: ...
+    ) -> ModelStepResult:
+        # [FUNCTION DOC]
+        # Protocol signature only: sample the next model turn.
+        ...
 
 
 class TraceEntry(TypedDict, total=False):
@@ -243,9 +246,15 @@ class LoopOwningSession(Protocol):
     strictness here: the two implementations legitimately differ in how they wait.
     """
 
-    def wait_for_completion(self, timeout_s: float | None = ...) -> int: ...
+    def wait_for_completion(self, timeout_s: float | None = ...) -> int:
+        # [FUNCTION DOC]
+        # Protocol signature: wait for the agent to finish and return its exit code.
+        ...
 
-    def fetch_proxy_trace(self) -> list[TraceEntry]: ...
+    def fetch_proxy_trace(self) -> list[TraceEntry]:
+        # [FUNCTION DOC]
+        # Protocol signature: return the captured TraceEntry list.
+        ...
 
 
 @runtime_checkable
@@ -255,9 +264,15 @@ class TrainableSession(Protocol):
     # TrainingTrace captures (wait_for_completion and fetch_training_trace).
     """A loop-owning session that supplies validated, masked engine captures."""
 
-    def wait_for_completion(self, timeout_s: float | None = ...) -> int: ...
+    def wait_for_completion(self, timeout_s: float | None = ...) -> int:
+        # [FUNCTION DOC]
+        # Protocol signature: wait for the agent to finish and return its exit code.
+        ...
 
-    def fetch_training_trace(self) -> TrainingTrace: ...
+    def fetch_training_trace(self) -> TrainingTrace:
+        # [FUNCTION DOC]
+        # Protocol signature: return the validated TrainingTrace.
+        ...
 
 
 class ResourceSession(ABC):

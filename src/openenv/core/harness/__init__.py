@@ -1,3 +1,12 @@
+# [PACKAGE DOC]
+# Harness integration package. Re-exports two layers: the trainer-side rollout
+# API (harness adapters, resource sessions, rollout results/limits, trace types,
+# rollout function builder, training traces) and the RFC 005 turn-based
+# agentic harness API (AgenticHarnessAdapter and its errors, HarnessConfig and
+# transport, HarnessEnvironment and HarnessAction, harness event/message types,
+# the MCP bridge, the harness process wrapper and tool conflict resolution).
+# Also re-exports the private _resolve_env_reward for backward compatibility
+# (not listed in __all__).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Harness integration helpers for training, evaluation, and wrapping agents.

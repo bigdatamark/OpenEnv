@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Echo environment package: the reference pure-MCP environment with echo_message and echo_with_length tools.
+# Re-exports the EchoEnv client and the MCP CallToolAction / ListToolsAction types.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

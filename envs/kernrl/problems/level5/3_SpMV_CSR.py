@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 5): sparse matrix-vector product with a 10000 x 10000
+# CSR matrix (1..99 non-zeros per row). The reference loops over rows in
+# Python.
 """
 Sparse Matrix-Vector Multiplication (SpMV) in CSR Format
 
@@ -23,6 +27,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference SpMV model storing the matrix dimensions.
     """
     Sparse matrix-vector multiplication: y = A * x
 
@@ -30,6 +36,8 @@ class Model(nn.Module):
     """
 
     def __init__(self, num_rows: int, num_cols: int):
+        # [FUNCTION DOC]
+        # Stores num_rows and num_cols.
         super(Model, self).__init__()
         self.num_rows = num_rows
         self.num_cols = num_cols
@@ -41,6 +49,10 @@ class Model(nn.Module):
         row_ptrs: torch.Tensor,
         x: torch.Tensor,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # For each row i, takes values[row_ptrs[i]:row_ptrs[i+1]] and their column
+        # indices and stores the dot product with the gathered x entries in y[i].
+        # Returns y of length num_rows (dtype of x).
         """
         Compute y = A * x using CSR format.
 
@@ -77,6 +89,10 @@ total_nnz = num_rows * avg_nnz_per_row
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Builds a random CSR matrix: random row lengths in [1, 2*avg-1], row pointers
+    # by cumulative sum, sorted unique random column indices per row, and normal
+    # values; plus a random dense x. Returns [values, col_indices, row_ptrs, x].
     # Generate random sparse matrix in CSR format
     # Each row has random number of non-zeros
     row_lengths = torch.randint(1, avg_nnz_per_row * 2, (num_rows,))
@@ -107,4 +123,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [num_rows, num_cols].
     return [num_rows, num_cols]

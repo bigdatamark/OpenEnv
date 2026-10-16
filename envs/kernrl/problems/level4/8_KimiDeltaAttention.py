@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# kernrl problem (level 4): Kimi Delta Attention, a Gated DeltaNet variant with
+# channel-wise (per value dim) decay gates, using flash-linear-attention's
+# chunk_kda kernel as baseline. Importing requires the fla package. Config:
+# batch 4, sequence 2048, hidden 2048, 16 heads, head dims 128.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,6 +38,10 @@ def kimi_delta_attention(
     beta: torch.Tensor,  # (batch, heads, seq) - update gate (0-1)
     scale: float,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Transposes q, k, v, gates a and beta from head-first to (B, T, H, ...)
+    # layout, converts a to log space (clamped at 1e-6), calls fla's chunk_kda with
+    # the scale, and returns the output transposed back to (B, H, T, d_v).
     """
     Kimi delta attention using flash-linear-attention's optimized kernel.
 
@@ -58,6 +67,11 @@ def kimi_delta_attention(
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference KDA layer: Q/K/V projections with optional causal depthwise short
+    # convolutions and SiLU, per-channel sigmoid decay gates, per-head sigmoid beta,
+    # chunked KDA attention, per-head LayerNorm, sigmoid output gate and output
+    # projection.
     """
     Kimi Delta Attention with channel-wise gating.
 
@@ -77,6 +91,11 @@ class Model(nn.Module):
         use_short_conv: bool = True,
         conv_kernel_size: int = 4,
     ):
+        # [FUNCTION DOC]
+        # Stores sizes and creates projections, the channel-wise gate projection
+        # (heads * head_dim_v outputs), beta projection, optional depthwise Conv1d
+        # layers, output-gate projection and LayerNorm. use_dplr and dplr_rank are
+        # accepted but unused.
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -122,6 +141,9 @@ class Model(nn.Module):
         self.scale = head_dim_qk**-0.5
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Same pipeline as the Gated DeltaNet problem except the decay gate a is
+        # (B, H, T, d_v) per channel. Returns (batch, seq_len, hidden_size).
         batch_size, seq_len, _ = x.shape
 
         q = self.q_proj(x)
@@ -176,8 +198,12 @@ head_dim_v = 128
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, seq_len, hidden_size).
     return [torch.randn(batch_size, seq_len, hidden_size)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [hidden_size, num_heads, head_dim_qk, head_dim_v].
     return [hidden_size, num_heads, head_dim_qk, head_dim_v]

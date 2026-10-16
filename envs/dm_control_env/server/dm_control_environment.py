@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# OpenEnv wrapper around dm_control.suite tasks. At import, sets MUJOCO_GL=egl on non-macOS platforms when unset
+# (headless rendering). Supports switching domain/task at reset and optional PNG pixel observations.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -58,6 +61,9 @@ except ImportError:
 
 
 class DMControlEnvironment(Environment):
+    # [CLASS DOC]
+    # Environment wrapping one loaded dm_control suite env (loaded lazily on first reset). Holds domain/task, render
+    # size, a render flag remembered from reset, and DMControlState. Supports concurrent sessions.
     """
     Wraps dm_control.suite environments with the OpenEnv interface.
 
@@ -97,6 +103,10 @@ class DMControlEnvironment(Environment):
         render_height: Optional[int] = None,
         render_width: Optional[int] = None,
     ):
+        # [FUNCTION DOC]
+        # Resolves domain (DMCONTROL_DOMAIN, default cartpole), task (DMCONTROL_TASK, default balance) and render size
+        # (DMCONTROL_RENDER_HEIGHT/WIDTH, default 480x640) from arguments or env vars, and creates an initial state.
+        # Does not load the simulator.
         """
         Initialize the dm_control environment.
 
@@ -136,6 +146,11 @@ class DMControlEnvironment(Environment):
         )
 
     def _load_environment(self, domain_name: str, task_name: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Closes any current env, imports dm_control.suite and loads domain/task, then updates names and the
+        # state's specs and timesteps.
+        # Raises: ImportError if dm_control is missing; RuntimeError with macOS hints for MuJoCo/GL failures on macOS;
+        # ValueError (chained) for other load failures, listing some available environments.
         """Load or switch to a dm_control environment."""
         if self._env is not None:
             try:
@@ -198,6 +213,8 @@ class DMControlEnvironment(Environment):
         self._state.control_timestep = self._env.control_timestep()
 
     def _get_action_spec_info(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the action spec as a dict of shape, dtype string, minimum/maximum lists and name.
         """Get information about the action space."""
         spec = self._env.action_spec()
         return {
@@ -209,6 +226,8 @@ class DMControlEnvironment(Environment):
         }
 
     def _get_observation_spec_info(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a mapping of observation name to {shape, dtype}.
         """Get information about the observation space."""
         specs = self._env.observation_spec()
         obs_info = {}
@@ -224,6 +243,10 @@ class DMControlEnvironment(Environment):
         time_step,
         include_pixels: bool = False,
     ) -> DMControlObservation:
+        # [FUNCTION DOC]
+        # HELPER: Converts a dm_env TimeStep: flattens each observation array to a list, optionally renders camera 0 at the
+        # configured size to a base64 PNG (render errors ignored), sets done when the step type is LAST and reward to the
+        # float reward (0.0 if None).
         """Convert dm_control TimeStep to DMControlObservation."""
         import dm_env
 
@@ -266,6 +289,12 @@ class DMControlEnvironment(Environment):
         render: bool = False,
         **kwargs,
     ) -> DMControlObservation:
+        # [FUNCTION DOC]
+        # Remembers the render flag, (re)loads the env if none is loaded or domain/task changed, seeds numpy's global RNG
+        # when seed is given, resets the simulator, creates a new state (fresh episode id, keeping specs), and returns the
+        # initial observation. Extra kwargs are ignored.
+        # KNOWN ISSUE: seeding numpy's global RNG does not seed the dm_control task's own random state, so seed does not make
+        # resets reproducible, and it affects other sessions in the process.
         """
         Reset the environment and return initial observation.
 
@@ -315,6 +344,10 @@ class DMControlEnvironment(Environment):
         render: bool = False,
         **kwargs,
     ) -> DMControlObservation:
+        # [FUNCTION DOC]
+        # Converts values to a float array, reshapes it if the element count matches the spec, clips to the spec bounds,
+        # steps the simulator, increments step_count and returns the observation (pixels if render or the reset flag).
+        # Raises: RuntimeError before the first reset; ValueError for a wrong number of action values.
         """
         Execute one step in the environment.
 
@@ -351,6 +384,9 @@ class DMControlEnvironment(Environment):
         )
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: renders camera 0 at 320x240 to an inline JPEG img tag; None if the observation lacks
+        # "observations" or rendering fails.
         """Draw the physics scene from the first camera (rendering does not step the simulation)."""
         if "observations" not in observation:
             return None
@@ -377,6 +413,8 @@ class DMControlEnvironment(Environment):
         render: bool = False,
         **kwargs,
     ) -> DMControlObservation:
+        # [FUNCTION DOC]
+        # Async reset: runs synchronously on macOS (MuJoCo is unsafe in worker threads there), otherwise in a worker thread.
         """Async version of reset.
 
         On macOS, runs synchronously to avoid MuJoCo threading crashes.
@@ -410,6 +448,8 @@ class DMControlEnvironment(Environment):
         render: bool = False,
         **kwargs,
     ) -> DMControlObservation:
+        # [FUNCTION DOC]
+        # Async step with the same macOS/thread-pool handling.
         """Async version of step.
 
         On macOS, runs synchronously to avoid MuJoCo threading crashes.
@@ -426,10 +466,14 @@ class DMControlEnvironment(Environment):
 
     @property
     def state(self) -> DMControlState:
+        # [FUNCTION DOC]
+        # Property: returns the DMControlState.
         """Get the current environment state."""
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the simulator (errors ignored) and clears it.
         """Close the dm_control environment."""
         env = getattr(self, "_env", None)
         if env is not None:
@@ -440,6 +484,8 @@ class DMControlEnvironment(Environment):
             self._env = None
 
     def __del__(self):
+        # [FUNCTION DOC]
+        # Calls close, ignoring errors.
         """Cleanup on deletion."""
         try:
             self.close()

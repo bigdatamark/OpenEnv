@@ -1,3 +1,17 @@
+# [MODULE DOC]
+# Builds the FastAPI app with the Gradio web interface (used when
+# ENABLE_WEB_INTERFACE is set). It wraps the standard app from
+# create_fastapi_app and adds: redirects from "/" and "/web" to "/web/",
+# GET /web/metadata, a /ws/ui WebSocket broadcasting episode state updates,
+# POST /web/reset, POST /web/step, GET /web/state, and the Gradio Blocks mounted
+# at /web (default playground, optionally combined with an env-provided custom
+# UI in tabs). The web UI drives a single environment instance owned by a
+# WebInterfaceManager, shared by all visitors and separate from /ws sessions.
+# Also generates the "Quick Start" Python snippet by statically parsing the
+# environment package's client.py and __init__.py, loads README content from
+# the filesystem, and keeps legacy action-field metadata helpers.
+# KNOWN ISSUE: the module docstring mentions "openenv push --enable-interface",
+# but the push flag is "--interface".
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -35,6 +49,14 @@ _CLIENT_BASES = {"EnvClient", "MCPClientBase", "MCPToolClient"}
 
 
 def _read_package(package: str) -> Tuple[Optional[str], set]:
+    # [FUNCTION DOC]
+    # HELPER: Locates package via importlib (without importing it) and parses its
+    # client.py to find the first top-level class whose base (ignoring generics
+    # and module prefixes) is EnvClient, MCPClientBase or MCPToolClient, and its
+    # __init__.py to collect imported names and all string constants (as a proxy
+    # for exports). Returns (client class name or None, set of names); (None,
+    # empty set) if the package is not found. Raises SyntaxError on unparsable
+    # files.
     """
     The client class defined in the package's `client.py` and the names its
     `__init__.py` exports. The files are parsed, not imported, so the server
@@ -50,6 +72,9 @@ def _read_package(package: str) -> Tuple[Optional[str], set]:
     root = Path(next(iter(spec.submodule_search_locations)))
 
     def parse(name: str) -> Optional[ast.Module]:
+        # [FUNCTION DOC]
+        # HELPER: Parses the named file under the package root into an AST, or returns
+        # None if it does not exist.
         path = root / name
         return ast.parse(path.read_text()) if path.exists() else None
 
@@ -73,6 +98,10 @@ def _read_package(package: str) -> Tuple[Optional[str], set]:
 
 
 def _example_value(annotation: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns a placeholder literal string for a type annotation (by its
+    # origin): False, 0, 0.0, "...", [], {} for bool/int/float/str/list/dict, else
+    # "...".
     """A placeholder literal for a field of the given type."""
     origin = get_origin(annotation) or annotation
     literals = {
@@ -91,6 +120,18 @@ def get_quick_start_markdown(
     action_cls: Type[Action],
     observation_cls: Type[Observation],
 ) -> str:
+    # [FUNCTION DOC]
+    # Returns Markdown showing how to connect with Python. Package name is the
+    # metadata name lowercased with spaces as underscores (default "env"); if no
+    # client class is found there, retries with the action class's top-level module
+    # name (unless it is the same, openenv, models or server). Base URL is
+    # https://<SPACE_HOST> when set, else http://localhost:8000. Without a client
+    # class, returns a short pointer to the README. Otherwise includes a pip
+    # install line when SPACE_ID is set, and a sync client snippet: for
+    # CallToolAction-based envs, listing tools (plus a call_tool hint); else a
+    # reset and a step with the action built from its required fields with
+    # placeholder values, importing the action from the package if exported, else
+    # from its module.
     """
     Build the Quick Start markdown shown next to the web interface.
 
@@ -177,6 +218,12 @@ def get_quick_start_markdown(
 def load_environment_metadata(
     env: Environment, env_name: Optional[str] = None
 ) -> EnvironmentMetadata:
+    # [FUNCTION DOC]
+    # Returns get_metadata() for an Environment instance. For a factory (partials
+    # unwrapped) builds default metadata: name = env_name or the class/function
+    # name, description "<class or env name> environment", version "1.0.0", plus
+    # README content found by _load_readme_from_filesystem. Does not instantiate
+    # factories.
     """
     Load environment metadata including README content.
 
@@ -221,6 +268,11 @@ def load_environment_metadata(
 
 
 def _load_readme_from_filesystem(env_name: Optional[str]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the text of the first readable README among: the
+    # ENV_README_PATH env var path, "envs/<env_name>/README.md" (relative to cwd,
+    # when env_name given), "/app/env/README.md", "/app/README.md"; None if none.
+    # Read errors are ignored.
     """
     Load README content from the filesystem.
 
@@ -253,6 +305,9 @@ def _load_readme_from_filesystem(env_name: Optional[str]) -> Optional[str]:
 
 
 class ActionLog(BaseModel):
+    # [CLASS DOC]
+    # Record of one web UI step: ISO timestamp, action dict, observation dict,
+    # optional reward, done flag and step count.
     """Log entry for an action taken."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -268,6 +323,9 @@ class ActionLog(BaseModel):
 
 
 class EpisodeState(BaseModel):
+    # [CLASS DOC]
+    # Web UI episode state: episode id, step count, current observation, action
+    # log list and whether the episode was just reset.
     """Current episode state for the web interface."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -286,6 +344,11 @@ class EpisodeState(BaseModel):
 
 
 class WebInterfaceManager:
+    # [CLASS DOC]
+    # Holds the single environment instance used by the web UI (instantiating a
+    # factory if needed), the action/observation classes, metadata, the episode
+    # state, connected /ws/ui sockets, and a one-thread executor for sync env
+    # calls. Keeps at most 1000 action log entries.
     """Manages the web interface for an environment."""
 
     MAX_ACTION_LOGS = 1000
@@ -298,6 +361,12 @@ class WebInterfaceManager:
         metadata: Optional[EnvironmentMetadata] = None,
     ):
         # Anything that is not an Environment instance is a factory, instantiate it
+        # [FUNCTION DOC]
+        # Instantiates env if it is not an Environment instance, stores classes and
+        # metadata (default built from env's class name), and initializes an empty
+        # episode state, client list and executor.
+        # KNOWN ISSUE: the default metadata uses the class of the env argument, which is
+        # "type" when a factory class was passed rather than the environment class.
         self.env = env if isinstance(env, Environment) else env()
         self.action_cls = action_cls
         self.observation_cls = observation_cls
@@ -321,6 +390,9 @@ class WebInterfaceManager:
         kwargs: Dict[str, Any],
         skip_params: Optional[set[str]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns kwargs accepted by sig (all if it has **kwargs), minus
+        # skip_params.
         """Filter kwargs to only those accepted by the target function."""
         skip_params = skip_params or set()
         valid_kwargs: Dict[str, Any] = {}
@@ -338,6 +410,9 @@ class WebInterfaceManager:
         return valid_kwargs
 
     async def _run_sync_in_thread_pool(self, func, *args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Runs func(*args, **kwargs) in the manager's single-thread executor and
+        # returns the result.
         """Run a synchronous function in the thread pool executor.
 
         This is needed for environments using sync libraries (e.g., Playwright sync API)
@@ -351,6 +426,8 @@ class WebInterfaceManager:
         )
 
     async def connect_websocket(self, websocket: WebSocket):
+        # [FUNCTION DOC]
+        # Accepts the socket, registers it and broadcasts the current state.
         """Connect a new WebSocket client."""
         await websocket.accept()
         self.connected_clients.append(websocket)
@@ -359,11 +436,16 @@ class WebInterfaceManager:
         await self._send_state_update()
 
     async def disconnect_websocket(self, websocket: WebSocket):
+        # [FUNCTION DOC]
+        # Unregisters the socket if present.
         """Disconnect a WebSocket client."""
         if websocket in self.connected_clients:
             self.connected_clients.remove(websocket)
 
     async def _send_state_update(self):
+        # [FUNCTION DOC]
+        # HELPER: Sends {"type": "state_update", "episode_state": ...} as JSON to every
+        # connected client, dropping clients whose send fails. No-op without clients.
         """Send current state to all connected clients."""
         if not self.connected_clients:
             return
@@ -388,6 +470,12 @@ class WebInterfaceManager:
     async def reset_environment(
         self, reset_kwargs: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Resets the env with accepted reset kwargs (async override if present, else
+        # sync in the executor), reads its state, serializes the observation, resets
+        # the episode state (episode id from state, step 0, current observation, logs
+        # cleared, is_reset True), broadcasts it, and returns the serialized
+        # observation dict.
         """Reset the environment and update state."""
         reset_kwargs = reset_kwargs or {}
 
@@ -421,6 +509,14 @@ class WebInterfaceManager:
         return serialized
 
     async def step_environment(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Deserializes action_data with web preprocessing (ValidationError on invalid
+        # input), runs the env's sync step in the executor, reads state, serializes the
+        # observation, appends an ActionLog (trimmed to the last 1000), updates the
+        # episode state (is_reset False), broadcasts it, and returns the serialized
+        # observation dict.
+        # KNOWN ISSUE: unlike reset_environment, an env's async step override is never
+        # used here; the sync step always runs in the executor.
         """Execute a step in the environment and update state."""
         # Deserialize action with preprocessing for web interface special cases
         action: Action = deserialize_action_with_preprocessing(
@@ -464,6 +560,8 @@ class WebInterfaceManager:
         return serialized
 
     def get_state(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the env's current state as a dict.
         """Get current environment state."""
         state: State = self.env.state
         return state.model_dump()
@@ -486,6 +584,14 @@ def create_web_interface_app(
     mode: Optional[Any] = None,
     reset_observation_cls: Optional[Type[Observation]] = None,
 ) -> FastAPI:
+    # [FUNCTION DOC]
+    # Creates the base app via create_fastapi_app (same env, classes, concurrency,
+    # name, state class, mode), loads metadata, creates the WebInterfaceManager
+    # (instantiating the env), registers the web routes, computes legacy action
+    # fields, chat detection and quick start Markdown, builds the Gradio blocks
+    # (title_override or the default display title), mounts them at /web with the
+    # OpenEnv theme and CSS, and returns the app. Errors from server construction,
+    # env instantiation or a gradio_builder propagate.
     """
     Create a FastAPI application with web interface for the given environment.
 
@@ -550,21 +656,30 @@ def create_web_interface_app(
     # Web API routes first (so they take precedence over Gradio mount at /web)
     @app.get("/", include_in_schema=False)
     async def web_root():
+        # [FUNCTION DOC]
+        # GET /: redirects to /web/.
         """Redirect the app root to the Gradio interface."""
         return RedirectResponse(url="/web/")
 
     @app.get("/web", include_in_schema=False)
     async def web_root_no_slash():
+        # [FUNCTION DOC]
+        # GET /web: redirects to /web/.
         """Redirect /web to /web/ for mounted Gradio deployments behind proxies."""
         return RedirectResponse(url="/web/")
 
     @app.get("/web/metadata")
     async def web_metadata():
+        # [FUNCTION DOC]
+        # GET /web/metadata: returns the metadata as a dict.
         """Get environment metadata."""
         return web_manager.metadata.model_dump()
 
     @app.websocket("/ws/ui")
     async def websocket_ui_endpoint(websocket: WebSocket):
+        # [FUNCTION DOC]
+        # WebSocket /ws/ui: registers the client (sending current state) and keeps
+        # reading frames until disconnect, then unregisters it.
         """WebSocket endpoint for web UI real-time updates.
 
         Uses `/ws/ui` to avoid conflict with `/ws` in `http_server.py`,
@@ -580,11 +695,20 @@ def create_web_interface_app(
 
     @app.post("/web/reset")
     async def web_reset(request: Optional[Dict[str, Any]] = Body(default=None)):
+        # [FUNCTION DOC]
+        # POST /web/reset: resets with the optional JSON body as reset kwargs and
+        # returns the serialized observation.
         """Reset endpoint for web interface."""
         return await web_manager.reset_environment(request)
 
     @app.post("/web/step")
     async def web_step(request: Dict[str, Any]):
+        # [FUNCTION DOC]
+        # POST /web/step: if the body has "message", converts it with the env's
+        # message_to_action when available (tokens as a list, or the action fields
+        # without metadata) or sends {"message": ...}; otherwise uses body["action"]
+        # (default {}). Steps and returns the serialized observation. Errors propagate
+        # as HTTP 500.
         """Step endpoint for web interface."""
         # Check if this is a message-based request (chat environment)
         if "message" in request:
@@ -604,6 +728,8 @@ def create_web_interface_app(
 
     @app.get("/web/state")
     async def web_state():
+        # [FUNCTION DOC]
+        # GET /web/state: returns the env state; a RuntimeError becomes HTTP 409.
         """State endpoint for web interface."""
         try:
             return web_manager.get_state()
@@ -654,6 +780,14 @@ def _build_gradio_blocks(
     custom_tab_primary: bool,
     show_default_tab: bool,
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # HELPER: Builds the default playground via build_gradio_app and sets its
+    # title. Without a gradio_builder returns it. Otherwise calls the builder
+    # (web_manager, action_fields, metadata, is_chat_env, display_title,
+    # quick_start_md), requiring a gr.Blocks (TypeError otherwise); returns the
+    # custom blocks alone when show_default_tab is False, else a TabbedInterface
+    # with "Playground" and the custom tab in the order chosen by
+    # custom_tab_primary, titled display_title.
     """Build the Gradio block tree mounted at `/web`."""
     default_blocks = build_gradio_app(
         web_manager,
@@ -701,6 +835,9 @@ def _build_gradio_blocks(
 
 
 def _is_chat_env(action_cls: Type[Action]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the action class has a "tokens" field whose
+    # annotation has a __name__ and whose string form contains "Tensor".
     """Return True if the action class is a chat-style env (tokens field)."""
     if hasattr(action_cls, "model_fields"):
         for field_name, field_info in action_cls.model_fields.items():
@@ -714,6 +851,11 @@ def _is_chat_env(action_cls: Type[Action]) -> bool:
 
 
 def _extract_action_fields(action_cls: Type[Action]) -> List[Dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: From the action's JSON schema (empty list on AttributeError),
+    # returns one dict per property except metadata with name, input type,
+    # required flag, description, default, enum choices, numeric and length bounds,
+    # pattern, placeholder and help text.
     """Extract enhanced field metadata from Action class for form generation."""
     # Use Pydantic's JSON schema generation for robust metadata extraction
     try:
@@ -761,6 +903,11 @@ def _extract_action_fields(action_cls: Type[Action]) -> List[Dict[str, Any]]:
 def _determine_input_type_from_schema(
     field_info: Dict[str, Any], field_name: str
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Maps a field to a UI input type: "tensor" if the name contains
+    # "tokens", "select" for enums, "checkbox" for booleans, "number" for
+    # integer/number, "textarea" for strings with maxLength > 100 or names
+    # containing message/code, otherwise "text".
     """Determine input type from JSON schema for form generation (Gradio UI)."""
     schema_type = field_info.get("type")
 
@@ -792,6 +939,9 @@ def _determine_input_type_from_schema(
 
 
 def _generate_placeholder(field_name: str, field_info: Dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns placeholder text based on the field name (code and tokens get
+    # specific hints; otherwise "Enter <name with spaces>...").
     """Generate placeholder text."""
     if "message" in field_name.lower():
         return f"Enter {field_name.replace('_', ' ')}..."
@@ -804,6 +954,9 @@ def _generate_placeholder(field_name: str, field_info: Dict[str, Any]) -> str:
 
 
 def _generate_help_text(field_name: str, field_info: Dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the schema description if present, else a canned hint for
+    # names containing action_id, game_name, tokens, code or message, else "".
     """Generate help text."""
     description = field_info.get("description", "")
     if description:

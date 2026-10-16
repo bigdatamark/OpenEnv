@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Test of the snake environment's web playground hooks (move buttons and board HTML). Skipped
+# without marlenv.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """The Snake board and moves in the web playground."""
@@ -11,6 +14,10 @@ from snake_env.server.snake_environment import SnakeEnvironment
 
 
 def test_snake_web_playground():
+    # [FUNCTION DOC]
+    # On a 10x10 board, web_actions offers straight/left/right; the rendered board after a step has an
+    # aria label, 100 cells and no hex colours; a grid value 13 renders a rounded head; an empty
+    # observation renders None.
     env = SnakeEnvironment(height=10, width=10)
     obs = env.reset().model_dump()
     assert env.web_actions(obs) == [

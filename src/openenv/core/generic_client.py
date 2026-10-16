@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Untyped EnvClient that sends and receives plain dicts, for connecting to any
+# OpenEnv server without installing its package, plus GenericAction, a dict
+# with a keyword-argument constructor.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -15,6 +19,10 @@ from .env_client import EnvClient
 
 
 class GenericEnvClient(EnvClient[Dict[str, Any], Dict[str, Any], Dict[str, Any]]):
+    # [CLASS DOC]
+    # EnvClient whose actions, observations and state are dicts. Connection,
+    # factories (from_docker_image, from_env) and dual sync/async behavior are
+    # inherited.
     """
     Environment client that works with raw dictionaries instead of typed classes.
 
@@ -56,6 +64,10 @@ class GenericEnvClient(EnvClient[Dict[str, Any], Dict[str, Any], Dict[str, Any]]
     """
 
     def _step_payload(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the action as a dict: dicts unchanged (same object), pydantic models
+        # via model_dump, other objects via vars(), else dict(action) (which may raise
+        # TypeError/ValueError).
         """
         Convert action to payload for the server.
 
@@ -86,6 +98,9 @@ class GenericEnvClient(EnvClient[Dict[str, Any], Dict[str, Any], Dict[str, Any]]
         return dict(action)
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[Dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns a StepResult with the payload's observation dict (default {}),
+        # reward, done (default False) and metadata.
         """
         Parse server response into a StepResult.
 
@@ -107,6 +122,8 @@ class GenericEnvClient(EnvClient[Dict[str, Any], Dict[str, Any], Dict[str, Any]]
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the state payload unchanged.
         """
         Parse state response from the server.
 
@@ -124,6 +141,9 @@ class GenericEnvClient(EnvClient[Dict[str, Any], Dict[str, Any], Dict[str, Any]]
 
 
 class GenericAction(Dict[str, Any]):
+    # [CLASS DOC]
+    # Dict subclass constructed from keyword arguments, for readability when
+    # stepping a GenericEnvClient.
     """
     A dictionary subclass for creating actions when using GenericEnvClient.
 
@@ -152,6 +172,8 @@ class GenericAction(Dict[str, Any]):
     """
 
     def __init__(self, **kwargs: Any) -> None:
+        # [FUNCTION DOC]
+        # Initializes the dict with the given keyword arguments.
         """
         Create a GenericAction from keyword arguments.
 
@@ -169,6 +191,8 @@ class GenericAction(Dict[str, Any]):
         super().__init__(kwargs)
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "GenericAction(k=v, ...)" using reprs of values.
         """Return a readable representation."""
         items = ", ".join(f"{k}={v!r}" for k, v in self.items())
         return f"GenericAction({items})"

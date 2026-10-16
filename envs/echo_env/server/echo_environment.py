@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Echo environment: an MCPEnvironment whose behavior is entirely provided by two inline FastMCP tools.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -45,6 +47,9 @@ from fastmcp import FastMCP
 
 
 class EchoEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # Pure MCP environment counting steps per episode and resets; rewards are always 0.0 and episodes never end.
+    # Supports concurrent sessions.
     """
     A pure MCP echo environment that echoes back messages.
 
@@ -69,12 +74,17 @@ class EchoEnvironment(MCPEnvironment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the echo tools on a FastMCP server, initializes the MCP base, and creates a state with a fresh
+        # episode id and a reset counter of 0.
         """Initialize the echo environment with MCP server and tools."""
         # Create MCP server and define tools inline
         mcp = FastMCP("echo_env")
 
         @mcp.tool
         def echo_message(message: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: returns the message unchanged.
             """
             Echo back the provided message.
 
@@ -88,6 +98,8 @@ class EchoEnvironment(MCPEnvironment):
 
         @mcp.tool
         def echo_with_length(message: str) -> dict:
+            # [FUNCTION DOC]
+            # MCP tool: returns {"message": message, "length": number of characters}.
             """
             Echo back the message with its length.
 
@@ -110,6 +122,9 @@ class EchoEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Creates a new state (given or random episode id, step 0), increments the reset counter, and returns a ready
+        # Observation (reward 0.0, metadata status "ready"). seed and kwargs are ignored.
         """
         Reset the environment.
 
@@ -139,6 +154,8 @@ class EchoEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Fallback for non-MCP actions: returns an observation with an "Unknown action type" error in metadata.
         """
         Handle non-MCP actions.
 
@@ -168,6 +185,8 @@ class EchoEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count and delegates to the MCP base step (list/call tools or _step_impl).
         """
         Execute a step in the environment.
 
@@ -193,6 +212,8 @@ class EchoEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async variant: increments step_count and awaits the MCP base step_async.
         """
         Async step used by the WebSocket handler.
 
@@ -204,6 +225,8 @@ class EchoEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property: returns the State (episode_id, step_count).
         """
         Get the current environment state.
 

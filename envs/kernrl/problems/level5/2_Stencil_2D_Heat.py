@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 5): one Jacobi iteration of the 5-point 2D stencil on
+# a 2048 x 2048 grid with fixed boundaries.
 """
 2D Stencil Computation - Heat Equation / Jacobi Iteration
 
@@ -18,6 +21,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference stencil model. No parameters.
     """
     Applies one iteration of 2D Jacobi stencil (5-point Laplacian).
 
@@ -28,9 +33,15 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(self, u: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns a copy of u where every interior cell is 0.25 times the sum of its
+        # four neighbors (computed from the old values) and boundary cells are
+        # unchanged.
         """
         Apply one Jacobi iteration.
 
@@ -66,6 +77,9 @@ grid_width = 2048
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [u] with random interior values and Dirichlet boundaries: top and
+    # left edges 1.0, bottom and right edges 0.0 (set in that order).
     # Initialize with random values (or could be zeros with boundary conditions)
     u = torch.randn(grid_height, grid_width)
     # Set boundary conditions (Dirichlet - fixed boundary)
@@ -77,4 +91,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

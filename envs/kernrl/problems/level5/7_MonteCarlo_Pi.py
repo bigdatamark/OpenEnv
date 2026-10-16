@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 5): Monte Carlo estimate of pi from 10 million
+# pre-generated random points (classification plus reduction).
 """
 Monte Carlo Pi Estimation
 
@@ -21,6 +24,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model. No parameters.
     """
     Monte Carlo estimation of Pi using random sampling.
 
@@ -29,9 +34,14 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(self, random_points: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Counts points with x^2 + y^2 <= 1 and returns 4 * count / N as a scalar
+        # tensor.
         """
         Compute Pi estimate from random points.
 
@@ -61,10 +71,14 @@ num_samples = 10_000_000
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [points] uniform in [0, 1)^2, shape (num_samples, 2).
     # Pre-generate random points
     random_points = torch.rand(num_samples, 2)
     return [random_points]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

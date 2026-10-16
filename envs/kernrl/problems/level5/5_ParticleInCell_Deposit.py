@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 5): Cloud-in-Cell charge deposition of 100000 particles
+# onto a 256 x 256 grid; the reference scatters per particle in a Python loop.
 """
 Particle-in-Cell (PIC) Charge Deposition
 
@@ -19,6 +22,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference CIC deposition model storing the grid size (default 256).
     """
     Deposits particle charges onto a 2D grid using Cloud-in-Cell (CIC) interpolation.
 
@@ -27,10 +32,18 @@ class Model(nn.Module):
     """
 
     def __init__(self, grid_size: int = 256):
+        # [FUNCTION DOC]
+        # Stores grid_size.
         super(Model, self).__init__()
         self.grid_size = grid_size
 
     def forward(self, positions: torch.Tensor, charges: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Computes each particle's cell (floor of position) and fractional offsets
+        # (computed before clamping cells to [0, grid_size - 2]), forms the four
+        # bilinear weights times the charge, and adds them to the cell's four corners
+        # (x index first) one particle at a time. Returns the (grid_size, grid_size)
+        # grid in the positions' dtype.
         """
         Deposit particle charges onto grid.
 
@@ -85,6 +98,9 @@ grid_size = 256
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns random positions uniform in [0, grid_size - 1) per axis and normal
+    # random charges.
     # Random particles uniformly distributed in grid
     positions = torch.rand(num_particles, 2) * (grid_size - 1)
     charges = torch.randn(num_particles)  # Can be positive or negative
@@ -92,4 +108,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [grid_size].
     return [grid_size]
