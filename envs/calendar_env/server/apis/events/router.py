@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI router for the events resource (Google Calendar v3) under /calendars/{calendarId}/events: list, insert, get,
+# patch, update, delete, move, quickAdd, import, instances and watch. User context comes from request headers. Every
+# endpoint checks the user's ACL role on the calendar (reader+ for reads, writer/owner for writes) before delegating
+# to EventManager; sendUpdates must be one of all/externalOnly/none where accepted.
 """
 Events API endpoints following Google Calendar API v3 structure
 Handles all 11 Events operations with exact Google API compatibility
@@ -46,6 +51,8 @@ session_manager = CalendarSessionManager()
 
 
 def get_event_manager(database_id: str) -> EventManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new EventManager for the database id.
     """Get event manager for the specified database"""
     return EventManager(database_id)
 
@@ -57,6 +64,9 @@ def check_event_acl_permissions(
     allowed_roles: list[str],
     operation: str = "access",
 ):
+    # [FUNCTION DOC]
+    # HELPER: Returns the calendar if the user holds one of allowed_roles on it, else raises HTTPException 403 naming the
+    # roles and operation label.
     """Check ACL permissions for event operations"""
     calendar = calendar_manager.get_calendar_by_id(user_id, calendar_id, allowed_roles)
     if not calendar:
@@ -142,6 +152,12 @@ async def list_events(
         description="Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter by. When specified, entries deleted since this time will always be included regardless of showDeleted. Optional. The default is not to filter by last modification time.",
     ),
 ):
+    # [FUNCTION DOC]
+    # GET /calendars/{calendarId}/events: requires reader+. Validates iCalUID (local@domain.tld pattern) and pageToken
+    # (non-negative integer string), converts eventTypes to a comma-separated string and returns the manager's
+    # EventListResponse for the many Google filters (maxResults 1-2500 default 250, orderBy default startTime, q, time
+    # bounds, sync token, etc.). Raises: 403, 500; ValueErrors map to 404.
+    # KNOWN ISSUE: input validation errors (bad iCalUID/pageToken) are reported as 404 instead of 400.
     """
     Returns events on the specified calendar
     ACL Required: reader, writer, or owner role
@@ -248,6 +264,10 @@ async def create_event(
         description="Whether API client performing operation supports event attachments",
     ),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/events (201): requires writer/owner; validates sendUpdates, event colorId, and presence
+    # of start and end (400). Creates the event with the query options and truncates attendees to maxAttendees (setting
+    # attendeesOmitted). Returns the Event. Raises: 400 (ValueError, ValidationError, validation), 403, 500.
     """
     Creates an event
     ACL Required: writer or owner role
@@ -343,6 +363,9 @@ async def get_event(
         description="Maximum number of attendees to include in the response. If there are more than the specified number of attendees, only the participant is returned. Optional.",
     ),
 ):
+    # [FUNCTION DOC]
+    # GET /calendars/{calendarId}/events/{eventId}: requires reader+; returns the event (optional timeZone and maxAttendees
+    # passed to the manager). Raises: 404 if missing, 403, 500.
     """
     Returns an event
 
@@ -409,6 +432,10 @@ async def patch_event(
         description="Whether API client performing operation supports event attachments",
     ),
 ):
+    # [FUNCTION DOC]
+    # PATCH /calendars/{calendarId}/events/{eventId}: requires writer/owner; validates sendUpdates, requires at least one
+    # non-None field and valid colors, then updates with patch semantics; truncates attendees to maxAttendees. Returns the
+    # Event. Raises: 400, 403, 404, 500.
     """
     Updates an event (partial update) following Google Calendar API v3 specification.
 
@@ -525,6 +552,10 @@ async def update_event(
         description="Whether API client performing operation supports event attachments",
     ),
 ):
+    # [FUNCTION DOC]
+    # PUT /calendars/{calendarId}/events/{eventId}: requires writer/owner and both start and end (400); validates sendUpdates
+    # and colors; defaults status to "confirmed" and visibility to "default" on the request when unset, then performs a
+    # full replace; truncates attendees. Returns the Event. Raises: 400, 403, 404, 500.
     """
     Updates an event (full update) following Google Calendar API v3 specification.
 
@@ -628,6 +659,9 @@ async def delete_event(
         description="Guests who should receive notifications. Acceptable values are: 'all' (notifications sent to all guests), 'externalOnly' (notifications sent to non-Google Calendar guests only), 'none' (no notifications sent)",
     ),
 ):
+    # [FUNCTION DOC]
+    # DELETE /calendars/{calendarId}/events/{eventId} (204): validates sendUpdates (default "all"), requires writer/owner
+    # and an existing event, deletes it. Returns None. Raises: 400, 403, 404, 500 (also when deletion reports failure).
     """
     Deletes an event
     ACL Required: writer or owner role (owner required for events created by others)
@@ -689,6 +723,10 @@ async def move_event(
         "all", description="Guests who should receive notifications"
     ),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/events/{eventId}/move?destination=...: validates sendUpdates, requires writer/owner on the
+    # source and an existing event of type "default" (400 for other types); the manager moves it (destination permissions
+    # checked there). Returns the moved Event. Raises: 400 (incl. ValueError), 403, 404, 500.
     """
     Moves an event to another calendar
     ACL Required:
@@ -767,6 +805,9 @@ async def quick_add_event(
         "all", description="Guests who should receive notifications"
     ),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/events/quickAdd?text=... (201): validates sendUpdates, requires writer/owner, creates an
+    # event parsed from free text by the manager. Returns the Event. Raises: 400, 403, 500.
     """
     Creates an event based on a simple text string
 
@@ -826,6 +867,10 @@ async def import_event(
         description="Whether API client performing operation supports event attachments",
     ),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/events/import (201): requires writer/owner, start and end, a non-empty iCalUID, every
+    # attendee email to exist as a user in the database, and valid colors; imports a private copy via the manager.
+    # Returns the imported Event. Raises: 400 (validation, ValueError, failed import), 403, 500.
     """
     Imports an event. This operation is used to add a private copy of an
     existing event to a calendar.
@@ -960,6 +1005,11 @@ async def get_event_instances(
         description="Time zone used in the response. Optional. The default is the time zone of the calendar.",
     ),
 ):
+    # [FUNCTION DOC]
+    # GET /calendars/{calendarId}/events/{eventId}/instances: requires reader+; validates pageToken and returns the
+    # manager's expansion of the recurring event (maxResults 1-2499, originalStart, time bounds, showDeleted, timeZone).
+    # Raises: 400, 403, 500.
+    # KNOWN ISSUE: maxResults declares both lt=2500 and le=2500, so 2500 itself is rejected despite the description.
     """
     Returns instances of the specified recurring event
 
@@ -1029,6 +1079,10 @@ async def watch_events(
         description="Event types of resources to watch. Optional. This parameter can be repeated multiple times to watch resources of different types. If unset, returns all event types. Acceptable values are: 'birthday' - Special all-day events with an annual recurrence, 'default' - Regular events, 'focusTime' - Focus time events, 'fromGmail' - Events from Gmail, 'outOfOffice' - Out of office events, 'workingLocation' - Working location events.",
     ),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/events/watch: validates an optional single eventTypes value (400), checks the user exists
+    # (404) and has reader+ access (403), then creates a watch channel via the manager. Returns the Channel.
+    # Raises: 400 for ValueError, 500 otherwise.
     """
     Watch for changes to Events resources
 

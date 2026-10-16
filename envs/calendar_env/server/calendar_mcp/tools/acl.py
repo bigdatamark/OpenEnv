@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Data-only module: ACL_TOOLS, a list of MCP tool definitions (name, long description, JSON input schema) for calendar
+# ACL operations mirroring the REST ACL router: get_acl_rule, list_acl_rules, insert_acl_rule, update_acl_rule,
+# patch_acl_rule, delete_acl_rule and watch_acl. No logic; execution is handled by the MCP handler.
 """
 ACL Tools Module
 

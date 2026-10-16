@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Provides CalendarEnvironment, the conventionally named OpenEnv environment class for this env.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,6 +17,8 @@ from .openenv_wrapper.mcp_env_environment import MCPEnvironment
 
 
 class CalendarEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # Pure alias subclass of the MCP-based environment in openenv_wrapper (all behavior inherited).
     """Calendar environment backed by MCP tools."""
 
     pass

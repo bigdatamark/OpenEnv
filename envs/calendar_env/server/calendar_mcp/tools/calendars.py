@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Data-only module: CALENDARS_TOOLS, MCP tool definitions (name, description, JSON input schema) for calendar
+# management mirroring the calendars router: create_calendar, get_calendar, patch_calendar, update_calendar,
+# delete_calendar and clear_calendar. No logic.
 """
 Calendars Tools Module
 

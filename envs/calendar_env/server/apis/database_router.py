@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Database-management router under /api for the Calendar server: download sample SQL, seed a database from SQL, view
+# database contents, get the schema, download the .db file, run arbitrary SQL, reset to stored seed, clone and delete
+# databases. Each database id maps to its own SQLite file managed by a module-level CalendarSessionManager; seed SQL is
+# persisted in a separate seed database for later resets. No authentication is applied to these endpoints.
 """
 Database Management API endpoints for Calendar API
 Handles database operations like seeding, viewing, and schema management
@@ -34,6 +39,9 @@ router = APIRouter(prefix="/api", tags=["database"])
 
 @router.get("/sample-data")
 async def get_sample_data():
+    # [FUNCTION DOC]
+    # GET /api/sample-data: returns a dict with success flag, message, format "sql" and the multi-user sample SQL script.
+    # Raises: HTTPException 500 on failure.
     """Get multi-user Calendar sample data as SQL script for download/inspection"""
     try:
         sql_content = get_multi_user_sql()
@@ -53,6 +61,15 @@ async def get_sample_data():
 
 @router.post("/seed-database")
 async def seed_database(body: dict):
+    # [FUNCTION DOC]
+    # POST /api/seed-database: body requires database_id and sql_content (400 otherwise); optional name/description.
+    # Drops every table in the database, recreates the schema from the SQLAlchemy models, strips blank and "--" comment
+    # lines, splits the rest on ";" and executes each statement (any failure aborts with 500). Then, best-effort (errors
+    # only logged): enforces one primary calendar per user and inserts missing owner and writer ACL rows (plus a user scope)
+    # for each calendar owner. Finally upserts the SQL into the seed store (best-effort).
+    # Returns: dict with success, message, database_id and sql_stored flag. Side effects: destructive DB rewrite.
+    # KNOWN ISSUE: splitting on ";" breaks statements whose string literals contain semicolons, and dropping "--" lines
+    # only handles whole-line comments.
     """Seed database with user-provided SQL content or default sample data"""
     try:
         database_id = body.get("database_id")
@@ -273,6 +290,10 @@ async def seed_database(body: dict):
 
 @router.get("/database-state")
 async def get_database_state(x_database_id: str = Header(alias="x-database-id")):
+    # [FUNCTION DOC]
+    # GET /api/database-state: initializes the database if needed, then returns every user table's row count and up to
+    # 100 rows each, plus file path, size, mtime and table count. Returns a "not_created" payload if the file is missing.
+    # Raises: HTTPException 500 on failure.
     """Get current database state and all data for frontend tabular display"""
     try:
         database_id = x_database_id
@@ -358,6 +379,8 @@ async def get_database_state(x_database_id: str = Header(alias="x-database-id"))
 
 @router.get("/schema")
 async def get_schema():
+    # [FUNCTION DOC]
+    # GET /api/schema: returns the static schema description derived from the SQLAlchemy models. Raises 500 on failure.
     """Get database schema as JSON"""
     try:
         # Return static schema definition from SQLAlchemy models
@@ -378,6 +401,10 @@ async def get_schema():
 async def download_database_file(
     x_database_id: str = Header(default="default", alias="x-database-id"),
 ):
+    # [FUNCTION DOC]
+    # GET /api/download-db-file: header x-database-id (default "default"). Initializes the DB if needed and returns the
+    # SQLite file as an attachment named with a sanitized id and timestamp. Raises: 400 for empty id or non-file path, 404
+    # if missing, 403 if unreadable, 500 otherwise.
     """Download the actual SQLite database file (.db)"""
     try:
         database_id = x_database_id.strip()
@@ -433,6 +460,8 @@ async def download_database_file(
 
 
 class SQLQueryRequest(BaseModel):
+    # [CLASS DOC]
+    # Request body for the SQL runner: non-empty query string and limit (1-1000, default 100).
     """Request model for executing SQL queries"""
 
     query: str = Field(..., min_length=1, description="SQL query to execute")
@@ -443,6 +472,11 @@ class SQLQueryRequest(BaseModel):
 
 @router.post("/sql-runner", response_model=Dict[str, Any])
 def execute_custom_query(request: SQLQueryRequest, x_database_id: str = Header(...)):
+    # [FUNCTION DOC]
+    # POST /api/sql-runner: header x-database-id required. Strips trailing ";" and runs the query via BaseManager against the
+    # database file. Returns success, message, data rows, row_count and the executed query. Raises: HTTPException 400 with
+    # the error text on any failure. Side effects: can execute any SQL, including writes.
+    # KNOWN ISSUE: the "limit" field is accepted but never applied (the comment says a LIMIT clause is added, but it is not).
     """Execute a custom SQL query with limit"""
     try:
         # Ensure database exists
@@ -472,6 +506,12 @@ def execute_custom_query(request: SQLQueryRequest, x_database_id: str = Header(.
 
 @router.post("/reset-database")
 async def reset_database(body: dict):
+    # [FUNCTION DOC]
+    # POST /api/reset-database: body requires database_id. Uses the stored seed SQL for that id; if none is stored but
+    # sql_content is given, stores it first (lazy migration); otherwise 400. Closes the session, deletes the DB file,
+    # recreates tables and runs the seed SQL as one script. Returns success, message and database_id.
+    # Raises: 400/500 HTTPExceptions.
+    # KNOWN ISSUE: leftover -wal/-shm/-journal files of the deleted DB are not removed.
     """Reset a database to its original seeded state."""
     try:
         database_id = body.get("database_id")
@@ -549,6 +589,11 @@ async def reset_database(body: dict):
 
 @router.post("/clone-database")
 async def clone_database(body: dict):
+    # [FUNCTION DOC]
+    # POST /api/clone-database: body database_id (or source_database_id). Copies the source DB file and any -wal/-shm/
+    # -journal companions to a new id "db_clone_<ms timestamp>_<9 random chars>", closes the source session first, and
+    # initializes a session for the clone without creating tables. Returns ids, new path and size.
+    # Raises: 400 if no id, 404 if the source is missing, 500 otherwise.
     """
     Clone an existing database to a new database.
     Returns the new database_id.
@@ -627,6 +672,10 @@ async def clone_database(body: dict):
 
 @router.delete("/delete-database")
 async def delete_database(body: dict):
+    # [FUNCTION DOC]
+    # DELETE /api/delete-database: body database_id (400 if missing; "default" is refused with 400). Closes its session,
+    # deletes the file and companion files, and best-effort deletes its stored seed SQL. Returns success, id and deleted
+    # size. Raises: 404 if missing, 500 otherwise.
     """
     Delete a cloned database.
     WARNING: This permanently deletes the database and cannot be undone.

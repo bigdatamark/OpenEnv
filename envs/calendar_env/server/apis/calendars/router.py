@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI router for the calendars resource (Google Calendar v3) under /calendars: get, patch, put, create, delete
+# and clear. "primary" as calendarId resolves to the user's primary calendar. Permissions are enforced by looking the
+# calendar up with the user's allowed ACL roles. Responses are Calendar models built from the manager's formatter.
 """
 Calendar API endpoints following Google Calendar API v3 structure
 Handles CRUD operations for calendars
@@ -22,6 +26,8 @@ session_manager = CalendarSessionManager()
 
 
 def get_calendar_manager(database_id: str) -> CalendarManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new CalendarManager for the database id.
     """Get calendar manager for the specified database"""
     return CalendarManager(database_id)
 
@@ -29,6 +35,8 @@ def get_calendar_manager(database_id: str) -> CalendarManager:
 def check_acl_permissions(
     manager: CalendarManager, user_id: str, calendar_id: str, allowed_roles: List[str]
 ):
+    # [FUNCTION DOC]
+    # HELPER: Returns the calendar if the user holds one of allowed_roles on it, else raises HTTPException 403.
     calendar = manager.get_calendar_by_id(user_id, calendar_id, allowed_roles)
     if not calendar:
         raise HTTPException(
@@ -42,6 +50,9 @@ def check_acl_permissions(
 async def get_calendar(
     calendarId: str, user_context: tuple[str, str] = Depends(get_user_context)
 ):
+    # [FUNCTION DOC]
+    # GET /calendars/{calendarId}: returns calendar metadata (primary, or any calendar the user can read/write/own).
+    # Raises: 404 if no primary calendar, 403 without permission or on PermissionError, 500 otherwise.
     """
     Returns metadata for a calendar
 
@@ -83,6 +94,10 @@ def patch_calendar(
     update: CalendarUpdateRequest = Body(...),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # PATCH /calendars/{calendarId}: partial update with the non-None fields of the request (400 if none), validates color
+    # fields (400 on error), requires writer/owner role, updates, refreshes and returns the calendar.
+    # Raises: 400/403/404/500 as described. Side effects: DB write.
     """
     Updates calendar metadata (partial update)
 
@@ -147,6 +162,10 @@ async def update_calendar(
     calendar_request: CalendarUpdateRequest,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # PUT /calendars/{calendarId}: same flow as patch using only explicitly set non-None fields; an empty body is allowed
+    # (no 400). Requires writer/owner. Returns the updated calendar. Raises: 400/403/404/500.
+    # KNOWN ISSUE: despite being the "full update" endpoint it does not clear omitted fields; it behaves like PATCH.
     """
     Updates calendar metadata (full update)
 
@@ -204,6 +223,9 @@ async def create_calendar(
     calendar_request: CalendarCreateRequest,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars (201): checks the user exists (404), validates colors (400), creates a secondary calendar owned by the
+    # user and returns it. Raises: 500 if creation returns nothing or on unexpected errors.
     """
     Creates a secondary calendar
 
@@ -249,6 +271,10 @@ async def create_calendar(
 def delete_calendar(
     calendarId: str, user_context: tuple[str, str] = Depends(get_user_context)
 ):
+    # [FUNCTION DOC]
+    # DELETE /calendars/{calendarId}: requires owner role and deletes the calendar ("primary" resolves to the primary
+    # calendar; the manager decides whether that is allowed). Returns a success message dict.
+    # Raises: 403 without permission, 404 if not found, 500 otherwise.
     """
     Deletes a secondary calendar
 
@@ -294,6 +320,10 @@ def delete_calendar(
 def clear_calendar(
     calendarId: str, user_context: tuple[str, str] = Depends(get_user_context)
 ):
+    # [FUNCTION DOC]
+    # DELETE /calendars/{calendarId}/clear: requires owner/writer, deletes all events of the calendar and returns the number
+    # removed. Raises: 400 for ValueError, 403, 404, 500.
+    # KNOWN ISSUE: docstring and Google API use POST for clear, but the route is registered as DELETE.
     """
     Clears a primary calendar (deletes all events)
 

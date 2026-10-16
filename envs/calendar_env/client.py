@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Synchronous HTTP client (httpx) for the Calendar environment server plus a scenario benchmark runner and CLI.
+# CalendarEnv talks to /reset, /step, /state and the /api database helpers, sending the database id, access token and
+# extra context as x-* headers. ScenarioRunner drives an LLM (via openenv's create_llm_client) through tool calls
+# against the env and scores runs with VerifierEngine (SQL state checks, LLM-judged response checks, tool-usage checks).
+# Defines its own lightweight StepResult dataclass instead of using openenv's EnvClient.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -47,6 +53,8 @@ ObsT = TypeVar("ObsT")
 
 @dataclass
 class StepResult(Generic[ObsT]):
+    # [CLASS DOC]
+    # Generic dataclass holding an observation, optional reward, done flag (default False) and optional metadata.
     observation: ObsT
     reward: Optional[float] = None
     done: bool = False
@@ -58,12 +66,17 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "response_output"
 
 
 def _generate_database_id() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new id "db_<epoch ms>_<9 random lowercase/digit chars>".
     timestamp = int(time.time() * 1000)
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=9))
     return f"db_{timestamp}_{suffix}"
 
 
 class CalendarEnv:
+    # [CLASS DOC]
+    # HTTP client bound to a base URL with default database id ("default"), optional access token, extra context headers
+    # and request timeout (60s). Lazily creates one httpx.Client; usable as a context manager (closes on exit).
     """HTTP client for the Calendar environment."""
 
     def __init__(
@@ -74,6 +87,8 @@ class CalendarEnv:
         context: Optional[Dict[str, Any]] = None,
         timeout_s: float = 60.0,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration (trailing "/" stripped from base_url); no network I/O.
         self.base_url = base_url.rstrip("/")
         self.database_id = database_id
         self.access_token = access_token
@@ -82,18 +97,26 @@ class CalendarEnv:
         self._client: Optional[httpx.Client] = None
 
     def __enter__(self) -> "CalendarEnv":
+        # [FUNCTION DOC]
+        # Creates the HTTP client if needed and returns self.
         self._ensure_client()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        # [FUNCTION DOC]
+        # Closes the HTTP client.
         self.close()
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes and discards the HTTP client if one exists; idempotent.
         if self._client is not None:
             self._client.close()
             self._client = None
 
     def _ensure_client(self) -> httpx.Client:
+        # [FUNCTION DOC]
+        # HELPER: Returns the HTTP client, creating it with the configured timeout on first use.
         if self._client is None:
             self._client = httpx.Client(timeout=self.timeout_s)
         return self._client
@@ -104,6 +127,11 @@ class CalendarEnv:
         access_token: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
+        # [FUNCTION DOC]
+        # HELPER: Builds request headers: JSON content type, x-database-id (override or default), x-access-token (override or
+        # default) and every non-None context entry (default context merged with the override) as a lowercased header with "_"
+        # replaced by "-" and an "x-" prefix added if missing; context never overrides the database/token headers.
+        # Returns the header dict.
         headers: Dict[str, str] = {"Content-Type": "application/json"}
 
         resolved_db = database_id if database_id is not None else self.database_id
@@ -133,6 +161,9 @@ class CalendarEnv:
     def _parse_step_result(
         self, payload: Dict[str, Any]
     ) -> StepResult[CalendarObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult with a CalendarObservation from a server response (success default True, error message,
+        # tools list, tool result, metadata preferring top-level "metadata"); reward may be None, done defaults to False.
         obs_data = payload.get("observation", {})
         observation = CalendarObservation(
             success=obs_data.get("success", True),
@@ -156,6 +187,9 @@ class CalendarEnv:
         sql_content: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> StepResult[CalendarObservation]:
+        # [FUNCTION DOC]
+        # POSTs /reset with optional database_id and sql_content in the body (no body if neither) and headers. Returns the parsed
+        # StepResult. Raises: httpx.HTTPStatusError on non-2xx responses, transport errors.
         payload: Dict[str, Any] = {}
         if database_id:
             payload["database_id"] = database_id
@@ -177,6 +211,8 @@ class CalendarEnv:
         database_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> StepResult[CalendarObservation]:
+        # [FUNCTION DOC]
+        # Reads a SQL file (expanded and resolved path) and resets with its content. Raises: FileNotFoundError if missing.
         sql_path = Path(sql_file_path).expanduser().resolve()
         if not sql_path.exists():
             raise FileNotFoundError(f"SQL file not found: {sql_path}")
@@ -191,6 +227,9 @@ class CalendarEnv:
         database_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> StepResult[CalendarObservation]:
+        # [FUNCTION DOC]
+        # POSTs /step with the action (CalendarAction dumped without None fields, or a raw dict). Returns the parsed StepResult.
+        # Raises: TypeError for other action types; httpx.HTTPStatusError on failure.
         if isinstance(action, CalendarAction):
             action_payload = action.model_dump(exclude_none=True)
         elif isinstance(action, dict):
@@ -212,6 +251,8 @@ class CalendarEnv:
         database_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Steps with a ListToolsAction and returns the observation's tool list (empty list if None).
         result = self.step(
             CalendarAction(action_type="ListToolsAction"),
             database_id=database_id,
@@ -226,6 +267,8 @@ class CalendarEnv:
         database_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> CalendarObservation:
+        # [FUNCTION DOC]
+        # Steps with a ToolCallAction for tool_name and arguments (default {}) and returns the observation.
         result = self.step(
             CalendarAction(
                 action_type="ToolCallAction",
@@ -243,6 +286,9 @@ class CalendarEnv:
         database_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # GETs /state, passing each verification SQL query as a repeated "verify_queries" parameter. Returns the JSON dict
+        # (including "verification_results" when queries are given). Raises httpx.HTTPStatusError on failure.
         params = (
             [("verify_queries", q) for q in verify_queries] if verify_queries else None
         )
@@ -256,6 +302,8 @@ class CalendarEnv:
         return response.json()
 
     def get_sample_sql(self) -> str:
+        # [FUNCTION DOC]
+        # GETs /api/sample-data and returns its sql_content. Raises: ValueError if absent; HTTP errors.
         client = self._ensure_client()
         response = client.get(f"{self.base_url}/api/sample-data")
         response.raise_for_status()
@@ -272,6 +320,9 @@ class CalendarEnv:
         name: Optional[str] = None,
         description: Optional[str] = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # POSTs /api/seed-database with the SQL, a database id (given or newly generated) and name/description defaults.
+        # Returns the database id used. Raises HTTP errors. Side effects: replaces that server database's contents.
         db_id = database_id or _generate_database_id()
         payload = {
             "database_id": db_id,
@@ -291,6 +342,8 @@ class CalendarEnv:
         name: Optional[str] = None,
         description: Optional[str] = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Reads SQL from a file and seeds with it. Returns the database id. Raises FileNotFoundError if missing.
         sql_path = Path(sql_file_path).expanduser().resolve()
         if not sql_path.exists():
             raise FileNotFoundError(f"SQL file not found: {sql_path}")
@@ -308,6 +361,8 @@ class CalendarEnv:
         name: Optional[str] = None,
         description: Optional[str] = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Fetches the server's sample SQL and seeds with it. Returns the database id.
         sql_content = self.get_sample_sql()
         return self.seed_database(
             sql_content=sql_content,
@@ -319,6 +374,12 @@ class CalendarEnv:
 
 @dataclass
 class ScenarioConfig:
+    # [CLASS DOC]
+    # Dataclass for one benchmark scenario: env URL (field name misspelled "gym_enviornment_url"), seed SQL file, system
+    # and user prompts, LLM model/provider/key, database id, access token, context headers, execution mode ("openenv"),
+    # expected/restricted tool lists, verifier definitions, number of runs, reset-between-runs flag, temperature, max
+    # tokens, max iterations, seed mode ("reset" or "api") and output directory.
+    # NOTE: expected_tools is loaded but never used by the runner.
     gym_enviornment_url: str
     seed_database_file: str
     system_prompt: str
@@ -343,12 +404,17 @@ class ScenarioConfig:
 
 
 class VerifierEngine:
+    # [CLASS DOC]
+    # Evaluates verifier definitions after a run, using the env client for SQL checks (via /state verify_queries) and an
+    # LLM client as judge.
     def __init__(
         self,
         client: CalendarEnv,
         llm_client: "LLMClient",
         execution_mode: str = "openenv",
     ):
+        # [FUNCTION DOC]
+        # Stores the env client, LLM client and execution mode.
         self.client = client
         self.llm_client = llm_client
         self.execution_mode = execution_mode
@@ -360,6 +426,10 @@ class VerifierEngine:
         database_id: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Async. Dispatches by verifier["verifier_type"]: "database_state", "response_check" or "tool_execution" (each given the
+        # verifier's validation_config). Returns the check's result dict (always with "passed"); unknown types return passed False
+        # with an error.
         verifier_type = verifier.get("verifier_type")
         if verifier_type == "database_state":
             return await self._execute_database_state_verifier(
@@ -387,6 +457,10 @@ class VerifierEngine:
         database_id: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Runs the config's "query", extracts a scalar (single-column first row) or the full rows, and compares with
+        # "expected_value" using "comparison_type" (default equals). Returns passed, expected, actual, comparison type, query and
+        # details; or passed False with an error if the query is missing or fails.
         sql_query = validation_config.get("query")
         expected_value = validation_config.get("expected_value")
         comparison_type = validation_config.get("comparison_type", "equals")
@@ -423,6 +497,10 @@ class VerifierEngine:
         database_id: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Runs the config's "sql_query" and asks the LLM judge to score the model's final text against the result using
+        # "comparison_prompt"; passes when the score >= minimum_comparison_value (default 7). Returns the judge result, or passed
+        # False with an error for missing config or failed SQL.
         sql_query = validation_config.get("sql_query")
         comparison_prompt = validation_config.get("comparison_prompt")
         minimum_comparison_value = validation_config.get("minimum_comparison_value", 7)
@@ -448,6 +526,9 @@ class VerifierEngine:
     async def _execute_tool_execution_verifier(
         self, validation_config: Dict[str, Any], model_response: Dict[str, Any]
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Checks that every name in expected_tools was called and at least minimum_tool_calls (default 1) calls were
+        # made. Returns passed plus expected/called/missing tools and counts.
         expected_tools = validation_config.get("expected_tools", [])
         minimum_tool_calls = validation_config.get("minimum_tool_calls", 1)
 
@@ -473,6 +554,9 @@ class VerifierEngine:
         database_id: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Runs one SQL query through the env's /state endpoint. Returns {"success": True, "result": rows} or
+        # {"success": False, "error": ...} when no results, the result has an error, or any exception occurs. Never raises.
         try:
             state_data = self.client.state(
                 verify_queries=[query],
@@ -495,6 +579,8 @@ class VerifierEngine:
             return {"success": False, "error": str(exc)}
 
     def _extract_value_from_sql_result(self, sql_result: Dict[str, Any]) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns the single value of the first row when it is a one-column dict; otherwise the whole result list.
         result_data = sql_result.get("result", [])
         if isinstance(result_data, list) and result_data:
             first_row = result_data[0]
@@ -505,6 +591,9 @@ class VerifierEngine:
     def _compare_values(
         self, actual: Any, expected: Any, comparison_type: str
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Compares actual vs expected with "equals", "greater_than", "less_than" or "contains" (expected substring of
+        # str(actual)). Returns passed and a details string; unknown types or comparison exceptions give passed False.
         try:
             if comparison_type == "equals":
                 passed = actual == expected
@@ -528,6 +617,8 @@ class VerifierEngine:
             return {"passed": False, "details": f"Comparison error: {exc}"}
 
     def _extract_llm_content(self, model_response: Dict[str, Any]) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the first of "content", "text", "response" present in the model response (as str), else str of the dict.
         for key in ("content", "text", "response"):
             if key in model_response:
                 return str(model_response[key])
@@ -540,6 +631,11 @@ class VerifierEngine:
         comparison_prompt: str,
         minimum_score: int,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Async. Sends a system prompt requesting JSON {score 1-10, reasoning} and a user prompt with the DB result, the
+        # assistant response and the comparison task to the LLM client (no tools). Parses the reply (extracting a ```json block
+        # if present). Returns passed (score >= minimum), score and reasoning, or passed False with a parse error. LLM call
+        # errors propagate.
         system_prompt = (
             "You are an evaluator comparing database results with an assistant response. "
             "Return only JSON in this format: "
@@ -579,7 +675,13 @@ class VerifierEngine:
 
 
 class ScenarioRunner:
+    # [CLASS DOC]
+    # Runs a scenario benchmark: prepares the database, lists (and filters) tools, runs the LLM tool-calling loop for each
+    # run, runs verifiers and aggregates statistics.
     def __init__(self, config: ScenarioConfig):
+        # [FUNCTION DOC]
+        # Creates the env client from the config, an LLM client via create_llm_client (provider, model, key, temperature, max
+        # tokens) and a VerifierEngine; initializes empty tool list and seed SQL cache.
         from openenv.core.llm_client import create_llm_client
 
         self.config = config
@@ -603,6 +705,10 @@ class ScenarioRunner:
         self._seed_sql_content: Optional[str] = None
 
     def _prepare_database(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Loads seed SQL from the configured file (FileNotFoundError if missing). In "api" seed mode, seeds via
+        # /api/seed-database (using the server sample SQL when no file) and then resets with that SQL; in "reset" mode, resets
+        # with the file SQL (or none). Caches the SQL for later resets.
         sql_content = None
         seed_file = self.config.seed_database_file
 
@@ -630,6 +736,8 @@ class ScenarioRunner:
             )
 
     async def initialize(self) -> None:
+        # [FUNCTION DOC]
+        # Async. Prepares the database and loads the tool list, removing tools named in restricted_tools.
         self._prepare_database()
         self.available_tools = self.client.list_tools()
         if self.config.restricted_tools:
@@ -640,6 +748,9 @@ class ScenarioRunner:
             ]
 
     async def execute_benchmark(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Async. Initializes, then executes number_of_runs runs (resetting the DB with the cached SQL before runs 2+ when
+        # configured). Returns a dict with benchmark_config, per-run results and aggregated statistics.
         await self.initialize()
         runs: List[Dict[str, Any]] = []
 
@@ -668,6 +779,10 @@ class ScenarioRunner:
         }
 
     async def execute_single_run(self, run_number: int) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Async. Executes the task and verifiers and returns a run record: number, start time, duration ms, final response,
+        # conversation flow, tools used, tool results, verification results/summary (total, passed, failed, pass rate) and
+        # overall_success (all verifiers passed; True when there are none).
         start_time = datetime.now(timezone.utc)
         task_result = await self._execute_task()
         verification_results = await self._run_verifiers(task_result)
@@ -703,6 +818,11 @@ class ScenarioRunner:
         }
 
     async def _execute_task(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Async LLM loop for up to max_iterations: sends messages and available tools, records the assistant message,
+        # stops when no tool calls are returned; otherwise executes each tool call against the env, appends a "tool" message with
+        # the JSON tool result and records it. Returns the final assistant content, conversation flow, unique tools used (in
+        # order) and all tool results. Side effects: network calls to the LLM and env.
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": self.config.system_prompt},
             {"role": "user", "content": self.config.user_prompt},
@@ -786,6 +906,9 @@ class ScenarioRunner:
         }
 
     async def _run_verifiers(self, task_result: Dict[str, Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Async. Builds a model-response dict (final content plus tool calls) and runs every configured verifier, keyed by
+        # its "name" or "verifier_<n>". Returns the mapping of verifier name to result.
         verification_results: Dict[str, Any] = {}
         model_response = {
             "content": task_result.get("final_response", ""),
@@ -806,6 +929,9 @@ class ScenarioRunner:
         return verification_results
 
     def _calculate_statistics(self, runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Aggregates runs: totals and success rate, pass@1 (first run succeeded), verifier-level pass rate, per-verifier
+        # pass counts/rates, mean execution time and per-tool usage counts (number of runs using each tool).
         successful_runs = [r for r in runs if r.get("overall_success")]
         total_runs = len(runs)
         overall_success_rate = (
@@ -873,6 +999,9 @@ class ScenarioRunner:
 
 
 def _resolve_api_key(provider: str, config_key: Optional[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the configured key, else the provider's environment variable (OPENAI_API_KEY, ANTHROPIC_API_KEY,
+    # GOOGLE_API_KEY, else LLM_API_KEY), else LLM_API_KEY. Raises ValueError if none is found.
     if config_key:
         return config_key
 
@@ -898,6 +1027,13 @@ def _load_scenario_config(
     output_dir: Optional[str],
     access_token_override: Optional[str],
 ) -> ScenarioConfig:
+    # [FUNCTION DOC]
+    # HELPER: Loads a scenario JSON file (keys starting with "_" ignored) and applies CLI overrides to build a ScenarioConfig.
+    # Base URL from override or gym_enviornment_url/gym_environment_url/base_url; seed_mode must be reset/api; system_prompt,
+    # user_prompt, llm_provider and llm_model are required; only execution_mode "openenv" is allowed; auto_db generates a new
+    # database id (else override/config/"default"); API key resolved via environment if absent.
+    # Raises: FileNotFoundError, ValueError for missing/invalid fields, json errors.
+    # KNOWN ISSUE: the relative-output-path branch is unreachable because the path is already resolved to absolute.
     path = Path(config_path).expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError(f"Scenario config not found: {path}")
@@ -982,6 +1118,9 @@ def _load_scenario_config(
 
 
 def _write_scenario_output(result: Dict[str, Any], output_dir: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: Creates the output directory and writes the result as indented JSON to benchmark_results_<UTC timestamp>.json.
+    # Returns the file path.
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = (
         f"benchmark_results_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
@@ -993,6 +1132,8 @@ def _write_scenario_output(result: Dict[str, Any], output_dir: Path) -> Path:
 
 
 def _parse_json_arg(value: str) -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Parses a JSON object string; empty string gives {}. Raises ValueError for invalid JSON or non-object values.
     if not value:
         return {}
     try:
@@ -1005,6 +1146,13 @@ def _parse_json_arg(value: str) -> Dict[str, Any]:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point. With --scenario, loads the config and runs the benchmark, writing results to the output dir.
+    # Otherwise connects to --base-url with the database id (or a generated one with --auto-db), seeds/resets from --seed-sql
+    # (via the seed API first in "api" mode) or plain reset, prints the tool count, and optionally calls --tool with JSON
+    # --args and prints the observation.
+    # KNOWN ISSUE: in scenario mode the --base-url and --database-id defaults are always non-empty, so they always override
+    # the URL and database id from the scenario file.
     parser = argparse.ArgumentParser(description="Calendar environment HTTP client")
     parser.add_argument("--base-url", default="http://localhost:8004")
     parser.add_argument("--database-id", default="default")
@@ -1037,6 +1185,8 @@ def main() -> None:
         )
 
         async def _run() -> None:
+            # [FUNCTION DOC]
+            # HELPER: Async closure that runs the scenario benchmark and saves the results file.
             runner = ScenarioRunner(config)
             result = await runner.execute_benchmark()
             output_path = _write_scenario_output(result, config.output_dir)

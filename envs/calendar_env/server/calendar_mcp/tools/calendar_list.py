@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Data-only module: CALENDAR_LIST_TOOLS, MCP tool definitions (name, description, JSON input schema) for the user's
+# calendar list mirroring the calendarList router: get_calendar_list, get_calendar_from_list, add_calendar_to_list,
+# update_calendar_in_list, replace_calendar_in_list, remove_calendar_from_list and watch_calendar_list. No logic.
 """
 CalendarList Tools Module
 

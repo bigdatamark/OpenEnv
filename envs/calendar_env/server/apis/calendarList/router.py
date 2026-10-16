@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# FastAPI router for the user's calendar list (Google Calendar v3 calendarList) under /users/me/calendarList: list,
+# get, insert, patch, put, delete and watch. User context (database id, user id) comes from request headers; "primary"
+# resolves to the user's primary entry. Write endpoints validate colors (colorId against the calendar palette; RGB
+# background/foreground only with colorRgbFormat=true and #RRGGBB format, mapped to a matching colorId when both are
+# given), and sanitize defaultReminders (method email/popup, minutes >= 0) and notificationSettings (method email and a
+# known notification type).
 """
 CalendarList API endpoints following Google Calendar API v3 structure
 Handles user's calendar list operations with exact Google API compatibility
@@ -39,6 +46,8 @@ session_manager = CalendarSessionManager()
 
 
 def get_calendar_list_manager(database_id: str) -> CalendarListManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new CalendarListManager for the database id.
     """Get calendar list manager for the specified database"""
     return CalendarListManager(database_id)
 
@@ -62,6 +71,14 @@ async def get_calendar_list(
     showHidden: Optional[bool] = Query(False, description="Include hidden calendars"),
     syncToken: Optional[str] = Query(None, description="Token for incremental sync"),
 ):
+    # [FUNCTION DOC]
+    # GET /users/me/calendarList: lists entries with optional maxResults (1-250), minAccessRole, pageToken, showDeleted,
+    # showHidden and syncToken. A syncToken forbids minAccessRole and forces showDeleted/showHidden. Returns a
+    # CalendarListResponse with a fixed etag, items and next page/sync tokens.
+    # Raises: 400 for ValueError; intends 410 for expired sync tokens.
+    # KNOWN ISSUE: HTTPExceptions raised inside the outer try (410 for expired sync token, 400 for manager errors) are not
+    # re-raised and are converted to 500 by the generic handler.
+    # KNOWN ISSUE: the maxResults description says 0 is allowed but the validator requires > 0.
     """
     Returns the calendars on the user's calendar list
 
@@ -138,6 +155,9 @@ async def get_calendar_list(
 async def get_calendar_from_list(
     calendarId: str, user_context: tuple[str, str] = Depends(get_user_context)
 ):
+    # [FUNCTION DOC]
+    # GET /users/me/calendarList/{calendarId}: returns the entry if the user has reader/writer/owner access ("primary"
+    # finds the entry flagged primary). Raises: 403 without permission, 404 if missing, 500 on errors.
     """
     Returns a calendar from the user's calendar list
 
@@ -205,6 +225,12 @@ async def add_calendar_to_list(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # POST /users/me/calendarList (201): inserts an existing calendar (request "id") into the user's list after color
+    # validation/normalization (blank strings dropped), reader+ ACL check and strict validation of reminders/notifications
+    # (400 on invalid items). Returns the created entry. Raises: 400 (ValueError, validation), 403, 404 if the manager
+    # returns nothing, 500 otherwise.
+    # KNOWN ISSUE: a request without "id" raises KeyError and yields 500 instead of 400.
     """
     Inserts an existing calendar into the user's calendar list
 
@@ -407,6 +433,11 @@ async def update_calendar_in_list(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # PATCH /users/me/calendarList/{calendarId}: partial update with explicitly set fields (400 if none). Requires
+    # writer/owner. Rejects null hidden/selected, drops blank strings, applies RGB/colorId rules, sets selected False when
+    # hidden is True (and True when hidden is False and selected not given), silently drops invalid reminder/notification
+    # items (empty result clears the field). Returns the updated entry. Raises: 400, 403, 404, 500.
     """
     Updates an entry on the user's calendar list (partial update)
 
@@ -636,6 +667,11 @@ async def replace_calendar_in_list(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # PUT /users/me/calendarList/{calendarId}: full replace using all request fields (missing ones become None, which clears
+    # them). Requires writer/owner. Defaults hidden False and selected True when null, converts blank strings to None, then
+    # the same color, hidden/selected coupling and sanitization rules as PATCH. Returns the entry. Raises: 400, 403, 404, 500.
+    # KNOWN ISSUE: ValueErrors from the manager are not mapped to 400 here (unlike PATCH) and become 500.
     """
     Updates an entry on the user's calendar list (full update)
 
@@ -835,6 +871,9 @@ async def replace_calendar_in_list(
 async def remove_calendar_from_list(
     calendarId: str, user_context: tuple[str, str] = Depends(get_user_context)
 ):
+    # [FUNCTION DOC]
+    # DELETE /users/me/calendarList/{calendarId} (204): requires owner role and an existing entry, then deletes it. Returns
+    # None. Raises: 400 when trying to remove the primary calendar, 403, 404, 500.
     """
     Removes a calendar from the user's calendar list
 
@@ -912,6 +951,9 @@ async def watch_calendar_list(
     watch_request: WatchRequest,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # POST /users/me/calendarList/watch: verifies the user exists (404 otherwise) and creates a watch channel via the
+    # manager; returns it. Raises 500 on other errors. Side effects: separate DB session; persists a channel.
     """
     Watch for changes to CalendarList resources
 

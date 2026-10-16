@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI router for calendar ACL rules (Google Calendar v3 acl resource) under /calendars/{calendarId}/acl: list,
+# get, insert, update (PUT), patch, delete and watch. Database id and user id come from request headers via
+# get_user_context; each request gets an ACLManager bound to a session from a module-level CalendarSessionManager.
 """
 ACL (Access Control List) API endpoints following Google Calendar API v3 structure.
 Handles CRUD operations for calendar access rules.
@@ -28,6 +32,8 @@ session_manager = CalendarSessionManager()
 
 
 def get_acl_manager_instance(database_id: str, user_id: str) -> ACLManager:
+    # [FUNCTION DOC]
+    # HELPER: Opens a DB session for the database id and returns an ACLManager for that session and user.
     session = session_manager.get_session(database_id)
     return get_acl_manager(session, user_id)
 
@@ -54,6 +60,11 @@ def list_acl_rules(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # GET /calendars/{calendarId}/acl: checks the calendar belongs to the user, forces showDeleted when a syncToken is
+    # given, and returns the manager's paged list (maxResults 1-250, default 100; pageToken; syncToken).
+    # Raises: HTTPException 404 for ValueError (e.g. unknown calendar), re-raises manager HTTPExceptions (e.g. 410 for
+    # expired sync token), 500 otherwise.
     try:
         database_id, user_id = user_context
         manager = get_acl_manager_instance(database_id, user_id)
@@ -95,6 +106,9 @@ def get_acl_rule(
     ruleId: str,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # GET /calendars/{calendarId}/acl/{ruleId}: returns the rule. Raises: 404 if not found, 500 on errors.
+    # KNOWN ISSUE: unlike list/insert/update, it does not check that the calendar belongs to the requesting user.
     try:
         database_id, user_id = user_context
         manager = get_acl_manager_instance(database_id, user_id)
@@ -119,6 +133,10 @@ def insert_acl_rule(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/acl (201): validates calendar ownership and inserts the rule (sendNotifications passed
+    # through). Returns the created rule. Raises: 400 for ValueError, 500 otherwise.
+    # KNOWN ISSUE: HTTPExceptions raised by the manager are converted to 500 by the generic handler.
     try:
         database_id, user_id = user_context
         manager = get_acl_manager_instance(database_id, user_id)
@@ -147,6 +165,9 @@ def update_acl_rule(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # PUT /calendars/{calendarId}/acl/{ruleId}: validates ownership and fully replaces the rule. Returns the updated rule.
+    # Raises: 400 for ValueError or a missing rule (rather than 404), 500 with the error text otherwise.
     try:
         database_id, user_id = user_context
         manager = get_acl_manager_instance(database_id, user_id)
@@ -178,6 +199,9 @@ def patch_acl_rule(
     ),
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # PATCH /calendars/{calendarId}/acl/{ruleId}: partially updates a rule. Returns it. Raises: 400 for ValueError or
+    # missing rule, 500 otherwise. No ownership check is performed here.
     try:
         database_id, user_id = user_context
         manager = get_acl_manager_instance(database_id, user_id)
@@ -198,6 +222,9 @@ def delete_acl_rule(
     ruleId: str,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # DELETE /calendars/{calendarId}/acl/{ruleId} (204): deletes the rule; returns None. Raises: 404 if not found, 500
+    # on errors.
     """
     Deletes an ACL rule from the specified calendar.
 
@@ -233,6 +260,10 @@ def watch_acl(
     watch_request: ACLWatchRequest,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # POST /calendars/{calendarId}/acl/watch: verifies the user exists in the database (404 otherwise), then creates a
+    # watch channel via the manager and returns it. Raises: 400 for pydantic validation errors (first location element and
+    # message per error), 500 otherwise. Side effects: opens/closes a separate DB session; persists a channel.
     """
     Set up watch notifications for ACL changes on the specified calendar.
 

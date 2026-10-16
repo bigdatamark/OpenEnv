@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Data-only module: EVENTS_TOOLS, MCP tool definitions (name, long description, detailed JSON input schemas including
+# nested event resources such as start/end, attendees, reminders, recurrence and conference data) for event operations
+# mirroring the events router: list_events, create_event, get_event, patch_event, update_event, delete_event,
+# move_event, quick_add_event, import_event, get_event_instances and watch_events. No logic.
 """
 Events MCP tools for Google Calendar API v3 compatibility
 All 11 Events API endpoints with clean tool definitions

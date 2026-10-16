@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Data-only module: COLORS_TOOLS, a single MCP tool definition "get_colors" (no input parameters) describing retrieval
+# of the static calendar/event color palettes. No logic.
 """
 Colors Tools Module
 

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# OpenEnv entry point for the Calendar server. At import it puts the server directory (and the repo's src dir, if
+# found four levels up) on sys.path so the server's top-level packages (apis, database, ...) import, then re-exports
+# the FastAPI app defined in main.py (relative import, falling back to absolute).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -42,6 +46,9 @@ app = _main.app
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default API_PORT env var or 8004) from the command line and runs uvicorn
+    # with the app. Blocks.
     """Run the Calendar environment server with uvicorn."""
 
     import argparse
