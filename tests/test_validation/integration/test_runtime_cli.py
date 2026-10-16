@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Docker-marked acceptance tests that run the installed "openenv validate" CLI
+# (runtime level, local lane, policy v2) as a subprocess against the validation
+# lab's offline build context. Injects faults via a VALIDATION_FAULT Dockerfile
+# ENV, then checks the JSON report, the signed artifact bundle, interrupt and
+# timeout handling, and that no labelled containers leak. IMPLEMENTED, PENDING
+# and NOT_APPLICABLE are the expected sets of runtime check ids by status.
 """Installed-wheel CLI acceptance: real builds, wire faults, reports and cleanup."""
 
 import hashlib
@@ -42,6 +49,12 @@ NOT_APPLICABLE = {
 
 
 def _copy_asset(source, destination):
+    # [FUNCTION DOC]
+    # HELPER: copy_function for copytree that hardlinks source to destination,
+    # falling back to a metadata-preserving copy when hardlinking fails (e.g.
+    # across filesystems).
+    # Returns: the destination path.
+    # Side effects: creates a file on disk.
     # Wheel bytes are immutable inputs; hardlinks avoid copying the locked
     # wheelhouse for every fault case. Fall back across filesystem boundaries.
     try:
@@ -53,6 +66,13 @@ def _copy_asset(source, destination):
 
 @pytest.fixture
 def cli_context(tmp_path):
+    # [FUNCTION DOC]
+    # Fixture that copies the lab context (OPENENV_VALIDATION_CONTEXT) into
+    # tmp_path/subject using hardlinks, then rewrites the Dockerfile as a fresh
+    # inode so later appends do not modify the shared original.
+    # Returns: the copied context Path.
+    # Raises: pytest.fail if unset and OPENENV_REQUIRE_DOCKER is "1"; otherwise
+    # skips when unset.
     root = os.environ.get("OPENENV_VALIDATION_CONTEXT")
     if not root:
         if os.environ.get("OPENENV_REQUIRE_DOCKER") == "1":
@@ -69,10 +89,18 @@ def cli_context(tmp_path):
 
 
 def _case_label(context):
+    # [FUNCTION DOC]
+    # HELPER: Returns the first 20 hex chars of the SHA-256 of the context path
+    # string, used as a per-test container label value.
     return hashlib.sha256(str(context).encode()).hexdigest()[:20]
 
 
 def _mark_context(context):
+    # [FUNCTION DOC]
+    # HELPER: Rewrites the context Dockerfile (as a new inode) with an appended
+    # LABEL org.openenv.validation.test=<case label> line so every container from
+    # this test is identifiable.
+    # Side effects: replaces the Dockerfile on disk.
     # An image label is inherited by every container, including failed starts.
     # This scopes external cleanup verification to this exact test invocation.
     dockerfile = context / "Dockerfile"
@@ -85,6 +113,11 @@ def _mark_context(context):
 
 
 def _container_ids(context):
+    # [FUNCTION DOC]
+    # HELPER: Lists all containers (including stopped) carrying this context's
+    # test label via the docker CLI.
+    # Returns: a set of container id strings.
+    # Raises: CalledProcessError / TimeoutExpired (10 s) on docker failure.
     checked = subprocess.run(
         [
             "docker",
@@ -104,6 +137,14 @@ def _container_ids(context):
 
 
 def _wait_for_blocked_step(process, context, work):
+    # [FUNCTION DOC]
+    # HELPER: Polls for up to 120 s (every 50 ms) until some labelled container's
+    # last 30 log lines contain OPENENV_VALIDATION_STEP_BLOCKED.
+    # Inputs: process - the running CLI Popen; context - subject context; work -
+    # case evidence directory.
+    # Returns: the monotonic time at which the marker was seen.
+    # Raises: pytest.fail if the CLI exits first or the deadline passes.
+    # Side effects: runs docker logs; writes blocked-handshake.json into work.
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -134,6 +175,13 @@ def _wait_for_blocked_step(process, context, work):
 
 
 def _verify_bundle(bundle, report):
+    # [FUNCTION DOC]
+    # HELPER: Validates a report against the packaged report-v2 JSON schema and
+    # checks schema/policy versions, lane "local" and a 64-char source digest;
+    # checks bundle/report.json equals the report and that SHA256SUMS lists every
+    # other bundle file exactly once with matching digests.
+    # Returns: a mapping from each recorded file name to its parsed JSON content.
+    # Raises: jsonschema.ValidationError or AssertionError on mismatch.
     schema = json.loads(
         files("openenv.validation")
         .joinpath("schemas/report-v2.schema.json")
@@ -168,6 +216,27 @@ def _invoke_cli(
     wait_for_blocked=False,
     interrupt=False,
 ):
+    # [FUNCTION DOC]
+    # Runs the validate CLI on a context and returns verified results.
+    # Inputs: context, tmp_path, case (evidence subdirectory name); keyword flags
+    # skip_build (adds --skip-build and puts a fake "docker" on PATH that records a
+    # marker file and exits 91), wait_for_blocked (waits for the blocked-step
+    # marker and then enforces a 15 s wait instead of 180 s), interrupt (sends
+    # SIGINT after the block; requires wait_for_blocked).
+    # Behavior: labels the context, runs the CLI in a new session with PYTHONPATH
+    # removed and user site disabled, capturing stdout/stderr to files in the case
+    # directory (under OPENENV_VALIDATION_ARTIFACTS or tmp_path). Always kills the
+    # process group if still alive, records remaining labelled containers in
+    # cleanup-external.json, force-removes them and asserts none remained.
+    # Then asserts the report file exists and equals stdout JSON, verifies the
+    # bundle, that the fake docker was not called, unique check ids, that runtime
+    # checks are exactly IMPLEMENTED|PENDING with PENDING skipped with evidence,
+    # NOT_APPLICABLE absent, coverage lists the requested checks and cleanup
+    # completed.
+    # Returns: a tuple (CompletedProcess, report dict, mapping check_id to result
+    # row, mapping artifact name to parsed JSON).
+    # Raises: AssertionError, TimeoutExpired, or pytest.fail from helpers.
+    # Side effects: subprocesses (CLI, docker), filesystem writes, signals.
     artifact_root = Path(os.environ.get("OPENENV_VALIDATION_ARTIFACTS", tmp_path))
     work = artifact_root / "cli" / case
     work.mkdir(parents=True, exist_ok=True)
@@ -297,6 +366,14 @@ def _invoke_cli(
     ],
 )
 def test_cli_runtime_contract_findings(cli_context, tmp_path, mode, failed_check):
+    # [FUNCTION DOC]
+    # Parametrized over fault modes: appends VALIDATION_FAULT=<mode> to the
+    # Dockerfile, runs the CLI and checks levels 1-2 ran, static/startup pass with a
+    # sha256 image ref, cleanup was required, run manifest records a container id
+    # and source digest, and the trace has the full reset/state/step sequence. For
+    # fault modes expects exit 1 / verdict fail with the named check failing with
+    # evidence; otherwise exit 0 / verdict warn with implemented checks passing and
+    # pending checks listed as incomplete.
     with (cli_context / "Dockerfile").open("a") as stream:
         stream.write(f"\nENV VALIDATION_FAULT={mode}\n")
     result, report, checks, artifacts = _invoke_cli(cli_context, tmp_path, mode)
@@ -331,6 +408,11 @@ def test_cli_runtime_contract_findings(cli_context, tmp_path, mode, failed_check
 
 
 def _assert_partial_episode(artifacts, expected_failure):
+    # [FUNCTION DOC]
+    # HELPER: Asserts an aborted episode's artifacts: trace is reset/state/step/state
+    # with counters 0 then 1 and step_count 1, collector evidence incomplete with
+    # failure phase "step" and a reason containing expected_failure, and cleanup
+    # both required and completed.
     trace = artifacts["collector-trace.json"]
     assert [row["operation"] for row in trace] == ["reset", "state", "step", "state"]
     assert trace[0]["response_json"]["data"]["observation"]["counter"] == 0
@@ -344,6 +426,12 @@ def _assert_partial_episode(artifacts, expected_failure):
 
 
 def test_cli_hung_step_times_out_with_partial_evidence(cli_context, tmp_path):
+    # [FUNCTION DOC]
+    # Uses the hung_step fault and rewrites openenv.yaml (as a new inode) to lower
+    # episode_timeout_s from 30.0 to 3.0; runs waiting for the blocked step and
+    # expects exit 1, verdict fail, the lowered timeout in the report, a failed
+    # startup check, other implemented checks skipped, and partial evidence with a
+    # TimeoutError.
     with (cli_context / "Dockerfile").open("a") as stream:
         stream.write("\nENV VALIDATION_FAULT=hung_step\n")
     manifest = cli_context / "openenv.yaml"
@@ -368,6 +456,10 @@ def test_cli_hung_step_times_out_with_partial_evidence(cli_context, tmp_path):
 
 
 def test_cli_sigint_retains_partial_evidence_and_cleans_up(cli_context, tmp_path):
+    # [FUNCTION DOC]
+    # Uses the hung_step fault, sends SIGINT once the step blocks, and expects exit
+    # 1, verdict fail, startup status "error" with interrupt evidence, other
+    # implemented checks skipped and partial evidence with KeyboardInterrupt.
     with (cli_context / "Dockerfile").open("a") as stream:
         stream.write("\nENV VALIDATION_FAULT=hung_step\n")
     result, report, checks, artifacts = _invoke_cli(
@@ -388,6 +480,9 @@ def test_cli_sigint_retains_partial_evidence_and_cleans_up(cli_context, tmp_path
 def test_cli_startup_failure_is_a_finding_and_leaves_no_container(
     cli_context, tmp_path
 ):
+    # [FUNCTION DOC]
+    # Uses the startup_failure fault and expects exit 1, verdict fail, levels 1-2
+    # run, startup failing, other implemented checks skipped and an empty trace.
     with (cli_context / "Dockerfile").open("a") as stream:
         stream.write("\nENV VALIDATION_FAULT=startup_failure\n")
     result, report, checks, artifacts = _invoke_cli(
@@ -404,6 +499,10 @@ def test_cli_startup_failure_is_a_finding_and_leaves_no_container(
 
 
 def test_cli_skip_build_does_not_invoke_docker(cli_context, tmp_path):
+    # [FUNCTION DOC]
+    # Runs with --skip-build and expects exit 0, verdict warn, only level 1 run, all
+    # runtime checks skipped with startup evidence mentioning --skip-build, no
+    # cleanup required, empty provider info and empty trace.
     result, report, checks, artifacts = _invoke_cli(
         cli_context, tmp_path, "skip_build", skip_build=True
     )

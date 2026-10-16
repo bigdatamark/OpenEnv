@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for runtime-level run_validation with FakeRuntimeProvider and a
+# monkeypatched evidence collector: single collection and teardown, capability
+# and credential preflight before any provider work, failure classification
+# (startup FAIL vs provider ERROR), withdrawal of results when the package
+# source changes, teardown failures, plus the grader scheduler
+# (order_graders / execute_graders) and artifact encoding.
 """Runtime scheduling, capability preflight and lifetime regression tests."""
 
 import json
@@ -23,12 +30,20 @@ FIXTURE = Path(__file__).parents[1] / "fixtures/validation/runtime/served_probe"
 
 @pytest.fixture
 def package(tmp_path):
+    # [FUNCTION DOC]
+    # Fixture copying the served_probe runtime fixture (minus __pycache__) into
+    # tmp_path/subject and returning its path.
     root = tmp_path / "subject"
     shutil.copytree(FIXTURE, root, ignore=shutil.ignore_patterns("__pycache__"))
     return root
 
 
 def measured_episode():
+    # [FUNCTION DOC]
+    # HELPER: Builds RuntimeEvidence for reset and one step (counter 0 then 1,
+    # reward 0.0 then 1.0, done False then True), each followed by a state
+    # exchange with matching step_count, plus an observation schema requiring
+    # counter, reward and done.
     rows = []
     for step in (0, 1):
         operation = "reset" if step == 0 else "step"
@@ -73,10 +88,17 @@ def measured_episode():
 def test_runtime_collects_once_cleans_up_and_marks_remaining_work(
     package, monkeypatch, tmp_path
 ):
+    # [FUNCTION DOC]
+    # A full runtime run builds, launches and collects once, stops the subject,
+    # emits a v2 report at levels static+runtime with verdict warn, passes the four
+    # implemented runtime checks, skips network_policy, and writes cleanup and
+    # runtime-plan artifacts.
     provider = FakeRuntimeProvider()
     calls = []
 
     def collect(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records call arguments and returns measured_episode().
         calls.append((args, kwargs))
         return measured_episode()
 
@@ -105,6 +127,8 @@ def test_runtime_collects_once_cleans_up_and_marks_remaining_work(
 
 
 def test_runtime_collection_uses_declared_episode_timeout(package, monkeypatch):
+    # [FUNCTION DOC]
+    # The collector receives the manifest's episode_timeout_s (raised to 600.0).
     path = package / "openenv.yaml"
     path.write_text(
         path.read_text().replace("episode_timeout_s: 30.0", "episode_timeout_s: 600.0")
@@ -112,6 +136,8 @@ def test_runtime_collection_uses_declared_episode_timeout(package, monkeypatch):
     calls = []
 
     def collect(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records keyword arguments and returns measured_episode().
         calls.append(kwargs)
         return measured_episode()
 
@@ -122,6 +148,9 @@ def test_runtime_collection_uses_declared_episode_timeout(package, monkeypatch):
 
 
 def test_skip_build_has_no_provider_side_effects(package):
+    # [FUNCTION DOC]
+    # skip_build never builds or launches, runs only static, and skips all
+    # runtime checks.
     provider = FakeRuntimeProvider()
     report = run_validation(
         package, max_level=Level.RUNTIME, provider=provider, skip_build=True
@@ -137,6 +166,9 @@ def test_skip_build_has_no_provider_side_effects(package):
 
 @pytest.mark.parametrize("change", ["network", "gpu", "build"])
 def test_unsupported_capability_is_refused_before_build(package, change):
+    # [FUNCTION DOC]
+    # A no-network policy, a GPU request or a provider without capabilities causes
+    # runtime.startup to be skipped without build or launch.
     import yaml
 
     source = package / "openenv.yaml"
@@ -161,6 +193,11 @@ def test_unsupported_capability_is_refused_before_build(package, change):
 def test_declared_credentials_skip_before_provider_access(
     package, monkeypatch, default_provider
 ):
+    # [FUNCTION DOC]
+    # requires_credentials True defers runtime: no provider is created or used,
+    # verdict warn, only static level, all runtime checks skipped with the
+    # deferral reason (dependents citing runtime.startup) and no host secret in
+    # the report.
     import yaml
 
     source = package / "openenv.yaml"
@@ -171,6 +208,8 @@ def test_declared_credentials_skip_before_provider_access(
     provider = FakeRuntimeProvider()
 
     def unexpected_provider():
+        # [FUNCTION DOC]
+        # HELPER: Raises AssertionError if the default Docker provider is created.
         raise AssertionError("credential deferral must precede provider creation")
 
     monkeypatch.setattr(
@@ -199,6 +238,9 @@ def test_declared_credentials_skip_before_provider_access(
 
 
 def test_credential_deferral_does_not_hide_invalid_runtime_plan(package):
+    # [FUNCTION DOC]
+    # An invalid runtime plan still fails runtime.startup even when credentials
+    # are declared, with no provider work.
     import yaml
 
     source = package / "openenv.yaml"
@@ -221,6 +263,9 @@ def test_credential_deferral_does_not_hide_invalid_runtime_plan(package):
 def test_llm_judge_without_credentials_can_run(
     package, monkeypatch, declare_no_credentials
 ):
+    # [FUNCTION DOC]
+    # An llm_judged manifest without required credentials (default or explicit
+    # False) still builds, launches, passes startup and stops the subject.
     import yaml
 
     source = package / "openenv.yaml"
@@ -246,6 +291,8 @@ def test_llm_judge_without_credentials_can_run(
 
 
 def test_explicit_v1_rejected_before_runtime(package):
+    # [FUNCTION DOC]
+    # Requesting runtime with policy v1 raises PolicyError before building.
     provider = FakeRuntimeProvider()
     with pytest.raises(PolicyError, match="policy v2"):
         run_validation(
@@ -258,6 +305,9 @@ def test_explicit_v1_rejected_before_runtime(package):
 
 
 def test_invalid_plan_is_visible_failure(package):
+    # [FUNCTION DOC]
+    # An invalid plan fails runtime.startup with schema-failure evidence
+    # mentioning a missing field and no build.
     (package / "validation/runtime.json").write_text('{"actions": []}')
     provider = FakeRuntimeProvider()
     report = run_validation(package, max_level=Level.RUNTIME, provider=provider)
@@ -269,9 +319,13 @@ def test_invalid_plan_is_visible_failure(package):
 
 
 def test_startup_failure_does_not_masquerade_as_skips(package):
+    # [FUNCTION DOC]
+    # A StartupError from build becomes a FAIL with its message as evidence.
     provider = FakeRuntimeProvider()
 
     def failed_build(*args):
+        # [FUNCTION DOC]
+        # HELPER: Raises StartupError("subject build failed").
         raise StartupError("subject build failed")
 
     provider.build = failed_build
@@ -283,9 +337,14 @@ def test_startup_failure_does_not_masquerade_as_skips(package):
 
 
 def test_provider_failure_diagnostics_are_visible_and_bounded(package):
+    # [FUNCTION DOC]
+    # A ProviderError from build becomes an ERROR whose evidence is truncated to
+    # exactly 4096 characters.
     provider = FakeRuntimeProvider()
 
     def failed_build(*args):
+        # [FUNCTION DOC]
+        # HELPER: Raises ProviderError with a ~5000 char message.
         raise ProviderError("provider deadline elapsed: " + "x" * 5000)
 
     provider.build = failed_build
@@ -300,13 +359,24 @@ def test_provider_failure_diagnostics_are_visible_and_bounded(package):
 def test_source_change_withdraws_dependent_runtime_results(
     package, monkeypatch, tmp_path, mutation
 ):
+    # [FUNCTION DOC]
+    # If the package changes, gains a symlink or becomes unreadable during
+    # collection, runtime.startup becomes ERROR with a generic reason, dependents
+    # are skipped citing it, the verdict fails, the original digest is reported,
+    # artifacts (report, cleanup, 4-row trace) are written, no private path leaks
+    # and the subject is stopped.
     provider = FakeRuntimeProvider()
     original_digest = source_digest(package)
 
     def unreadable_source(*args):
+        # [FUNCTION DOC]
+        # HELPER: Raises OSError with a private path message.
         raise OSError("private-source-path")
 
     def collect(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Applies the parametrized mutation (write file, add symlink, or patch
+        # source_digest to fail) and returns measured_episode().
         if mutation == "content":
             (package / "changed.txt").write_text("changed during collection")
         elif mutation == "symlink":
@@ -351,9 +421,14 @@ def test_source_change_withdraws_dependent_runtime_results(
 
 @pytest.mark.parametrize("failure", [RuntimeError, KeyboardInterrupt])
 def test_collector_crash_or_cancel_always_tears_down(package, monkeypatch, failure):
+    # [FUNCTION DOC]
+    # A collector raising RuntimeError or KeyboardInterrupt still stops the
+    # subject, fails the verdict and does not leak the message.
     provider = FakeRuntimeProvider()
 
     def explode(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Raises the parametrized exception with a secret-like message.
         raise failure("token=must-not-appear")
 
     monkeypatch.setattr("openenv.validation.runner.collect_runtime_evidence", explode)
@@ -367,12 +442,20 @@ def test_collector_crash_or_cancel_always_tears_down(package, monkeypatch, failu
 def test_teardown_failure_preserves_primary_provider_error(
     package, monkeypatch, failure
 ):
+    # [FUNCTION DOC]
+    # When inspect raises a provider error and stop also fails, runtime.startup is
+    # ERROR with the inspect message and "subject teardown failed", without
+    # leaking the stop error.
     provider = FakeRuntimeProvider()
 
     def failed_inspect():
+        # [FUNCTION DOC]
+        # HELPER: Raises the parametrized provider error.
         raise failure("subject inspection failed")
 
     def failed_stop():
+        # [FUNCTION DOC]
+        # HELPER: Raises RuntimeError with a secret-like message.
         raise RuntimeError("token=must-not-appear")
 
     monkeypatch.setattr(provider.subject, "inspect", failed_inspect)
@@ -390,6 +473,12 @@ def test_teardown_failure_preserves_primary_provider_error(
 def test_teardown_failure_preserves_collection_outcome(
     package, monkeypatch, tmp_path, collection_state, teardown_error
 ):
+    # [FUNCTION DOC]
+    # For complete, failed and partial collections combined with a failing stop
+    # (RuntimeError or KeyboardInterrupt), runtime.startup is ERROR listing the
+    # collection outcome and teardown failure, measured provider/image are kept on
+    # completion, cleanup.json records incomplete with the error type, trace and
+    # evidence artifacts match the collection, and nothing secret leaks.
     provider = FakeRuntimeProvider()
     collected = measured_episode()
     if collection_state == "failed":
@@ -405,6 +494,8 @@ def test_teardown_failure_preserves_collection_outcome(
         )
 
     def failed_stop():
+        # [FUNCTION DOC]
+        # HELPER: Raises the parametrized teardown error.
         raise teardown_error("token=must-not-appear")
 
     monkeypatch.setattr(provider.subject, "stop", failed_stop)
@@ -444,6 +535,9 @@ def test_teardown_failure_preserves_collection_outcome(
 
 
 def test_bad_static_bounds_do_not_suppress_independent_runtime(package, monkeypatch):
+    # [FUNCTION DOC]
+    # An out-of-bounds floor_margin fails the first static result while
+    # runtime.state_contract still passes.
     path = package / "openenv.yaml"
     path.write_text(path.read_text().replace("floor_margin: 0.5", "floor_margin: 0.01"))
     provider = FakeRuntimeProvider()
@@ -460,6 +554,9 @@ def test_bad_static_bounds_do_not_suppress_independent_runtime(package, monkeypa
 
 
 def test_semantic_ceiling_does_not_claim_semantic_execution(package):
+    # [FUNCTION DOC]
+    # With a semantic ceiling and skip_build, only static runs and
+    # semantic.oracle_max is reported as skipped.
     report = run_validation(package, max_level=Level.SEMANTIC, skip_build=True)
     assert report.levels_run == [Level.STATIC]
     assert any(
@@ -469,6 +566,10 @@ def test_semantic_ceiling_does_not_claim_semantic_execution(package):
 
 
 def grader(check_id, depends_on=(), *, status=CheckStatus.PASS, requires=frozenset()):
+    # [FUNCTION DOC]
+    # HELPER: Builds a SimpleNamespace grader with the given id, dependencies,
+    # required provider capabilities and a run function returning a CheckResult
+    # with the given status.
     return SimpleNamespace(
         check_id=check_id,
         depends_on=depends_on,
@@ -478,6 +579,9 @@ def grader(check_id, depends_on=(), *, status=CheckStatus.PASS, requires=frozens
 
 
 def test_scheduler_orders_dependencies_and_keeps_independent_checks():
+    # [FUNCTION DOC]
+    # order_graders puts prerequisites first; execute_graders skips a dependent of
+    # a failed check (citing it) while independent checks still pass.
     first = grader("runtime.z", status=CheckStatus.FAIL)
     dependent = grader("runtime.a", ("runtime.z",))
     independent = grader("runtime.other")
@@ -494,6 +598,9 @@ def test_scheduler_orders_dependencies_and_keeps_independent_checks():
 
 
 def test_scheduler_detects_cycle_and_missing_prerequisites():
+    # [FUNCTION DOC]
+    # A dependency cycle raises PolicyError; a missing prerequisite and missing
+    # provider capability yield a SKIP with both reasons.
     with pytest.raises(PolicyError, match="cycle"):
         order_graders(
             [grader("runtime.a", ("runtime.b",)), grader("runtime.b", ("runtime.a",))]
@@ -514,6 +621,9 @@ def test_scheduler_detects_cycle_and_missing_prerequisites():
 
 
 def test_grader_cannot_substitute_a_different_result_id():
+    # [FUNCTION DOC]
+    # A grader returning a result with a different id produces an ERROR under the
+    # grader's declared id.
     wrong = grader("runtime.wrong")
     wrong.check_id = "runtime.expected"
     (result,) = execute_graders([wrong], None)
@@ -522,6 +632,8 @@ def test_grader_cannot_substitute_a_different_result_id():
 
 
 def test_digest_rejects_symlinks_without_reading_the_target(tmp_path):
+    # [FUNCTION DOC]
+    # source_digest raises ValueError for a symlink, even a dangling one.
     root = tmp_path / "subject"
     root.mkdir()
     (root / "link").symlink_to(tmp_path / "missing-secret")
@@ -530,6 +642,9 @@ def test_digest_rejects_symlinks_without_reading_the_target(tmp_path):
 
 
 def test_artifacts_encode_invalid_numbers_and_redact_secrets(package, tmp_path):
+    # [FUNCTION DOC]
+    # The written trace redacts token values and encodes NaN as an invalid_number
+    # object so it is strict JSON.
     report = run_validation(package, max_level=Level.RUNTIME, skip_build=True)
     raw = evidence(exchange("step", {}, {"token": "secret", "reward": float("nan")}))
     write_runtime_bundle(tmp_path / "bundle", report, evidence=raw)
@@ -545,6 +660,10 @@ def test_artifacts_encode_invalid_numbers_and_redact_secrets(package, tmp_path):
 def test_collection_failure_is_reported_once_and_dependents_skip(
     package, monkeypatch, prefix_length
 ):
+    # [FUNCTION DOC]
+    # For partial collections (0, 1 or 4 exchanges) ending in a step failure,
+    # runtime.startup fails with the failure reason and the three dependent checks
+    # are skipped with "unmet dependencies: runtime.startup".
     collected = replace(
         measured_episode(),
         exchanges=measured_episode().exchanges[:prefix_length],

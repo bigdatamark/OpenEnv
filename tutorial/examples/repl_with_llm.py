@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script running the RLM (recursive language model) loop from repl_env
+# locally: an LLM served through huggingface_hub InferenceClient writes Python
+# code, LocalRLMRunner executes it in the REPL, and the loop repeats until the
+# model produces a final answer. Configuration comes from REPL_LLM_MODEL
+# (default Qwen/Qwen3.5-9B) and HF_TOKEN environment variables; MAX_ITERATIONS
+# caps the loop.
 """
 REPL Environment with LLM Integration.
 
@@ -28,10 +35,23 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 
 def create_chat_fn():
+    # [FUNCTION DOC]
+    # Creates an InferenceClient for MODEL_NAME (300 s timeout, HF_TOKEN auth) and
+    # returns a chat function closure.
+    # Returns: a callable taking (messages, optional model) and returning the
+    # assistant reply text.
     """Create the chat function with Qwen3.5 model card recommended params."""
     client = InferenceClient(model=MODEL_NAME, token=HF_TOKEN, timeout=300)
 
     def chat_fn(messages: list[dict], model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Sends the chat messages to the inference endpoint (model override or
+        # MODEL_NAME) with max 2048 tokens, temperature 0.6, top_p 0.95, extra
+        # sampling params (top_k 20, min_p 0, repetition_penalty 1) and thinking mode
+        # disabled.
+        # Returns: the first choice's message content.
+        # Raises: whatever the inference client raises on HTTP/network errors.
+        # Side effects: network request.
         response = client.chat.completions.create(
             model=model or MODEL_NAME,
             messages=messages,
@@ -54,6 +74,11 @@ def create_chat_fn():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs a fixed word-counting task over a short sample context with
+    # LocalRLMRunner (max depth 3, verbose) and prints the model, task, final
+    # answer and iteration count.
+    # Side effects: console output and network calls to the inference API.
     print("=" * 60)
     print("REPL Environment with LLM Integration (Qwen)")
     print("=" * 60)

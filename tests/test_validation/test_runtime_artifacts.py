@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for write_runtime_bundle: the saved collector evidence and trace must
+# let runtime graders replay to identical results, preserve failure metadata,
+# redact secrets (marking the evidence as modified), bound deeply nested or
+# non-finite subject JSON, and distinguish missing from null schemas.
 import hashlib
 import json
 from dataclasses import replace
@@ -19,6 +24,9 @@ from support.runtime import evidence, exchange
 
 
 def report():
+    # [FUNCTION DOC]
+    # HELPER: Builds a minimal v2 ValidationReport (served_min_pass manifest,
+    # local lane, static+runtime levels, no results, WARN verdict).
     return ValidationReportV2(
         report_schema_version="2",
         target="subject",
@@ -36,6 +44,9 @@ def report():
 
 
 def measured():
+    # [FUNCTION DOC]
+    # HELPER: Builds RuntimeEvidence for a well-formed reset/state/step/state
+    # episode (reward 0.5 on step) with an integer counter observation schema.
     return evidence(
         exchange(
             "reset",
@@ -72,6 +83,12 @@ def measured():
 
 
 def rebuild(directory):
+    # [FUNCTION DOC]
+    # HELPER: Reconstructs RuntimeEvidence from a written bundle directory using
+    # collector-evidence.json and the trace file it names; schemas become None
+    # when marked unavailable.
+    # Returns: a RuntimeEvidence.
+    # Side effects: reads files.
     metadata = json.loads((directory / "collector-evidence.json").read_text())
     trace = json.loads((directory / metadata["trace_file"]).read_text())
     return RuntimeEvidence(
@@ -99,6 +116,10 @@ def rebuild(directory):
 
 
 def test_saved_collector_evidence_replays_all_basic_graders(tmp_path):
+    # [FUNCTION DOC]
+    # Reward, observation-schema and state-contract graders yield the same status
+    # on original and replayed evidence; metadata records version "1", complete,
+    # not redacted, and the evidence file's hash appears in SHA256SUMS.
     original = measured()
     validation_report = report()
     write_runtime_bundle(tmp_path, validation_report, evidence=original)
@@ -130,6 +151,9 @@ def test_saved_collector_evidence_replays_all_basic_graders(tmp_path):
 
 
 def test_saved_schema_reproduces_observation_schema_failure(tmp_path):
+    # [FUNCTION DOC]
+    # A schema requiring a missing field fails identically (status and evidence)
+    # on replay.
     original = replace(
         measured(), observation_schema_json='{"required":["missing-field"]}'
     )
@@ -148,6 +172,8 @@ def test_saved_schema_reproduces_observation_schema_failure(tmp_path):
 
 
 def test_truncated_trace_metadata_preserves_the_collection_failure(tmp_path):
+    # [FUNCTION DOC]
+    # Failure phase/reason survive the bundle and mark it incomplete.
     original = replace(
         measured(), failure_phase="step", failure_reason="step failed (TimeoutError)"
     )
@@ -160,6 +186,9 @@ def test_truncated_trace_metadata_preserves_the_collection_failure(tmp_path):
 
 
 def test_schema_and_trace_redaction_marks_evidence_as_modified(tmp_path):
+    # [FUNCTION DOC]
+    # Token-like schema values and bearer credentials are redacted and the
+    # metadata flags redacted True.
     original = replace(
         measured(),
         observation_schema_json=json.dumps({"description": "hf_notarealtoken12345"}),
@@ -173,6 +202,9 @@ def test_schema_and_trace_redaction_marks_evidence_as_modified(tmp_path):
 
 
 def test_deep_subject_json_is_bounded_in_artifacts(tmp_path):
+    # [FUNCTION DOC]
+    # 600-level nested JSON is cut with a nesting-limit marker, flagged redacted,
+    # and the trace stays under 20 KB.
     nested = '"leaf"'
     for _ in range(600):
         nested = '{"child":' + nested + "}"
@@ -193,6 +225,9 @@ def test_deep_subject_json_is_bounded_in_artifacts(tmp_path):
 
 
 def test_nonfinite_wire_values_remain_valid_artifact_json(tmp_path):
+    # [FUNCTION DOC]
+    # A NaN reward is written as an invalid_number object so the trace is strict
+    # JSON.
     original = RuntimeEvidence(
         exchanges=(WireExchange("step", "{}", '{"reward":NaN}'),),
         observation_schema_json="{}",
@@ -200,6 +235,8 @@ def test_nonfinite_wire_values_remain_valid_artifact_json(tmp_path):
     write_runtime_bundle(tmp_path, report(), evidence=original)
 
     def reject_constant(value):
+        # [FUNCTION DOC]
+        # HELPER: parse_constant hook raising ValueError for NaN/Infinity tokens.
         raise ValueError(value)
 
     trace = json.loads(
@@ -209,6 +246,8 @@ def test_nonfinite_wire_values_remain_valid_artifact_json(tmp_path):
 
 
 def test_missing_schema_is_distinct_from_an_advertised_null_schema(tmp_path):
+    # [FUNCTION DOC]
+    # A None schema and a "null" schema each round-trip unchanged.
     for schema in (None, "null"):
         directory = tmp_path / ("missing" if schema is None else "null")
         original = replace(measured(), observation_schema_json=schema)
@@ -217,6 +256,9 @@ def test_missing_schema_is_distinct_from_an_advertised_null_schema(tmp_path):
 
 
 def test_malformed_wire_omission_is_visible_in_metadata(tmp_path):
+    # [FUNCTION DOC]
+    # A non-JSON response is omitted from the trace, recorded in
+    # omitted_trace_fields, and flagged redacted.
     original = RuntimeEvidence(
         exchanges=(WireExchange("step", "{}", "not JSON"),),
         failure_phase="step",
@@ -231,6 +273,10 @@ def test_malformed_wire_omission_is_visible_in_metadata(tmp_path):
 
 
 def test_redaction_preserves_token_metadata_and_filters_secret_keys():
+    # [FUNCTION DOC]
+    # _redact keeps benign token-named fields (max_tokens, prompt_token_ids,
+    # task_distribution) but redacts access_token values and secret-looking keys
+    # and values.
     from openenv.validation.runtime.artifacts import _redact
 
     secret = "hf_abcdefghijk123456789"
@@ -256,6 +302,9 @@ def test_redaction_preserves_token_metadata_and_filters_secret_keys():
 def test_reset_schema_bundle_preserves_selection_and_grader_result(
     tmp_path, reset_schema
 ):
+    # [FUNCTION DOC]
+    # For absent, null and failing reset schemas, the reset schema round-trips and
+    # the observation-schema grader result is identical on replay.
     original = replace(measured(), reset_observation_schema_json=reset_schema)
     validation_report = report()
     write_runtime_bundle(tmp_path, validation_report, evidence=original)
@@ -280,6 +329,9 @@ def test_reset_schema_bundle_preserves_selection_and_grader_result(
     [("not JSON", True), ('{"description":"hf_abcdefghijk123456789"}', False)],
 )
 def test_reset_schema_omission_or_redaction_is_visible(tmp_path, schema, parse_failed):
+    # [FUNCTION DOC]
+    # An unparsable or secret-bearing reset schema is marked available, flags
+    # parse failure as appropriate, sets redacted and never writes the secret.
     write_runtime_bundle(
         tmp_path,
         report(),

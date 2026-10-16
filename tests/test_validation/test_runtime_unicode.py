@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests that wire evidence within collector byte budgets also fits through the
+# schema-worker subprocess transport, and that the worker enforces its own
+# input byte bound.
 """Bounded wire evidence must survive the schema-worker transport."""
 
 import json
@@ -18,6 +22,10 @@ from openenv.validation.types import CheckStatus
 
 @pytest.mark.parametrize("payload_kind", ["unicode", "numeric"])
 def test_valid_episode_within_wire_budgets_passes_schema_worker(tmp_path, payload_kind):
+    # [FUNCTION DOC]
+    # Builds seven exchanges (reset then steps) of large Unicode text or compact
+    # "1e9" number arrays that fit MAX_MESSAGE_BYTES and MAX_TRACE_BYTES, and
+    # checks the observation schema grader passes (runs the real worker).
     if payload_kind == "unicode":
         response = json.dumps(
             {
@@ -73,6 +81,10 @@ def test_valid_episode_within_wire_budgets_passes_schema_worker(tmp_path, payloa
 
 
 def test_schema_worker_rejects_oversized_binary_input():
+    # [FUNCTION DOC]
+    # Runs schema_worker.py in isolated mode with an empty environment and a
+    # whitespace-padded JSON input one byte over MAX_INPUT_BYTES; expects exit 0
+    # and a JSON list with the size-budget message.
     worker = (
         Path(__file__).parents[2] / "src/openenv/validation/runtime/schema_worker.py"
     )

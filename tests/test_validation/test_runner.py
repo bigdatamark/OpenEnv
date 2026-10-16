@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for run_validation (the end-to-end validation runner) and
+# source_digest (deterministic package content hashing), including runtime
+# grader discovery with a fake provider and collector, static-level verdicts,
+# and hardening of the digest against special files and symlink swaps.
 import hashlib
 import os
 import shutil
@@ -19,6 +24,15 @@ from support.runtime import evidence, FakeRuntimeProvider
 def test_registered_runtime_graders_use_metadata_throughout_run(
     tmp_path, monkeypatch, mode
 ):
+    # [FUNCTION DOC]
+    # Parametrized over modes. Copies the served_probe fixture, registers two
+    # Probe graders for existing policy ids with a dependency chain on
+    # runtime.startup, patches the default registry and the evidence collector,
+    # and runs validation at the runtime level with FakeRuntimeProvider.
+    # Expects: for capability / applies-to modes the probes never run nor appear;
+    # in "run" mode both run and pass; with skip-build they are skipped with
+    # "unmet dependency" evidence; with source-change (the collector writes a file
+    # into the package) they are skipped citing the changed source.
     package = tmp_path / "subject"
     shutil.copytree(FIXTURES / "runtime" / "served_probe", package)
     policy = load_policy("v2")
@@ -26,6 +40,9 @@ def test_registered_runtime_graders_use_metadata_throughout_run(
     calls = []
 
     class Probe:
+        # [CLASS DOC]
+        # Runtime-level grader fake whose required capabilities include task_api only
+        # in "capability" mode; records its id into calls when run.
         level = Level.RUNTIME
         requires_provider = frozenset()
         requires_capabilities = (
@@ -33,13 +50,19 @@ def test_registered_runtime_graders_use_metadata_throughout_run(
         )
 
         def __init__(self, check_id, dependency):
+            # [FUNCTION DOC]
+            # Stores the check id and a single-element depends_on tuple.
             self.check_id = check_id
             self.depends_on = (dependency,)
 
         def applies_to(self, manifest):
+            # [FUNCTION DOC]
+            # Returns False only in "applies-to" mode.
             return mode != "applies-to"
 
         def run(self, subject):
+            # [FUNCTION DOC]
+            # Appends its id to calls and returns a passing CheckResult.
             calls.append(self.check_id)
             return CheckResult(
                 check_id=self.check_id, status=CheckStatus.PASS, duration_s=0
@@ -56,6 +79,9 @@ def test_registered_runtime_graders_use_metadata_throughout_run(
     monkeypatch.setattr(runner, "default_grader_registry", lambda policy: registry)
 
     def collect(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake collector returning empty evidence; in source-change mode it
+        # first writes changed.txt into the package.
         if mode == "source-change":
             (package / "changed.txt").write_text("changed during collection")
         return evidence()
@@ -88,6 +114,9 @@ def test_registered_runtime_graders_use_metadata_throughout_run(
 
 
 def test_valid_package_passes_static_level():
+    # [FUNCTION DOC]
+    # served_min_pass at static level passes in the local lane with
+    # static.manifest passing and the manifest embedded.
     report = run_validation(
         FIXTURES / "served_min_pass", max_level=Level.STATIC, skip_build=True
     )
@@ -100,6 +129,8 @@ def test_valid_package_passes_static_level():
 
 
 def test_report_round_trips_through_its_schema():
+    # [FUNCTION DOC]
+    # The produced report survives a JSON round trip.
     report = run_validation(
         FIXTURES / "served_min_pass", max_level=Level.STATIC, skip_build=True
     )
@@ -107,6 +138,9 @@ def test_report_round_trips_through_its_schema():
 
 
 def test_broken_manifest_fails_static_manifest_with_evidence():
+    # [FUNCTION DOC]
+    # broken_manifest fails with a single failing static.manifest result with
+    # evidence and no manifest.
     report = run_validation(
         FIXTURES / "broken_manifest", max_level=Level.STATIC, skip_build=True
     )
@@ -119,6 +153,9 @@ def test_broken_manifest_fails_static_manifest_with_evidence():
 
 
 def test_out_of_bounds_declaration_fails_static_manifest(tmp_path):
+    # [FUNCTION DOC]
+    # A floor_margin below the policy bound fails static.manifest citing
+    # floor_margin.
     src = (FIXTURES / "served_min_pass" / "openenv.yaml").read_text()
     (tmp_path / "openenv.yaml").write_text(
         src.replace("floor_margin: 0.5", "floor_margin: 0.01")
@@ -131,11 +168,15 @@ def test_out_of_bounds_declaration_fails_static_manifest(tmp_path):
 
 
 def test_ambiguous_package_raises_signature_error():
+    # [FUNCTION DOC]
+    # An ambiguous package raises SignatureError.
     with pytest.raises(SignatureError, match="ambiguous"):
         run_validation(FIXTURES / "ambiguous_package", max_level=Level.STATIC)
 
 
 def test_report_embeds_the_pinned_policy_version():
+    # [FUNCTION DOC]
+    # The report records the supplied policy's version.
     policy = load_policy("v1")
     report = run_validation(
         FIXTURES / "served_min_pass",
@@ -147,6 +188,8 @@ def test_report_embeds_the_pinned_policy_version():
 
 
 def test_source_digest_is_deterministic_and_content_sensitive(tmp_path):
+    # [FUNCTION DOC]
+    # The digest is stable, 64 hex chars, and changes when a file is added.
     copy = tmp_path / "pkg"
     shutil.copytree(FIXTURES / "served_min_pass", copy)
     first = source_digest(copy)
@@ -157,6 +200,9 @@ def test_source_digest_is_deterministic_and_content_sensitive(tmp_path):
 
 
 def test_source_digest_uses_portable_relative_paths(tmp_path):
+    # [FUNCTION DOC]
+    # For a single nested file the digest equals SHA-256 over the POSIX relative
+    # path, a NUL, the contents and a NUL.
     package_root = tmp_path / "pkg"
     nested = package_root / "nested"
     nested.mkdir(parents=True)
@@ -170,6 +216,8 @@ def test_source_digest_uses_portable_relative_paths(tmp_path):
 def test_source_digest_does_not_require_platform_open_flags(
     tmp_path, monkeypatch, flag
 ):
+    # [FUNCTION DOC]
+    # The digest still works when os.O_NONBLOCK or os.O_NOFOLLOW is absent.
     (tmp_path / "file.txt").write_bytes(b"contents")
     monkeypatch.delattr(os, flag, raising=False)
 
@@ -178,10 +226,18 @@ def test_source_digest_does_not_require_platform_open_flags(
 
 @pytest.mark.parametrize("failure", [ValueError, OSError])
 def test_initial_source_digest_failure_is_reported(monkeypatch, failure):
+    # [FUNCTION DOC]
+    # If source_digest raises ValueError/OSError, the run reports a single ERROR
+    # result with generic evidence, empty digest and FAIL verdict, never parses
+    # the package and never leaks the exception message.
     def fail_digest(*args):
+        # [FUNCTION DOC]
+        # HELPER: Raises the parametrized exception with a private path message.
         raise failure("private-source-path")
 
     def fail_parse(*args):
+        # [FUNCTION DOC]
+        # HELPER: Raises AssertionError if parsing is attempted.
         raise AssertionError("rejected source must not be parsed")
 
     monkeypatch.setattr("openenv.validation.runner.source_digest", fail_digest)
@@ -202,12 +258,18 @@ def test_initial_source_digest_failure_is_reported(monkeypatch, failure):
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="platform has no named pipes")
 def test_source_digest_rejects_named_pipes(tmp_path):
+    # [FUNCTION DOC]
+    # A FIFO in the package makes source_digest raise ValueError about regular
+    # files (skipped where mkfifo is unavailable).
     os.mkfifo(tmp_path / "pipe")
     with pytest.raises(ValueError, match="regular files"):
         source_digest(tmp_path)
 
 
 def test_source_digest_rejects_swapped_file_without_nofollow(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # Without O_NOFOLLOW, a file replaced by a symlink between stat and open is
+    # detected and raises ValueError "changed before".
     package = tmp_path / "package"
     package.mkdir()
     source = package / "source.txt"
@@ -217,6 +279,9 @@ def test_source_digest_rejects_swapped_file_without_nofollow(tmp_path, monkeypat
     original_open = os.open
 
     def swap_before_open(path, flags):
+        # [FUNCTION DOC]
+        # HELPER: Replaces the source file with a symlink to a private file, then
+        # calls the real os.open.
         source.unlink()
         source.symlink_to(private)
         return original_open(path, flags)

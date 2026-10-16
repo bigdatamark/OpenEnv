@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Docker-marked integration tests for DockerValidationProvider using the
+# validation lab's pinned fixture image (from OPENENV_VALIDATION_IMAGE).
+# Verifies effective container limits/hardening, the WebSocket reset/step/state
+# protocol, startup-failure cleanup, exec timeouts, and that no labelled
+# containers are leaked. Optionally writes evidence into
+# OPENENV_VALIDATION_ARTIFACTS.
 """Real lifecycle acceptance using the lab's exact-wheel, pinned-base image."""
 
 import json
@@ -19,6 +26,14 @@ pytestmark = pytest.mark.docker
 
 @pytest.fixture
 def spec():
+    # [FUNCTION DOC]
+    # Fixture building the LaunchSpec used by every test: the image from
+    # OPENENV_VALIDATION_IMAGE, 1 CPU / 512 MB memory / 64 MB disk / 10 s episode
+    # timeout, default network policy, a random "provider-<12 hex>" run id and a
+    # 30 s startup timeout.
+    # Returns: a LaunchSpec.
+    # Raises: pytest.fail if the image is unset and OPENENV_REQUIRE_DOCKER is "1";
+    # otherwise pytest.skip when the image is unset.
     image = os.environ.get("OPENENV_VALIDATION_IMAGE")
     if not image:
         if os.environ.get("OPENENV_REQUIRE_DOCKER") == "1":
@@ -36,6 +51,16 @@ def spec():
 
 
 def record_cleanup(name, run_id, details=None):
+    # [FUNCTION DOC]
+    # HELPER: Asserts that no container labelled with the run id remains and
+    # records the case in a cleanup evidence file.
+    # Inputs: name - case label; run_id - validation run id; details - optional
+    # inspection dict to store.
+    # Raises: AssertionError if any labelled container is still listed;
+    # CalledProcessError / TimeoutExpired if the docker CLI fails or exceeds 10 s.
+    # Side effects: runs "docker container ls"; if OPENENV_VALIDATION_ARTIFACTS is
+    # set, appends an entry to cleanup-provider.json there (reading any existing
+    # list first) and rewrites the file.
     result = subprocess.run(
         [
             "docker",
@@ -68,6 +93,15 @@ def record_cleanup(name, run_id, details=None):
 
 
 def test_docker_lifecycle_effective_limits_and_owned_cleanup(spec):
+    # [FUNCTION DOC]
+    # Starts the subject and checks inspect() reports the image, running state,
+    # uid 65532, read-only rootfs, memory/swap/CPU/pids limits, dropped capabilities
+    # and no-new-privileges; checks exec runs as uid 65532 with an empty capability
+    # bounding set, root writes fail while /tmp writes succeed; then drives
+    # reset/step/state/close over the /ws WebSocket and checks counter, episode id
+    # and step count. Writes container logs to the artifacts dir when configured.
+    # Always stops the subject (and stops it twice to check idempotence), then
+    # verifies cleanup.
     running = DockerValidationProvider().start(spec)
     details = None
     try:
@@ -149,6 +183,10 @@ def test_docker_lifecycle_effective_limits_and_owned_cleanup(spec):
 
 
 def test_docker_unhealthy_startup_removes_container(spec):
+    # [FUNCTION DOC]
+    # Starts a copy of the spec with VALIDATION_FAULT=startup_failure and a 2 s
+    # startup timeout; expects StartupError mentioning "deadline" and verifies no
+    # container is left behind.
     failed = spec.model_copy(
         update={
             "env_vars": {"VALIDATION_FAULT": "startup_failure"},
@@ -161,6 +199,10 @@ def test_docker_unhealthy_startup_removes_container(spec):
 
 
 def test_docker_exec_timeout_removes_process_tree(spec):
+    # [FUNCTION DOC]
+    # Execs a command that spawns a sleeping child and sleeps itself with a 0.2 s
+    # timeout; expects ProviderError mentioning "deadline", then stops the subject
+    # and verifies cleanup.
     running = DockerValidationProvider().start(spec)
     try:
         with pytest.raises(ProviderError, match="deadline"):

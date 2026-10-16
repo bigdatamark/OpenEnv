@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Unit tests for the Docker validation provider with the docker CLI replaced by
+# a fake (monkeypatched docker._command) and HTTP readiness stubbed. Covers
+# hardened container creation flags, rejected capabilities, startup and exec
+# timeouts, ownership-verified cleanup, credential redaction, filtered build
+# context snapshots and bounded command output. A few tests run real local
+# subprocesses through docker._command.
 import json
 import sys
 import time
@@ -23,6 +30,10 @@ IMAGE = "sha256:" + "a" * 64
 
 
 def launch_spec(**kwargs):
+    # [FUNCTION DOC]
+    # HELPER: Builds a LaunchSpec for IMAGE with run id "test-run", a default
+    # NetworkPolicy and a small ResourceDeclaration (0.5 CPU, 128 MB, 32 MB disk,
+    # 5 s) unless overridden; remaining keyword arguments pass through.
     return LaunchSpec(
         image_ref=IMAGE,
         run_id="test-run",
@@ -41,6 +52,12 @@ def launch_spec(**kwargs):
 
 
 def details(name="test", run_id="test-run", mounts=None):
+    # [FUNCTION DOC]
+    # HELPER: Builds a fake "docker inspect" record for a container: id, image,
+    # ownership label set to run_id, user 65532, an env containing a TOKEN, running
+    # state, memory/read-only host config, the given mounts (default empty) and a
+    # port binding to 127.0.0.1:49231.
+    # Returns: a dict.
     return {
         "Id": name,
         "Image": IMAGE,
@@ -59,19 +76,34 @@ def details(name="test", run_id="test-run", mounts=None):
 
 
 class Healthy:
+    # [CLASS DOC]
+    # Stub URL opener / response used for readiness probes: context manager whose
+    # open() returns itself with status 200.
     status = 200
 
     def __enter__(self):
+        # [FUNCTION DOC]
+        # Returns self.
         return self
 
     def __exit__(self, *args):
+        # [FUNCTION DOC]
+        # Does nothing (exceptions are not suppressed).
         pass
 
     def open(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # Ignores arguments and returns self (a 200 response).
         return self
 
 
 def listing(argv, containers):
+    # [FUNCTION DOC]
+    # HELPER: Emulates "docker ps" output for a name filter: one "name<TAB>owner"
+    # line for each known container whose name contains the filter value.
+    # Inputs: argv - the command (must include --filter name=...); containers -
+    # mapping name to owner run id.
+    # Returns: the concatenated text.
     """Answer a `docker ps` name query the way the Docker CLI formats it."""
     query = argv[argv.index("--filter") + 1].removeprefix("name=")
     return "".join(
@@ -81,10 +113,19 @@ def listing(argv, containers):
 
 @pytest.fixture
 def commands(monkeypatch):
+    # [FUNCTION DOC]
+    # Fixture that replaces docker._command with a fake recording every argv:
+    # create registers the container as owned by "test-run", ps returns a listing,
+    # inspect returns details for the container, rm forgets it, others return
+    # "ok". Also stubs urllib build_opener to return Healthy.
+    # Returns: the list of recorded argv lists.
     calls = []
     containers = {}
 
     def run(argv, timeout_s, max_bytes=docker._MAX_OUTPUT):
+        # [FUNCTION DOC]
+        # HELPER: The fake command runner described by the fixture.
+        # Returns: a tuple (exit code, stdout, stderr).
         calls.append(argv)
         if argv[1] == "create":
             containers[argv[argv.index("--name") + 1]] = "test-run"
@@ -102,6 +143,12 @@ def commands(monkeypatch):
 
 
 def test_start_is_hardened_and_does_not_forward_host_tokens(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # Starting a subject uses non-root user, dropped caps, no-new-privileges,
+    # memory/swap/CPU/pids limits, a loopback publish, bridge network, read-only
+    # root, init, sized tmpfs and shm, forwards declared env vars but not the host
+    # HF_TOKEN, ends with the image ref, and stop() is idempotent with exactly one
+    # rm and no prune.
     monkeypatch.setenv("HF_TOKEN", "hf_not_forwarded_to_subject")
     subject = docker.DockerValidationProvider().start(
         launch_spec(env_vars={"MODE": "probe"})
@@ -142,12 +189,18 @@ def test_start_is_hardened_and_does_not_forward_host_tokens(commands, monkeypatc
     ],
 )
 def test_unsupported_network_is_rejected_without_docker(commands, network):
+    # [FUNCTION DOC]
+    # no-network and allowlist policies raise UnsupportedCapability before any
+    # docker call.
     with pytest.raises(UnsupportedCapability):
         docker.DockerValidationProvider().start(launch_spec(network=network))
     assert not commands
 
 
 def test_gpu_is_rejected_without_docker(commands):
+    # [FUNCTION DOC]
+    # A GPU request raises UnsupportedCapability mentioning GPU before any docker
+    # call.
     spec = launch_spec(
         resources=ResourceDeclaration(
             cpu=1, memory_mb=128, disk_mb=32, episode_timeout_s=5, gpus=1
@@ -159,8 +212,15 @@ def test_gpu_is_rejected_without_docker(commands):
 
 
 def test_startup_timeout_removes_container(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # With readiness always refused and a tiny timeout, start raises StartupError
+    # ("deadline") and the container is force-removed.
     class Unhealthy:
+        # [CLASS DOC]
+        # Stub opener whose open always raises URLError.
         def open(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # Raises URLError("refused").
             raise urllib.error.URLError("refused")
 
     monkeypatch.setattr(docker.urllib.request, "build_opener", lambda *a: Unhealthy())
@@ -170,9 +230,15 @@ def test_startup_timeout_removes_container(commands, monkeypatch):
 
 
 def test_image_volumes_are_rejected_before_execution(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # If inspection reports a volume mount, start raises StartupError mentioning
+    # mounts, never runs "start", and removes the container.
     containers = {}
 
     def run(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Fake command runner like the fixture's, but inspect reports a
+        # volume mount.
         commands.append(argv)
         if argv[1] == "create":
             containers[argv[argv.index("--name") + 1]] = "test-run"
@@ -192,9 +258,16 @@ def test_image_volumes_are_rejected_before_execution(commands, monkeypatch):
 
 
 def test_create_failure_still_attempts_owned_cleanup(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # When create raises after the engine created the container, start raises
+    # StartupError, removes that named container and verifies removal with a name
+    # filter listing.
     containers = {}
 
     def run(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Fake runner whose create registers the container then raises
+        # ProviderError("deadline").
         commands.append(argv)
         if argv[1] == "create":
             # The client timed out, but the engine had already created it.
@@ -218,6 +291,9 @@ def test_create_failure_still_attempts_owned_cleanup(commands, monkeypatch):
 
 
 def test_inspection_reports_effective_settings_not_environment(commands):
+    # [FUNCTION DOC]
+    # inspect() exposes effective limits but never the container environment
+    # (no TOKEN).
     subject = docker.DockerValidationProvider().start(
         launch_spec(env_vars={"OPTION": "1"})
     )
@@ -229,10 +305,15 @@ def test_inspection_reports_effective_settings_not_environment(commands):
 
 
 def test_exec_timeout_destroys_subject_to_stop_descendants(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # An exec timeout propagates ProviderError("deadline"), removes the container,
+    # and later exec calls fail with "stopped".
     subject = docker.DockerValidationProvider().start(launch_spec())
     original = docker._command
 
     def timeout_exec(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Raises ProviderError("deadline") for exec, else delegates.
         if argv[1] == "exec":
             raise ProviderError("deadline")
         return original(argv, *args)
@@ -248,12 +329,19 @@ def test_exec_timeout_destroys_subject_to_stop_descendants(commands, monkeypatch
 def test_exec_timeout_is_preserved_when_cleanup_verification_fails(
     commands, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # If the post-rm ps verification fails, exec raises ProviderError mentioning
+    # "independently verified" chained from the original timeout, and the subject
+    # is not marked stopped.
     subject = docker.DockerValidationProvider().start(launch_spec())
     original = docker._command
     timeout = ProviderError("Docker operation exceeded its deadline")
     removed = False
 
     def fail_exec_and_verification(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Raises the timeout for exec; after an rm has been seen, ps returns
+        # a daemon error; otherwise delegates. Mutates the enclosing removed flag.
         nonlocal removed
         if argv[1] == "exec":
             raise timeout
@@ -282,10 +370,16 @@ MISSING_CONTAINER_ERRORS = [
 def test_cleanup_verifies_removal_by_listing_not_error_text(
     commands, monkeypatch, missing_error
 ):
+    # [FUNCTION DOC]
+    # Even when rm reports an engine-specific "no such container" error, stop()
+    # succeeds by verifying absence via listing (ps, rm, ps; no inspect).
     subject = docker.DockerValidationProvider().start(launch_spec())
     original = docker._command
 
     def vanished_during_rm(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Performs the real fake rm, then returns exit 1 with the missing
+        # error text.
         if argv[1] == "rm":
             original(argv, *args)
             return 1, "", missing_error
@@ -302,10 +396,15 @@ def test_cleanup_verifies_removal_by_listing_not_error_text(
 def test_failed_removal_is_reported_whatever_the_engine_says(
     commands, monkeypatch, missing_error
 ):
+    # [FUNCTION DOC]
+    # If rm fails and the container is still listed, stop() raises ProviderError
+    # "Could not remove validation container" and the subject stays unstopped.
     subject = docker.DockerValidationProvider().start(launch_spec())
     original = docker._command
 
     def rm_fails_but_container_remains(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Records rm and returns failure without removing; delegates others.
         if argv[1] == "rm":
             commands.append(argv)
             return 1, "", missing_error
@@ -318,10 +417,14 @@ def test_failed_removal_is_reported_whatever_the_engine_says(
 
 
 def test_cleanup_skips_a_container_that_is_already_gone(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # When ps lists nothing, stop() marks stopped without calling rm.
     subject = docker.DockerValidationProvider().start(launch_spec())
     original = docker._command
 
     def already_gone(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Records ps and returns empty output; delegates others.
         if argv[1] == "ps":
             commands.append(argv)
             return 0, "", ""
@@ -334,9 +437,14 @@ def test_cleanup_skips_a_container_that_is_already_gone(commands, monkeypatch):
 
 
 def test_unreachable_engine_is_never_treated_as_removed(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # When every docker call fails, stop() raises ProviderError about ownership,
+    # does not rm and leaves the subject unstopped.
     subject = docker.DockerValidationProvider().start(launch_spec())
 
     def unreachable(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Records argv and returns a daemon-connection failure.
         commands.append(argv)
         return 1, "", "Cannot connect to the Docker daemon"
 
@@ -348,11 +456,17 @@ def test_unreachable_engine_is_never_treated_as_removed(commands, monkeypatch):
 
 
 def test_exec_preserves_argv_and_redacts_credentials(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # exec passes the argv string unchanged (no shell interpretation) and redacts
+    # declared env values, hf_ tokens and token= values from stdout/stderr while
+    # keeping the exit code.
     subject = docker.DockerValidationProvider().start(
         launch_spec(env_vars={"API_KEY": "private-value"})
     )
 
     def run(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Records argv and returns exit 7 with secret-bearing output.
         commands.append(argv)
         return 7, "private-value hf_abcdefgh12345", "token=bad-secret"
 
@@ -368,6 +482,12 @@ def test_exec_preserves_argv_and_redacts_credentials(commands, monkeypatch):
 def test_build_uses_filtered_snapshot_and_returns_immutable_image(
     tmp_path, monkeypatch, uppercase_secret_names
 ):
+    # [FUNCTION DOC]
+    # Parametrized on uppercase names. Creates a context with VCS/venv/output dirs
+    # and many secret-like files plus similarly named source files; build must
+    # run docker (timeout <= 600 s) on a separate snapshot containing only the
+    # Dockerfile, data.txt and the .py files, and return the image id written to
+    # the --iidfile.
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
     (tmp_path / "data.txt").write_text("source")
     for name in (".git", ".venv", "outputs"):
@@ -417,6 +537,9 @@ def test_build_uses_filtered_snapshot_and_returns_immutable_image(
         (tmp_path / name).write_text("VALUE = 'source'\n")
 
     def build(argv, timeout_s):
+        # [FUNCTION DOC]
+        # HELPER: Fake build runner asserting the timeout and snapshot contents, then
+        # writing IMAGE to the iidfile path.
         assert timeout_s <= 600
         context = Path(argv[-1])
         assert set(path.name for path in context.iterdir()) == {
@@ -441,6 +564,9 @@ def test_build_uses_filtered_snapshot_and_returns_immutable_image(
 
 
 def test_build_rejects_symlink_escape_without_invoking_docker(tmp_path, commands):
+    # [FUNCTION DOC]
+    # A symlink in the context makes build raise ProviderError mentioning
+    # symbolic links, with no docker call.
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
     (tmp_path / "escape").symlink_to("/etc/passwd")
     with pytest.raises(ProviderError, match="symbolic"):
@@ -449,6 +575,9 @@ def test_build_rejects_symlink_escape_without_invoking_docker(tmp_path, commands
 
 
 def test_build_rejects_oversized_snapshot(tmp_path, commands):
+    # [FUNCTION DOC]
+    # A max_context_bytes of 1 makes build raise ProviderError about the budget,
+    # with no docker call.
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
     with pytest.raises(ProviderError, match="budget"):
         docker.DockerValidationProvider(max_context_bytes=1).build(
@@ -458,6 +587,9 @@ def test_build_rejects_oversized_snapshot(tmp_path, commands):
 
 
 def test_build_failure_is_bounded_and_sanitized(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # A failing build with huge stderr yields a ProviderError message under 4200
+    # chars with hf_ tokens redacted.
     (tmp_path / "Dockerfile").write_text("FROM scratch\n")
     monkeypatch.setattr(
         docker, "_command", lambda *a: (1, "", "x" * 8000 + " hf_1234567890123456")
@@ -469,6 +601,9 @@ def test_build_failure_is_bounded_and_sanitized(tmp_path, monkeypatch):
 
 
 def test_command_drains_large_stdout_and_stderr_with_bounded_memory():
+    # [FUNCTION DOC]
+    # Runs a real subprocess writing 200 KB to each stream; _command returns exit 0
+    # and only max_bytes (1024) of each.
     code, stdout, stderr = docker._command(
         [
             sys.executable,
@@ -482,6 +617,9 @@ def test_command_drains_large_stdout_and_stderr_with_bounded_memory():
 
 
 def test_command_kills_timed_out_process_group():
+    # [FUNCTION DOC]
+    # A real sleeping subprocess with a 50 ms timeout raises ProviderError
+    # ("deadline") within 3 s.
     started = time.monotonic()
     with pytest.raises(ProviderError, match="deadline"):
         docker._command([sys.executable, "-c", "import time; time.sleep(20)"], 0.05)
@@ -489,14 +627,21 @@ def test_command_kills_timed_out_process_group():
 
 
 def test_readiness_never_follows_redirects():
+    # [FUNCTION DOC]
+    # The readiness redirect handler returns None for a redirect.
     handler = docker._NoRedirects()
     assert handler.redirect_request(None, None, 302, "", {}, "http://private/") is None
 
 
 def test_cleanup_refuses_a_container_with_another_owner(commands, monkeypatch):
+    # [FUNCTION DOC]
+    # When the listing shows the exact name owned by another run (and a prefixed
+    # sibling), stop() raises ProviderError "another owner" without rm.
     subject = docker.DockerValidationProvider().start(launch_spec())
 
     def foreign(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Records argv and returns a listing with a foreign-owned match.
         commands.append(argv)
         # The name filter also matches a sibling whose name has ours as a prefix.
         return 0, f"{subject.name}-2\ttest-run\n{subject.name}\tother-run\n", ""
@@ -510,6 +655,9 @@ def test_cleanup_refuses_a_container_with_another_owner(commands, monkeypatch):
 def test_logs_remain_byte_bounded_after_redaction_expands_short_values(
     commands, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # Redacting a short secret value in logs must not exceed max_bytes and must
+    # remove the value.
     subject = docker.DockerValidationProvider().start(
         launch_spec(env_vars={"KEY": "x"})
     )
@@ -522,10 +670,15 @@ def test_logs_remain_byte_bounded_after_redaction_expands_short_values(
 def test_large_image_metadata_cannot_prevent_cleanup_after_inspection_failure(
     monkeypatch,
 ):
+    # [FUNCTION DOC]
+    # Non-JSON (oversized) inspection output makes start raise StartupError
+    # "invalid inspection evidence" and still removes the container (ps, rm, ps).
     calls = []
     containers = {}
 
     def run(argv, *args):
+        # [FUNCTION DOC]
+        # HELPER: Fake runner whose inspect returns a max-size non-JSON blob.
         calls.append(argv)
         if argv[1] == "create":
             containers[argv[argv.index("--name") + 1]] = "test-run"

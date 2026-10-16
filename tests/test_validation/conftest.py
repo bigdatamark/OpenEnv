@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Shared pytest constants and helpers for the validation test suite.
+# Defines FIXTURES (path to tests/fixtures/validation), lists of fixture
+# directory names whose manifests are expected to be valid or invalid, and
+# EXPECTED_POLICY: a mapping from check id to a (level, tier, severity) tuple
+# that must mirror the severity-v1.json policy file so drift is detected.
 import json
 from pathlib import Path
 
@@ -65,4 +71,10 @@ EXPECTED_POLICY = {
 
 
 def load_fixture_manifest(name: str) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Loads a fixture's pre-normalized manifest.
+    # Inputs: name - fixture directory name under FIXTURES.
+    # Returns: the parsed JSON dict from <name>/normalized_manifest.json.
+    # Raises: FileNotFoundError / JSONDecodeError if the file is missing or invalid.
+    # Side effects: reads a file.
     return json.loads((FIXTURES / name / "normalized_manifest.json").read_text())

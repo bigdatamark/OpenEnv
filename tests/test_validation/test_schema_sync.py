@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Checks that the committed JSON schemas under src/openenv/validation/schemas
+# match the pydantic models' generated schemas (EXPORTS maps file name to
+# model).
 import json
 from pathlib import Path
 
@@ -21,6 +25,9 @@ EXPORTS = {
 
 @pytest.mark.parametrize("fname", sorted(EXPORTS))
 def test_committed_schema_matches_model(fname):
+    # [FUNCTION DOC]
+    # The committed file equals the model schema rendered with indent 2, sorted
+    # keys and a trailing newline; the failure message names the sync script.
     committed = (SCHEMAS_DIR / fname).read_text()
     rendered = (
         json.dumps(EXPORTS[fname].model_json_schema(), indent=2, sort_keys=True) + "\n"
@@ -31,6 +38,8 @@ def test_committed_schema_matches_model(fname):
 
 
 def test_report_schema_allows_hub_and_statistical_check_ids():
+    # [FUNCTION DOC]
+    # The CheckResult check_id pattern accepts hub. and statistical. ids.
     schema = ValidationReport.model_json_schema()
     pattern = schema["$defs"]["CheckResult"]["properties"]["check_id"]["pattern"]
     import re

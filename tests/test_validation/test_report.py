@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic validation tests for CheckResult and ValidationReport.
 import pytest
 from conftest import load_fixture_manifest
 from openenv.validation.manifest import NormalizedManifest
@@ -7,11 +9,15 @@ from pydantic import ValidationError
 
 
 def test_check_result_ids_are_namespaced():
+    # [FUNCTION DOC]
+    # A check id without a namespace prefix is rejected.
     with pytest.raises(ValidationError):
         CheckResult(check_id="not-namespaced", status=CheckStatus.PASS, duration_s=0.0)
 
 
 def test_check_result_duration_is_non_negative():
+    # [FUNCTION DOC]
+    # A negative duration is rejected.
     with pytest.raises(ValidationError):
         CheckResult(
             check_id="static.manifest", status=CheckStatus.PASS, duration_s=-1.0
@@ -19,6 +25,8 @@ def test_check_result_duration_is_non_negative():
 
 
 def test_report_round_trips_with_embedded_manifest():
+    # [FUNCTION DOC]
+    # A full report with an embedded manifest survives a JSON round trip.
     manifest = NormalizedManifest.model_validate(
         load_fixture_manifest("served_min_pass")
     )
@@ -48,6 +56,8 @@ def test_report_round_trips_with_embedded_manifest():
 
 
 def test_report_allows_null_manifest_when_schema_failed():
+    # [FUNCTION DOC]
+    # A report with manifest None (failed schema) is valid and round-trips.
     report = ValidationReport(
         report_schema_version="1",
         target="tests/fixtures/validation/broken_manifest",
@@ -72,6 +82,8 @@ def test_report_allows_null_manifest_when_schema_failed():
 
 
 def test_report_schema_version_is_pinned():
+    # [FUNCTION DOC]
+    # An unknown report_schema_version is rejected.
     manifest = NormalizedManifest.model_validate(
         load_fixture_manifest("served_min_pass")
     )

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Regression tests for the acceptance-lab scripts in scripts/validation
+# (reproduce.py and verify_artifacts.py), loaded by file path: Linux wheelhouse
+# requirement filtering, target-platform wheel downloads, evidence bundle
+# verification and the redacting, bounded command runner.
 """Regression checks for the shared acceptance harness."""
 
 import hashlib
@@ -17,6 +22,10 @@ ACCEPTANCE = ROOT / "tests/validation_runtime/acceptance.json"
 
 
 def module(name):
+    # [FUNCTION DOC]
+    # HELPER: Imports scripts/validation/<name>.py by path as a fresh module.
+    # Returns: the executed module object.
+    # Side effects: executes the script's top-level code.
     spec = importlib.util.spec_from_file_location(
         name, ROOT / "scripts/validation" / f"{name}.py"
     )
@@ -26,6 +35,9 @@ def module(name):
 
 
 def test_linux_wheelhouse_markers_ignore_host_platform(tmp_path):
+    # [FUNCTION DOC]
+    # select_linux_requirements keeps linux-marked requirements (marker removed)
+    # and drops darwin ones, rewriting the file.
     requirements = tmp_path / "requirements.txt"
     requirements.write_text(
         "jeepney==0.9.0 ; sys_platform == 'linux' \\\n    --hash=sha256:aaa\n"
@@ -40,6 +52,14 @@ def test_linux_wheelhouse_markers_ignore_host_platform(tmp_path):
 def test_wheel_download_uses_target_image_compatibility(
     tmp_path, monkeypatch, arch, minor
 ):
+    # [FUNCTION DOC]
+    # Parametrized over arch and manylinux minor. Builds a fake native wheel and a
+    # hash-pinned requirements file, fakes only docker calls (returning target
+    # platform tags, asserting --platform, base image, --pull=never and
+    # --network=none) and lets real pip resolve offline. Expects the wheel copied
+    # into the wheelhouse unless its glibc tag (2_40) is newer than the target
+    # supports, in which case RuntimeError "No matching distribution" is raised and
+    # nothing is downloaded. Skips if pip is unavailable.
     # The pinned runtime lab supplies pip and fails if any test is skipped.
     pytest.importorskip(
         "pip", reason="Wheel resolution requires the pinned runtime lab"
@@ -72,6 +92,9 @@ def test_wheel_download_uses_target_image_compatibility(
     run = reproduction.run
 
     def fake_docker(argv, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Intercepts docker argv (validating flags; pull returns status text,
+        # otherwise returns JSON tag list); delegates other commands to the real run.
         if argv[0] == "docker":
             assert argv[argv.index("--platform") + 1] == docker_platform
             assert base_image in argv
@@ -100,6 +123,14 @@ def test_wheel_download_uses_target_image_compatibility(
 
 
 def evidence(tmp_path, skipped=0, suite="fast", cases=None, inventory=None):
+    # [FUNCTION DOC]
+    # HELPER: Writes a fake evidence bundle into tmp_path: acceptance.json
+    # (committed inventory by default), a successful run-manifest.json recording
+    # the suite and inventory hash, a junit.xml with the given cases and skipped
+    # count, and SHA256SUMS over all files via reproduce.hashes.
+    # Inputs: tmp_path; skipped count; suite name; cases as "class::name" strings
+    # (default one example case); inventory bytes override.
+    # Side effects: writes files.
     reproduction = module("reproduce")
     inventory = ACCEPTANCE.read_bytes() if inventory is None else inventory
     (tmp_path / "acceptance.json").write_bytes(inventory)
@@ -128,6 +159,9 @@ def evidence(tmp_path, skipped=0, suite="fast", cases=None, inventory=None):
 
 
 def test_artifact_verification_rejects_missing_or_added_evidence(tmp_path):
+    # [FUNCTION DOC]
+    # verify passes a clean bundle (1 case), rejects an unrecorded file
+    # ("inventory") and a modified file ("checksum").
     evidence(tmp_path)
     verify = module("verify_artifacts").verify
     assert verify(tmp_path) == 1
@@ -141,6 +175,8 @@ def test_artifact_verification_rejects_missing_or_added_evidence(tmp_path):
 
 
 def test_required_acceptance_cannot_silently_skip(tmp_path):
+    # [FUNCTION DOC]
+    # A junit with skips is rejected.
     evidence(tmp_path, skipped=1)
     with pytest.raises(ValueError, match="skips"):
         module("verify_artifacts").verify(tmp_path)
@@ -150,6 +186,8 @@ def test_required_acceptance_cannot_silently_skip(tmp_path):
 def test_required_acceptance_rejects_deselected_cases_despite_passing_tests(
     tmp_path, suite
 ):
+    # [FUNCTION DOC]
+    # Omitting one required case of the suite is rejected.
     required = json.loads(ACCEPTANCE.read_text())["suites"][suite]
     evidence(tmp_path, suite=suite, cases=required[:-1])
     with pytest.raises(ValueError, match="Missing required acceptance cases"):
@@ -158,12 +196,17 @@ def test_required_acceptance_rejects_deselected_cases_despite_passing_tests(
 
 @pytest.mark.parametrize("suite", ["protocol", "docker"])
 def test_all_required_acceptance_cases_establish_completion(tmp_path, suite):
+    # [FUNCTION DOC]
+    # All required cases pass verification and the count is returned.
     required = json.loads(ACCEPTANCE.read_text())["suites"][suite]
     evidence(tmp_path, suite=suite, cases=required)
     assert module("verify_artifacts").verify(tmp_path) == len(required)
 
 
 def test_reduced_inventory_cannot_redefine_required_acceptance(tmp_path):
+    # [FUNCTION DOC]
+    # A bundle whose inventory was shrunk is rejected as differing from the
+    # committed inventory.
     changed = json.loads(ACCEPTANCE.read_text())
     changed["suites"]["docker"] = changed["suites"]["docker"][:1]
     evidence(
@@ -177,6 +220,9 @@ def test_reduced_inventory_cannot_redefine_required_acceptance(tmp_path):
 
 
 def test_nested_case_checksum_is_itself_covered_by_bundle(tmp_path):
+    # [FUNCTION DOC]
+    # A nested SHA256SUMS in a case directory is treated as an ordinary covered
+    # file and verification passes.
     case = tmp_path / "case"
     case.mkdir()
     (case / "SHA256SUMS").write_text("case-owned checksums")
@@ -186,6 +232,9 @@ def test_nested_case_checksum_is_itself_covered_by_bundle(tmp_path):
 
 @pytest.mark.parametrize("stdout", ['{"Architecture": "aarch64"}', "aarch64", ""])
 def test_command_keeps_warnings_out_of_returned_stdout(tmp_path, stdout):
+    # [FUNCTION DOC]
+    # run() returns stdout only, logs both streams and redacts ghp_ tokens in the
+    # log.
     reproduction = module("reproduce")
     log = tmp_path / "command.log"
     result = reproduction.run(
@@ -205,6 +254,9 @@ def test_command_keeps_warnings_out_of_returned_stdout(tmp_path, stdout):
 
 
 def test_command_drains_large_stdout_and_stderr_without_unbounded_retention(tmp_path):
+    # [FUNCTION DOC]
+    # With 3 MB on each stream, run() returns stdout truncated to MAX_LOG_BYTES and
+    # the log is capped at MAX_LOG_BYTES while including stderr.
     reproduction = module("reproduce")
     log = tmp_path / "command.log"
     result = reproduction.run(
@@ -223,6 +275,9 @@ def test_command_drains_large_stdout_and_stderr_without_unbounded_retention(tmp_
 
 
 def test_command_failure_preserves_redacted_stderr(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # A non-zero exit raises RuntimeError "Command failed (7)"; the message and log
+    # include stdout and stderr with the env-provided token redacted.
     reproduction = module("reproduce")
     log = tmp_path / "command.log"
     token = "hf_testsecret123456"
@@ -245,6 +300,8 @@ def test_command_failure_preserves_redacted_stderr(tmp_path, monkeypatch):
 
 
 def test_command_digest_hashes_complete_unsanitized_bytes():
+    # [FUNCTION DOC]
+    # command_digest returns the SHA-256 of the full raw stdout bytes.
     reproduction = module("reproduce")
     payload = b" leading\n" + b"x" * 1_100_000 + b" ghp_abcdefgh\n"
     observed = reproduction.command_digest(
@@ -261,6 +318,8 @@ def test_command_digest_hashes_complete_unsanitized_bytes():
 
 
 def test_command_timeout_retains_partial_log(tmp_path):
+    # [FUNCTION DOC]
+    # A timed-out command raises TimeoutExpired and leaves a redacted partial log.
     log = tmp_path / "command.log"
     with pytest.raises(subprocess.TimeoutExpired):
         module("reproduce").run(

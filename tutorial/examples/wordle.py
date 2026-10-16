@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Example GRPO training script (copied from TRL) that fine-tunes a language
+# model to play Wordle against the TextArena OpenEnv environment, generating
+# rollouts with vLLM through TRL's experimental OpenEnv helpers. Each episode
+# plays up to max_turns guesses; the final turn's correctness, green, yellow
+# and repetition scores become four separate reward functions.
+# KNOWN ISSUE: the module docstring mentions an --env-mode docker-local option
+# that the argument parser does not define.
 # Copyright 2020-2026 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -93,6 +101,15 @@ from textarena_env.rewards import (
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Defines and parses the command line options: tokenizer/model ids, environment
+    # URL, system prompt path, dataset prompt and size, max turns and new tokens,
+    # sampling params (temperature, top-k, top-p), optimizer settings, batch and
+    # generation counts, epochs, checkpointing, output dir, run/project names,
+    # trackio space id, vLLM mode and server URL, logging steps and a debug flag.
+    # Returns: the parsed argparse Namespace.
+    # Side effects: reads sys.argv; exits on invalid arguments or --help.
+    # KNOWN ISSUE: --debug is parsed but never used.
     parser = argparse.ArgumentParser(
         description="Run GRPO training for Wordle using the TextArena OpenEnv environment."
     )
@@ -257,6 +274,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_system_prompt(path: str) -> str:
+    # [FUNCTION DOC]
+    # Reads the system prompt from the given path, or, if that is not a file,
+    # from the same relative path next to this script.
+    # Returns: the file text.
+    # Raises: FileNotFoundError if neither location exists.
     prompt_path = Path(path)
     if not prompt_path.is_file():
         prompt_path = Path(__file__).parent / path
@@ -264,6 +286,8 @@ def resolve_system_prompt(path: str) -> str:
 
 
 def sanitize_name(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the name with "/" replaced by "-" for use in paths/ids.
     return name.replace("/", "-")
 
 
@@ -273,6 +297,10 @@ def sanitize_name(name: str) -> str:
 
 
 def format_history(messages: Iterable[TextArenaMessage]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats TextArena messages as "[CATEGORY] content" lines (category
+    # defaults to MESSAGE), skipping messages with empty stripped content.
+    # Returns: the lines joined by newlines (empty string if none).
     lines: list[str] = []
     for message in messages:
         tag = message.category or "MESSAGE"
@@ -284,6 +312,11 @@ def format_history(messages: Iterable[TextArenaMessage]) -> str:
 
 
 def make_user_prompt(prompt_text: str, messages: Iterable[TextArenaMessage]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the user prompt from the game prompt (default "Wordle-v0" if
+    # blank) and the formatted history (or a placeholder if empty), ending with an
+    # instruction to reply with a bracketed guess.
+    # Returns: the prompt string.
     history = format_history(messages)
     prompt_section = prompt_text.strip() if prompt_text.strip() else "Wordle-v0"
     history_section = history if history else "[PROMPT] Awaiting first feedback."
@@ -295,6 +328,12 @@ def make_user_prompt(prompt_text: str, messages: Iterable[TextArenaMessage]) -> 
 
 
 def scale_repetition_score(previous_occurrences: int, max_occurrences: int) -> float:
+    # [FUNCTION DOC]
+    # HELPER: Returns (max - previous) / max, or 0.0 when max is 0; higher means
+    # the guess has been repeated less.
+    # KNOWN ISSUE: callers pass the number of distinct previous guesses as max, so
+    # the very first guess always scores 0.0 and the value is not a true
+    # occurrence ratio.
     """Scale the repetition score based on the number of previous occurrences from 0 to 1"""
     if max_occurrences == 0:
         return 0.0
@@ -309,6 +348,18 @@ def rollout_once(
     system_prompt: str,
     max_turns: int,
 ) -> dict[str, list]:
+    # [FUNCTION DOC]
+    # Plays one Wordle episode: resets the env, then for up to max_turns (stopping
+    # when done) builds a chat prompt from the observation, generates one
+    # completion via generate_rollout_completions, extracts the guess, steps the
+    # env, and computes per-turn correctness (env reward), green/yellow fractions
+    # from parsed feedback (out of 5) and a repetition score. Token ids and
+    # logprobs from every turn are concatenated.
+    # Returns: a dict with prompt_ids, completion_ids, logprobs, raw_rewards (all
+    # turns), and the last turn's correct_reward (falling back to the last raw
+    # reward or 0.0), green_reward, yellow_reward and repetition_reward (0.0 when
+    # no turns were played).
+    # Side effects: network calls to the environment; generation via the trainer.
     result = env.reset()
     observation = result.observation
 
@@ -397,6 +448,9 @@ def rollout_once(
 
 
 def reward_correct(completions: list[str], **kwargs) -> list[float]:
+    # [FUNCTION DOC]
+    # TRL reward function: returns the correct_reward values passed through kwargs
+    # as floats, or 0.0 for every completion when absent.
     rewards = kwargs.get("correct_reward") if kwargs else None
     if rewards is None:
         return [0.0 for _ in completions]
@@ -404,6 +458,8 @@ def reward_correct(completions: list[str], **kwargs) -> list[float]:
 
 
 def reward_greens(completions: list[str], **kwargs) -> list[float]:
+    # [FUNCTION DOC]
+    # TRL reward function: same as reward_correct but for green_reward.
     rewards = kwargs.get("green_reward") if kwargs else None
     if rewards is None:
         return [0.0 for _ in completions]
@@ -411,6 +467,8 @@ def reward_greens(completions: list[str], **kwargs) -> list[float]:
 
 
 def reward_yellows(completions: list[str], **kwargs) -> list[float]:
+    # [FUNCTION DOC]
+    # TRL reward function: same as reward_correct but for yellow_reward.
     rewards = kwargs.get("yellow_reward") if kwargs else None
     if rewards is None:
         return [0.0 for _ in completions]
@@ -418,6 +476,8 @@ def reward_yellows(completions: list[str], **kwargs) -> list[float]:
 
 
 def reward_repetition(completions: list[str], **kwargs) -> list[float]:
+    # [FUNCTION DOC]
+    # TRL reward function: same as reward_correct but for repetition_reward.
     rewards = kwargs.get("repetition_reward") if kwargs else None
     if rewards is None:
         return [0.0 for _ in completions]
@@ -430,6 +490,17 @@ def reward_repetition(completions: list[str], **kwargs) -> list[float]:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses args, loads the tokenizer (pad token set to EOS), reads the system
+    # prompt, builds a dataset repeating the dataset prompt, configures GRPOConfig
+    # (vLLM, optimizer, checkpointing, trackio reporting; output dir defaults to a
+    # timestamped outputs/ folder), sets run name / project / trackio space id,
+    # then opens a sync TextArenaEnv client and trains a GRPOTrainer with the four
+    # reward functions and a custom rollout function.
+    # Side effects: downloads models, network access, GPU training, writes
+    # checkpoints, console output.
+    # KNOWN ISSUE: the trackio_space_id computed in GRPOConfig is always overwritten
+    # by the --trackio-space-id argument value.
     args = parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_id)
@@ -472,6 +543,12 @@ def main() -> None:
     grpo_config.trackio_space_id = args.trackio_space_id
 
     def rollout_func(prompts: list[str], trainer: GRPOTrainer) -> dict[str, list]:
+        # [FUNCTION DOC]
+        # Rollout function given to GRPOTrainer: runs rollout_once for each prompt
+        # using the enclosing env client (bound later by the with-block), tokenizer
+        # and system prompt, and collects per-episode ids, logprobs and rewards.
+        # Returns: a dict of lists keyed by prompt_ids, completion_ids, logprobs,
+        # correct_reward, green_reward, yellow_reward and repetition_reward.
         episode_prompt_ids: list[list[int]] = []
         episode_completion_ids: list[list[int]] = []
         episode_logprobs: list[list[float]] = []

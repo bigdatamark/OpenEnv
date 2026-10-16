@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for OpenEnvYamlParser, which reads openenv.yaml into a
+# NormalizedManifest, plus default parser-registry dispatch.
 import pytest
 from conftest import FIXTURES, load_fixture_manifest
 from openenv.validation.manifest import ManifestError, NormalizedManifest
@@ -8,12 +11,17 @@ from openenv.validation.types import SignatureKind
 
 
 def test_parse_matches_the_committed_golden_manifest():
+    # [FUNCTION DOC]
+    # Parsing served_min_pass equals its committed normalized manifest.
     parsed = OpenEnvYamlParser().parse(FIXTURES / "served_min_pass")
     golden = NormalizedManifest.model_validate(load_fixture_manifest("served_min_pass"))
     assert parsed == golden
 
 
 def test_broken_manifest_raises_manifest_error_with_field_evidence():
+    # [FUNCTION DOC]
+    # broken_manifest raises ManifestError whose errors mention the reward range
+    # (or "strictly increasing") and resources.
     with pytest.raises(ManifestError) as exc_info:
         OpenEnvYamlParser().parse(FIXTURES / "broken_manifest")
     evidence = "\n".join(exc_info.value.errors)
@@ -22,12 +30,18 @@ def test_broken_manifest_raises_manifest_error_with_field_evidence():
 
 
 def test_unpinned_judge_raises_manifest_error_on_the_judge_pin():
+    # [FUNCTION DOC]
+    # unpinned_judge raises ManifestError mentioning "judge pin".
     with pytest.raises(ManifestError) as exc_info:
         OpenEnvYamlParser().parse(FIXTURES / "unpinned_judge")
     assert any("judge pin" in error for error in exc_info.value.errors)
 
 
 def test_missing_validation_block_has_remediation(tmp_path):
+    # [FUNCTION DOC]
+    # An openenv.yaml without a validation block raises ManifestError whose first
+    # error mentions "validation" and which carries a remediation.
+    # Side effects: writes a temp file.
     (tmp_path / "openenv.yaml").write_text("spec_version: 1\nname: bare\n")
     with pytest.raises(ManifestError) as exc_info:
         OpenEnvYamlParser().parse(tmp_path)
@@ -36,6 +50,9 @@ def test_missing_validation_block_has_remediation(tmp_path):
 
 
 def test_parse_is_a_pure_read(tmp_path):
+    # [FUNCTION DOC]
+    # Parsing succeeds even when a server.py that would exit on import is present,
+    # proving the parser does not import package code.
     src = (FIXTURES / "served_min_pass" / "openenv.yaml").read_text()
     (tmp_path / "openenv.yaml").write_text(src)
     (tmp_path / "server.py").write_text(
@@ -46,6 +63,9 @@ def test_parse_is_a_pure_read(tmp_path):
 
 
 def test_default_registry_dispatches_openenv_yaml_end_to_end():
+    # [FUNCTION DOC]
+    # Signature detection yields OPENENV_SERVED and the default registry's parser
+    # parses served_min_pass.
     signature = detect_signature(FIXTURES / "served_min_pass")
     assert signature is SignatureKind.OPENENV_SERVED
     manifest = (
@@ -57,6 +77,9 @@ def test_default_registry_dispatches_openenv_yaml_end_to_end():
 
 
 def test_network_policy_parses_and_defaults_to_public(tmp_path):
+    # [FUNCTION DOC]
+    # An appended allowlist network block parses mode and hosts; without it the
+    # mode is public with no hosts.
     src = (FIXTURES / "served_min_pass" / "openenv.yaml").read_text()
     (tmp_path / "openenv.yaml").write_text(
         src
@@ -72,6 +95,9 @@ def test_network_policy_parses_and_defaults_to_public(tmp_path):
 
 
 def test_allowed_hosts_without_allowlist_mode_is_a_manifest_error(tmp_path):
+    # [FUNCTION DOC]
+    # allowed_hosts without allowlist mode raises ManifestError mentioning
+    # "allowlist".
     src = (FIXTURES / "served_min_pass" / "openenv.yaml").read_text()
     (tmp_path / "openenv.yaml").write_text(
         src + "  network:\n    allowed_hosts: [api.example.com]\n"

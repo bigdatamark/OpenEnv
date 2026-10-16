@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Docker-marked canary that runs the unmodified envs/echo_env through the
+# installed validation CLI (via test_runtime_cli._invoke_cli) and records
+# compatibility findings as evidence.
 """Run the unchanged reference Echo environment through the installed CLI."""
 
 import hashlib
@@ -13,6 +17,19 @@ pytestmark = pytest.mark.docker
 
 
 def test_reference_echo_validates_reset_and_unscored_steps(tmp_path):
+    # [FUNCTION DOC]
+    # Skips (or fails when OPENENV_REQUIRE_DOCKER is "1") if
+    # OPENENV_VALIDATION_ECHO_CONTEXT is unset. Verifies the staged Echo sources
+    # match the SHA-256 hashes in echo-canary-source.json, runs the CLI, and writes
+    # cli/echo_canary/compatibility-findings.json summarizing expected vs observed
+    # statuses. Asserts levels 1 and 2 ran, static/startup/state checks pass, the
+    # collector trace is reset/state/step/state/step/state with consistent episode
+    # id and step counts, step observations echo the messages with null rewards,
+    # and that the overall verdict fails (exit code 1) only because null rewards
+    # fail runtime.reward_well_formed; also checks the reset vs step observation
+    # schemas differ in requiring tool_name.
+    # Side effects: reads OPENENV_VALIDATION_ARTIFACTS (KeyError if unset) and
+    # writes a JSON file there; runs a subprocess via the CLI helper.
     configured = os.environ.get("OPENENV_VALIDATION_ECHO_CONTEXT")
     if not configured:
         if os.environ.get("OPENENV_REQUIRE_DOCKER") == "1":
