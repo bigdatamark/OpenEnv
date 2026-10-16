@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 7): 2D cross-correlation (template matching) of a
+# 1024 x 1024 image with a random 32 x 32 template.
 """
 2D Cross-Correlation (Template Matching)
 
@@ -17,11 +20,15 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model with a random (1, 1, th, tw) template buffer.
     """
     2D cross-correlation for template matching.
     """
 
     def __init__(self, template_height: int = 32, template_width: int = 32):
+        # [FUNCTION DOC]
+        # Stores template dimensions and registers a random normal template.
         super(Model, self).__init__()
         self.template_height = template_height
         self.template_width = template_width
@@ -31,6 +38,11 @@ class Model(nn.Module):
         self.register_buffer("template", template)
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Cross-correlates the image with the template via conv2d with padding
+        # (th // 2, tw // 2) and returns the 2D correlation map.
+        # KNOWN ISSUE: with even template sizes the output is (H + 1, W + 1), not the
+        # (H, W) the docstring claims.
         """
         Compute cross-correlation between image and template.
 
@@ -58,9 +70,13 @@ image_width = 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] random normal of shape (image_height, image_width).
     image = torch.randn(image_height, image_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [32, 32] (template height and width).
     return [32, 32]  # template_height, template_width

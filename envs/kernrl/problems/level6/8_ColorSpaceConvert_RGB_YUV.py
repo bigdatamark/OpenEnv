@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 6): per-pixel RGB to YUV (BT.601-style coefficients)
+# conversion of a 1920 x 1080 x 3 image.
 """
 Color Space Conversion - RGB to YUV
 
@@ -20,11 +23,15 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model holding the 3 x 3 RGB-to-YUV matrix as a buffer.
     """
     RGB to YUV color space conversion.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the conversion matrix.
         super(Model, self).__init__()
 
         # Conversion matrix
@@ -36,6 +43,9 @@ class Model(nn.Module):
         self.register_buffer("conversion_matrix", rgb_to_yuv)
 
     def forward(self, rgb: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns rgb @ matrix^T over the last (channel) dimension, same shape as the
+        # input.
         """
         Convert RGB to YUV.
 
@@ -56,10 +66,14 @@ image_width = 1080
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [rgb] uniform random of shape (image_height, image_width, 3).
     # RGB image
     rgb = torch.rand(image_height, image_width, 3)
     return [rgb]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

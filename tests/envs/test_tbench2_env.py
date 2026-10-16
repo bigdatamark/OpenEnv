@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Tests for tbench2_env (Terminal-Bench 2): local Tbench2Environment reset/workdir resolution,
+# withholding of verifier assets (tests/ and solution/) with an in-memory tests cache, staging tests
+# into fixed paths only at verify time (wiping agent-planted files and symlinks), canonical test.sh
+# scoring and its failure modes, and Tbench2DockerEnvironment equivalents against fake containers
+# (copy exclusions, stage/verify/cleanup ordering, workdir resolution, argv exec, image-less task
+# rejection). An opt-in smoke test needs camel-ai and TB2_ENABLE_TESTS=1. Side effect at import:
+# prepends the repo root and envs to sys.path; camel is imported optionally.
 import io
 import logging
 import os
@@ -30,14 +38,22 @@ from envs.tbench2_env.server.tbench2_env_environment import (
 
 
 class _FakeTerminalToolkit:
+    # [CLASS DOC]
+    # HELPER: Stand-in for camel's terminal toolkit recording constructor kwargs.
     def __init__(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Stores kwargs.
         self.kwargs = kwargs
 
     def shell_exec(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Returns the empty string.
         return ""
 
 
 def test_tbench2_reset_uses_default_task_id(monkeypatch, tmp_path: Path):
+    # [FUNCTION DOC]
+    # A parameterless reset loads the configured default task's instruction.
     """HTTP resets without kwargs should land on the default demo task."""
     task_dir = tmp_path / "headless-terminal"
     task_dir.mkdir()
@@ -63,6 +79,9 @@ def test_tbench2_reset_uses_default_task_id(monkeypatch, tmp_path: Path):
 
 
 def _make_env(monkeypatch, tmp_path: Path, task_id: str) -> Tbench2Environment:
+    # [FUNCTION DOC]
+    # HELPER: Patches _require_terminal_toolkit to the fake and returns a Tbench2Environment over
+    # tmp_path with the given default task.
     monkeypatch.setattr(
         tbench2_env_environment,
         "_require_terminal_toolkit",
@@ -76,6 +95,8 @@ def _make_env(monkeypatch, tmp_path: Path, task_id: str) -> Tbench2Environment:
 
 
 def test_tbench2_workdir_from_task_dockerfile(monkeypatch, tmp_path: Path):
+    # [FUNCTION DOC]
+    # An existing WORKDIR from the task Dockerfile becomes the working directory.
     """A parsed WORKDIR that exists and isn't the server tree becomes the cwd."""
     task_dir = tmp_path / "demo-task"
     (task_dir / "environment").mkdir(parents=True)
@@ -93,6 +114,8 @@ def test_tbench2_workdir_from_task_dockerfile(monkeypatch, tmp_path: Path):
 
 
 def test_tbench2_workdir_rejects_server_tree(monkeypatch, tmp_path: Path):
+    # [FUNCTION DOC]
+    # A WORKDIR pointing at the server's own package directory falls back to the task directory.
     """A parsed WORKDIR that is the server's own install tree (e.g. /app on
     the standard server image) falls back to the task source dir."""
     server_tree = Path(tbench2_env_environment.__file__).resolve().parent
@@ -115,6 +138,9 @@ def test_tbench2_workdir_rejects_server_tree(monkeypatch, tmp_path: Path):
 
 
 def _make_task_dir(root: Path, name: str = "my-task") -> Path:
+    # [FUNCTION DOC]
+    # HELPER: Creates a task directory with tests/test.sh, tests/test_outputs.py, solution/solve.sh,
+    # task.toml (docker_image debian:12) and instruction.md; returns its path.
     task = root / name
     (task / "tests").mkdir(parents=True)
     (task / "tests" / "test.sh").write_text(
@@ -130,6 +156,9 @@ def _make_task_dir(root: Path, name: str = "my-task") -> Path:
 
 @pytest.fixture()
 def staged_paths(monkeypatch, tmp_path: Path):
+    # [FUNCTION DOC]
+    # HELPER: Fixture redirecting the module's fixed verify tests dir and verifier log dir into tmp_path;
+    # returns (tests_dir, logs_dir).
     """Redirect the official fixed paths (/tests, /logs/verifier) into tmp."""
     tests = tmp_path / "stage" / "tests"
     logs = tmp_path / "stage" / "logs" / "verifier"
@@ -140,10 +169,15 @@ def staged_paths(monkeypatch, tmp_path: Path):
 
 @pytest.fixture(autouse=True)
 def _fresh_withhold_cache(monkeypatch):
+    # [FUNCTION DOC]
+    # HELPER: Autouse fixture replacing the class-level withheld-tests cache with an empty dict.
     monkeypatch.setattr(Tbench2Environment, "_WITHHELD_TESTS", {})
 
 
 def test_withhold_removes_assets_and_caches_tests(tmp_path: Path):
+    # [FUNCTION DOC]
+    # Withholding deletes tests/ and solution/, keeps task.toml and instruction.md, caches the tests, and
+    # a second call keeps the cache.
     task = _make_task_dir(tmp_path)
     env = Tbench2Environment(withhold_tests=True)
 
@@ -161,6 +195,9 @@ def test_withhold_removes_assets_and_caches_tests(tmp_path: Path):
 
 
 def test_stage_from_memory_and_wipe_planted_files(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # Staging from the cache restores the official tests, removes a planted conftest.py and reward file,
+    # and leaves an empty log dir.
     stage_tests, stage_logs = staged_paths
     task = _make_task_dir(tmp_path)
     env = Tbench2Environment(withhold_tests=True)
@@ -184,6 +221,8 @@ def test_stage_from_memory_and_wipe_planted_files(tmp_path: Path, staged_paths):
 
 
 def test_stage_from_disk_without_gate(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # Without withholding, tests are staged from disk and the source task is untouched.
     stage_tests, _ = staged_paths
     task = _make_task_dir(tmp_path)
     env = Tbench2Environment(withhold_tests=False)
@@ -198,6 +237,8 @@ def test_stage_from_disk_without_gate(tmp_path: Path, staged_paths):
 
 
 def test_stage_reports_missing_tests(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # Staging returns False when the task has no tests.
     task = tmp_path / "empty-task"
     task.mkdir()
     env = Tbench2Environment(withhold_tests=False)
@@ -207,16 +248,25 @@ def test_stage_reports_missing_tests(tmp_path: Path, staged_paths):
 
 
 class _RecordingToolkit:
+    # [CLASS DOC]
+    # HELPER: Toolkit fake recording shell_exec kwargs and returning fixed output.
     def __init__(self, output: str):
+        # [FUNCTION DOC]
+        # HELPER: Stores the output and an empty call log.
         self.calls: list[dict] = []
         self.output = output
 
     def shell_exec(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records kwargs and returns the output.
         self.calls.append(kwargs)
         return self.output
 
 
 def test_evaluate_canonical_from_withheld_copy(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # _evaluate_task runs the staged test.sh, logs under the verifier dir, reads reward 1.0, and removes
+    # staged tests and logs afterwards.
     """Full evaluate flow: staging from memory + canonical test.sh scoring."""
     stage_tests, stage_logs = staged_paths
     task = _make_task_dir(tmp_path)
@@ -243,6 +293,8 @@ def test_evaluate_canonical_from_withheld_copy(tmp_path: Path, staged_paths):
 
 
 def test_evaluate_missing_verdict_raises_not_zero(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # An empty reward marker raises RuntimeError ("produced no verdict") and still cleans up.
     """test.sh ran but wrote no reward.txt (crash / kill before the verifier
     wrote one): scoring must error out — reward None on the observation — not
     return a 0.0 indistinguishable from tests genuinely failing. The staged
@@ -264,6 +316,8 @@ def test_evaluate_missing_verdict_raises_not_zero(tmp_path: Path, staged_paths):
 
 
 def test_evaluate_without_tests_scores_zero(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # A task without tests scores 0 without running anything.
     task = tmp_path / "empty-task"
     task.mkdir()
     env = Tbench2Environment(withhold_tests=False)
@@ -280,6 +334,9 @@ def test_evaluate_without_tests_scores_zero(tmp_path: Path, staged_paths):
 def test_evaluate_wipes_partial_stage_on_error(
     tmp_path: Path, staged_paths, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # If extraction fails partway (patched _extractall), the OSError propagates and staged paths are
+    # removed.
     """A stage that errors partway must be wiped like a completed one — the
     session survives a scoring error, so no partial tests/ copy may remain."""
     stage_tests, stage_logs = staged_paths
@@ -291,6 +348,8 @@ def test_evaluate_wipes_partial_stage_on_error(
     env._withhold_verifier_assets(task)
 
     def _explode(tar, dest):
+        # [FUNCTION DOC]
+        # HELPER: Writes one file into the destination then raises OSError("disk full").
         (Path(dest) / "test_outputs.py").write_text("EXPECTED = 'secret42'\n")
         raise OSError("disk full")
 
@@ -304,6 +363,8 @@ def test_evaluate_wipes_partial_stage_on_error(
 
 
 def test_stage_wipes_symlinked_fixed_path(tmp_path: Path, staged_paths):
+    # [FUNCTION DOC]
+    # A symlinked fixed tests path is replaced by a real directory; the agent's target is not written.
     """A symlinked /tests must not let the official suite merge into a dir the
     agent controls (rmtree silently no-ops on a symlink; _hard_remove doesn't)."""
     stage_tests, _ = staged_paths
@@ -328,6 +389,8 @@ def test_stage_wipes_symlinked_fixed_path(tmp_path: Path, staged_paths):
 
 
 def test_withhold_removes_symlinked_tests(tmp_path: Path):
+    # [FUNCTION DOC]
+    # A symlinked tests/ is removed (link only) and the cache contains the target's real files.
     """tests/ as a symlink is removed too — the link, not just its target."""
     task = tmp_path / "task"
     task.mkdir()
@@ -357,6 +420,8 @@ def test_withhold_removes_symlinked_tests(tmp_path: Path):
 
 
 class _FakeContainer:
+    # [CLASS DOC]
+    # HELPER: Fake docker container logging put_archive and exec_run calls in order.
     """Records exec/put_archive calls in one ordered event log.
 
     exec_run receives argv form (["bash", "-c", payload]); the log records
@@ -364,26 +429,36 @@ class _FakeContainer:
     """
 
     def __init__(self, exec_output: bytes = b"__TB2_REWARD__:1\n"):
+        # [FUNCTION DOC]
+        # HELPER: Initialises event and raw command logs and the exec output.
         self.events: list[tuple] = []
         self.raw_cmds: list = []
         self.exec_output = exec_output
 
     def put_archive(self, dest, data):
+        # [FUNCTION DOC]
+        # HELPER: Logs ("put", dest, data) and returns True.
         self.events.append(("put", dest, data))
         return True
 
     def exec_run(self, cmd, workdir=None, stdout=True, stderr=True):
+        # [FUNCTION DOC]
+        # HELPER: Logs the raw command and ("exec", shell payload); returns (0, exec_output).
         self.raw_cmds.append(cmd)
         self.events.append(("exec", cmd[-1] if isinstance(cmd, list) else cmd))
         return 0, self.exec_output
 
 
 def _tar_names(data: bytes) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns member names of a tar archive given as bytes.
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
         return tar.getnames()
 
 
 def test_docker_copy_excludes_verifier_assets(tmp_path: Path):
+    # [FUNCTION DOC]
+    # _copy_dir_to_container sends one archive to /task without solution/ or tests/ and no duplicate names.
     task = _make_task_dir(tmp_path)
     (task / "environment").mkdir()
     (task / "environment" / "Dockerfile").write_text("FROM debian:12\n")
@@ -403,6 +478,8 @@ def test_docker_copy_excludes_verifier_assets(tmp_path: Path):
 
 
 def test_evaluate_docker_missing_verdict_raises_not_zero(tmp_path: Path):
+    # [FUNCTION DOC]
+    # An empty reward marker raises "produced no verdict" and the last exec cleans /tests and logs.
     """Docker-mode twin of the local missing-verdict case: an empty reward
     marker errors out (with cleanup) instead of scoring 0.0."""
     task = _make_task_dir(tmp_path)
@@ -419,6 +496,9 @@ def test_evaluate_docker_missing_verdict_raises_not_zero(tmp_path: Path):
 
 
 def test_evaluate_docker_stages_tests_at_verify(tmp_path: Path):
+    # [FUNCTION DOC]
+    # Event order is wipe, put /tests, run test.sh from /task with a 900s timeout reading reward.txt,
+    # then wipe; reward 1.0.
     task = _make_task_dir(tmp_path)
     env = Tbench2DockerEnvironment()
     container = _FakeContainer()
@@ -447,6 +527,8 @@ def test_evaluate_docker_stages_tests_at_verify(tmp_path: Path):
 
 
 def test_evaluate_docker_runs_in_resolved_workdir(tmp_path: Path):
+    # [FUNCTION DOC]
+    # The verify command cds into the resolved workdir.
     task = _make_task_dir(tmp_path)
     env = Tbench2DockerEnvironment()
     env._container = _FakeContainer()
@@ -461,6 +543,8 @@ def test_evaluate_docker_runs_in_resolved_workdir(tmp_path: Path):
 
 
 def test_evaluate_docker_fallback_without_testsh(tmp_path: Path):
+    # [FUNCTION DOC]
+    # Without test.sh, scoring runs pytest on /tests and uses its exit code.
     """A task dir whose tests/ ships no canonical harness scores via pytest,
     still against the staged /tests copy."""
     task = _make_task_dir(tmp_path)
@@ -480,13 +564,19 @@ def test_evaluate_docker_fallback_without_testsh(tmp_path: Path):
 
 
 def test_evaluate_docker_cleans_up_when_scoring_raises(tmp_path: Path):
+    # [FUNCTION DOC]
+    # If running test.sh raises, the error propagates and cleanup still runs.
     """The staged /task/tests must not outlive a verify that errors out —
     step() reports the failure without ending the episode, so the agent
     keeps its session."""
     task = _make_task_dir(tmp_path)
 
     class _ExplodingContainer(_FakeContainer):
+        # [CLASS DOC]
+        # HELPER: Container whose exec raises RuntimeError for the test.sh command.
         def exec_run(self, cmd, workdir=None, stdout=True, stderr=True):
+            # [FUNCTION DOC]
+            # HELPER: Logs and raises for test.sh payloads, otherwise delegates.
             payload = cmd[-1] if isinstance(cmd, list) else cmd
             if "test.sh" in payload:
                 self.events.append(("exec", payload))
@@ -506,12 +596,18 @@ def test_evaluate_docker_cleans_up_when_scoring_raises(tmp_path: Path):
 
 
 def test_evaluate_docker_fails_closed_when_prestage_wipe_fails(tmp_path: Path):
+    # [FUNCTION DOC]
+    # A failing pre-stage wipe raises "could not reset /tests" and nothing is put.
     """If the pre-stage rm -rf fails, scoring must error out rather than
     put_archive into a dir the agent still controls."""
     task = _make_task_dir(tmp_path)
 
     class _StubbornContainer(_FakeContainer):
+        # [CLASS DOC]
+        # HELPER: Container whose pre-stage wipe (rm plus mkdir) exits 1.
         def exec_run(self, cmd, workdir=None, stdout=True, stderr=True):
+            # [FUNCTION DOC]
+            # HELPER: Logs the payload; returns exit 1 for the pre-stage wipe, else success.
             payload = cmd[-1] if isinstance(cmd, list) else cmd
             self.events.append(("exec", payload))
             if "rm -rf /tests" in payload and "mkdir" in payload:
@@ -530,11 +626,17 @@ def test_evaluate_docker_fails_closed_when_prestage_wipe_fails(tmp_path: Path):
 
 
 def test_evaluate_docker_warns_when_cleanup_fails(tmp_path: Path, caplog):
+    # [FUNCTION DOC]
+    # A failing post-verify wipe logs a warning but keeps reward 1.0.
     """A post-verify rm -rf that exits nonzero must not stay silent."""
     task = _make_task_dir(tmp_path)
 
     class _LeakyContainer(_FakeContainer):
+        # [CLASS DOC]
+        # HELPER: Container whose post-verify wipe (rm without mkdir) exits 1.
         def exec_run(self, cmd, workdir=None, stdout=True, stderr=True):
+            # [FUNCTION DOC]
+            # HELPER: Logs the payload; returns exit 1 for the post-verify wipe, else success.
             payload = cmd[-1] if isinstance(cmd, list) else cmd
             self.events.append(("exec", payload))
             if "rm -rf /tests" in payload and "mkdir" not in payload:
@@ -557,6 +659,8 @@ def test_evaluate_docker_warns_when_cleanup_fails(tmp_path: Path, caplog):
 
 
 def test_evaluate_docker_missing_tests_scores_zero(tmp_path: Path):
+    # [FUNCTION DOC]
+    # A task without tests scores 0 with no container activity.
     task = tmp_path / "no-tests-task"
     task.mkdir()
     env = Tbench2DockerEnvironment()
@@ -571,6 +675,8 @@ def test_evaluate_docker_missing_tests_scores_zero(tmp_path: Path):
 
 
 def test_docker_reset_rejects_task_without_image(tmp_path: Path):
+    # [FUNCTION DOC]
+    # reset on a task without docker_image raises RuntimeError.
     """No host-execution fallback: a task dir that declares no docker_image
     must fail reset loudly, not silently run agent commands on the server."""
     task = tmp_path / "imageless-task"
@@ -587,6 +693,8 @@ def test_docker_reset_rejects_task_without_image(tmp_path: Path):
 
 
 def test_docker_failed_reset_closes_previous_container(tmp_path: Path):
+    # [FUNCTION DOC]
+    # A rejected reset stops (timeout 10) and force-removes the previous container and clears task state.
     """A rejected reset must not leave the previous container usable with
     metadata from the new task."""
     task = tmp_path / "imageless-task"
@@ -595,13 +703,21 @@ def test_docker_failed_reset_closes_previous_container(tmp_path: Path):
     (task / "instruction.md").write_text("do it\n")
 
     class _PreviousContainer:
+        # [CLASS DOC]
+        # HELPER: Container fake logging stop/remove calls.
         def __init__(self):
+            # [FUNCTION DOC]
+            # HELPER: Initialises the event log.
             self.events = []
 
         def stop(self, timeout):
+            # [FUNCTION DOC]
+            # HELPER: Logs ("stop", timeout).
             self.events.append(("stop", timeout))
 
         def remove(self, force):
+            # [FUNCTION DOC]
+            # HELPER: Logs ("remove", force).
             self.events.append(("remove", force))
 
     env = Tbench2DockerEnvironment(
@@ -624,11 +740,17 @@ def test_docker_failed_reset_closes_previous_container(tmp_path: Path):
 
 
 class _FakeImage:
+    # [CLASS DOC]
+    # HELPER: Docker image fake with Config.WorkingDir.
     def __init__(self, working_dir: str):
+        # [FUNCTION DOC]
+        # HELPER: Sets attrs with the given working dir.
         self.attrs = {"Config": {"WorkingDir": working_dir}}
 
 
 def test_docker_workdir_prefers_image_metadata(tmp_path: Path):
+    # [FUNCTION DOC]
+    # _resolve_workdir prefers image WorkingDir, then the task Dockerfile WORKDIR, then /task.
     """Image Config.WorkingDir wins (it sees base-image WORKDIRs); the task
     Dockerfile is the fallback, /task the last resort."""
     task = _make_task_dir(tmp_path)
@@ -647,6 +769,8 @@ def test_docker_workdir_prefers_image_metadata(tmp_path: Path):
 
 
 def test_docker_exec_passes_command_as_argv(tmp_path: Path):
+    # [FUNCTION DOC]
+    # _exec_in_container runs ["bash", "-c", "cd <workdir> && <command>"] preserving quoting.
     """Agent commands ride as a bash -c argv element, so shell quoting in the
     command (a single quote, say) survives byte-identical; the exec cd's into
     the resolved image workdir."""
@@ -668,6 +792,9 @@ def test_docker_exec_passes_command_as_argv(tmp_path: Path):
     reason="TB2_ENABLE_TESTS not enabled",
 )
 def test_tbench2_env_smoke():
+    # [FUNCTION DOC]
+    # Opt-in end-to-end: reset a real task, exec pwd successfully with output, then close. Runs real
+    # commands via camel's terminal toolkit.
     env = Tbench2Environment(tasks_dir=os.environ.get("TB2_TASKS_DIR"))
     obs = env.reset(task_id=os.environ.get("TB2_TASK_ID", "headless-terminal"))
     assert obs.instruction

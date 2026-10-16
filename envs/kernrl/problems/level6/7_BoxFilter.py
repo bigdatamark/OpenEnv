@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 6): 11 x 11 box (mean) filter of a 1920 x 1080 image
+# with zero padding.
 """
 Box Filter (Moving Average)
 
@@ -17,6 +20,8 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference box filter model with a uniform normalized kernel buffer.
     """
     Box filter (uniform averaging filter).
 
@@ -24,6 +29,9 @@ class Model(nn.Module):
     """
 
     def __init__(self, kernel_size: int = 11):
+        # [FUNCTION DOC]
+        # Stores kernel size and padding and registers the (1, 1, k, k) kernel of
+        # value 1 / k^2.
         super(Model, self).__init__()
         self.kernel_size = kernel_size
         self.padding = kernel_size // 2
@@ -35,6 +43,9 @@ class Model(nn.Module):
         self.register_buffer("kernel", kernel)
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Convolves the (H, W) image with the uniform kernel (zero padding, same size)
+        # and returns the (H, W) result.
         """
         Apply box filter.
 
@@ -55,9 +66,13 @@ image_width = 1080
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (image_height, image_width).
     image = torch.rand(image_height, image_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [11] (kernel_size).
     return [11]  # kernel_size

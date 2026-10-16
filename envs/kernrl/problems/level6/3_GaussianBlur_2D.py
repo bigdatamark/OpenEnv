@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 6): 15 x 15 Gaussian blur (sigma 3) of a 1920 x 1080
+# grayscale image with zero padding.
 """
 2D Gaussian Blur
 
@@ -17,6 +20,9 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference Gaussian blur model with a normalized 2D Gaussian kernel buffer
+    # (1, 1, k, k) built from the outer product of a 1D Gaussian.
     """
     Applies Gaussian blur to a 2D image.
 
@@ -24,6 +30,8 @@ class Model(nn.Module):
     """
 
     def __init__(self, kernel_size: int = 15, sigma: float = 3.0):
+        # [FUNCTION DOC]
+        # Stores kernel size, sigma and padding (k // 2) and registers the kernel.
         super(Model, self).__init__()
         self.kernel_size = kernel_size
         self.sigma = sigma
@@ -42,6 +50,10 @@ class Model(nn.Module):
         self.register_buffer("kernel", gaussian_2d.unsqueeze(0).unsqueeze(0))
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Accepts (H, W), (C, H, W) or (B, C, H, W) input, applies the kernel to each
+        # channel with a depthwise conv2d (zero padding, same size), and restores the
+        # original rank. Returns the blurred image.
         """
         Apply Gaussian blur.
 
@@ -82,10 +94,14 @@ image_width = 1080
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (image_height, image_width).
     # Grayscale image
     image = torch.rand(image_height, image_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [15, 3.0] (kernel_size, sigma).
     return [15, 3.0]  # kernel_size, sigma

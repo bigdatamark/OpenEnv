@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Async MCP client classes for tool-calling environments, built on EnvClient. In
+# production mode (the only mode accepted) a persistent server-side session is created
+# over HTTP JSON-RPC at <base>/mcp and the WebSocket connects with the same session_id,
+# so reset/step/state over WebSocket and tools/list / tools/call over HTTP share one
+# environment session. Provides tool discovery with caching, tool invocation, payload
+# and observation parsing, and teardown that closes the remote session.
+# KNOWN ISSUE: the module overview says MCPToolClient defaults to step-based /ws usage,
+# but MCPClientBase rejects any mode other than "production".
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -74,6 +83,9 @@ from .env_server.types import Observation, State
 
 
 def _tool_from_payload(payload: Dict[str, Any]) -> Tool:
+    # [FUNCTION DOC]
+    # HELPER: Builds a Tool from a JSON payload: name and description default "",
+    # input_schema from "input_schema" or "inputSchema" (default {}).
     """Convert a JSON tool payload into the internal Tool model."""
     return Tool(
         name=payload.get("name", ""),
@@ -83,6 +95,9 @@ def _tool_from_payload(payload: Dict[str, Any]) -> Tool:
 
 
 class GenericMCPObservation(Observation):
+    # [CLASS DOC]
+    # Observation subclass that allows extra fields, used to pass through environment-specific
+    # observation fields.
     """Generic MCP observation that preserves env-specific fields."""
 
     model_config = ConfigDict(
@@ -93,6 +108,10 @@ class GenericMCPObservation(Observation):
 
 
 class MCPClientBase(EnvClient[Any, Observation, State]):
+    # [CLASS DOC]
+    # Base MCP client (EnvClient subclass) with production-mode HTTP MCP session handling,
+    # tool discovery and caching, and step payload/result/state conversion. Tracks the tools
+    # cache, production session id, locks, JSON-RPC request counter and a lazy httpx client.
     """
     Base class for MCP clients with tool discovery.
 
@@ -116,6 +135,10 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         max_message_size_mb: float = 100.0,
         headers: Optional[Dict[str, str]] = None,
     ):
+        # [FUNCTION DOC]
+        # Validates mode (default "production"; anything else raises ValueError), forwards
+        # connection settings (timeouts, keepalive, provider, max message size, headers) to
+        # EnvClient, and initializes cache, session state, locks and request counter.
         """
         Initialize MCP client.
 
@@ -175,11 +198,17 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         self._http_client: Optional[Any] = None  # lazily-created httpx.AsyncClient
 
     def _next_request_id(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Increments and returns the JSON-RPC request id counter.
         """Generate a monotonically increasing JSON-RPC request id."""
         self._jsonrpc_request_id += 1
         return self._jsonrpc_request_id
 
     def _production_mcp_url(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the HTTP MCP endpoint: base URL with ws->http / wss->https, path plus
+        # "/mcp", no query or fragment.
+        # Raises: RuntimeError if there is no base URL.
         """Build the HTTP MCP endpoint URL from the stable base URL."""
         if self._base_url is None:
             raise RuntimeError("MCP client is not connected to a server.")
@@ -195,6 +224,8 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         )
 
     async def _get_http_client(self) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns the shared httpx.AsyncClient (created lazily with the client headers).
         """Return a shared httpx.AsyncClient, creating one lazily."""
         if self._http_client is None:
             import httpx
@@ -205,6 +236,10 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
     async def _production_mcp_request(
         self, method: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: POSTs a JSON-RPC 2.0 request (method, params or {}, next id) to the MCP URL with
+        # the message timeout and returns the parsed JSON.
+        # Raises: httpx.HTTPStatusError for non-2xx responses; transport errors propagate.
         """Send a JSON-RPC request to HTTP /mcp and return parsed JSON response."""
         client = await self._get_http_client()
         response = await client.post(
@@ -221,6 +256,12 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         return response.json()
 
     async def _connect_async(self) -> EnvClient:
+        # [FUNCTION DOC]
+        # Connects. In production mode (under a lock): starts the provider if needed, ensures an
+        # HTTP MCP session, temporarily adds session_id to the WebSocket URL query, and connects
+        # via EnvClient (restoring the URL afterwards); on any failure or cancellation closes the
+        # client and re-raises. Returns self. Otherwise defers to EnvClient.
+        # Raises: RuntimeError if no WebSocket URL.
         """
         Establish connection to the server.
 
@@ -256,6 +297,10 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         return await super()._connect_async()
 
     async def _ensure_production_session(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Under a lock, returns the cached session id or creates one via
+        # "openenv/session/create" and caches it.
+        # Raises: RuntimeError if the response contains an error or lacks session_id.
         """Create and cache a persistent HTTP MCP session id if needed."""
         async with self._production_session_lock:
             if self._production_session_id is not None:
@@ -274,6 +319,13 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
             return session_id
 
     async def list_tools(self, use_cache: bool = True) -> List[Tool]:
+        # [FUNCTION DOC]
+        # Returns the tool list, using the cache when use_cache and populated. Production mode:
+        # calls tools/list with the session id and caches the parsed tools. Otherwise steps a
+        # ListToolsAction and caches the observation's tools ([] for unexpected observations).
+        # KNOWN ISSUE: in production mode every failure (including server errors it raises
+        # itself) is swallowed and [] is returned, so errors are indistinguishable from an
+        # environment without tools.
         """
         Discover available tools from the environment.
 
@@ -326,6 +378,9 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         return self._tools_cache
 
     def _step_payload(self, action: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts an action to the step payload: {"type": "list_tools"}, a call_tool payload with
+        # tool_name and arguments, model_dump() for other pydantic actions, or {"action": str}.
         """Convert an Action object to the JSON data expected by the env server."""
         if isinstance(action, ListToolsAction):
             return {"type": "list_tools"}
@@ -342,6 +397,11 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
             return {"action": str(action)}
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[Observation]:
+        # [FUNCTION DOC]
+        # Parses a step response into StepResult: a ListToolsObservation when the observation has
+        # "tools", a CallToolObservation (with ToolError if present) when it has "tool_name",
+        # otherwise a GenericMCPObservation carrying the extra fields. done, reward and metadata
+        # come from the top-level payload (metadata falls back to the observation's).
         """Convert a JSON response from the env server to StepResult[Observation]."""
         obs_data = payload.get("observation", {})
 
@@ -390,6 +450,8 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> State:
+        # [FUNCTION DOC]
+        # Returns State with episode_id and step_count (default 0) from the payload.
         """Convert a JSON response from the state endpoint to a State object."""
         return State(
             episode_id=payload.get("episode_id"),
@@ -397,6 +459,10 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
         )
 
     async def _close_async(self) -> None:
+        # [FUNCTION DOC]
+        # Closes resources: disconnects the WebSocket, then best-effort closes the remote MCP
+        # session ("openenv/session/close") and clears the id, closes the httpx client, and
+        # finally runs EnvClient teardown (provider), even on errors or cancellation.
         """
         Close client resources.
 
@@ -441,6 +507,8 @@ class MCPClientBase(EnvClient[Any, Observation, State]):
 
 
 class MCPToolClient(MCPClientBase):
+    # [CLASS DOC]
+    # Async tool-calling client: call_tool, get_tool and has_tool on top of MCPClientBase.
     """
     Async client for tool-calling style MCP interactions.
 
@@ -486,6 +554,12 @@ class MCPToolClient(MCPClientBase):
     """
 
     async def call_tool(self, name: str, **kwargs: Any) -> Any:
+        # [FUNCTION DOC]
+        # Calls a tool with keyword arguments. Production mode: JSON-RPC tools/call with the
+        # session id; returns result["data"] when present, else the result. Otherwise: steps a
+        # CallToolAction and returns the observation result's data attribute/key or the result
+        # itself (or the raw observation for unexpected types).
+        # Raises: RuntimeError on JSON-RPC errors or CallToolObservation errors.
         """
         Call a tool by name.
 
@@ -562,6 +636,8 @@ class MCPToolClient(MCPClientBase):
         return obs
 
     async def get_tool(self, name: str) -> Optional[Tool]:
+        # [FUNCTION DOC]
+        # Returns the Tool with the given name from list_tools(), or None.
         """
         Get a specific tool by name.
 
@@ -588,6 +664,8 @@ class MCPToolClient(MCPClientBase):
         return None
 
     async def has_tool(self, name: str) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if get_tool(name) finds a tool.
         """
         Check if a tool exists.
 

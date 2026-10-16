@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 6): Sobel gradient magnitude and direction of a
+# 1920 x 1080 grayscale image (zero padding).
 """
 Sobel Edge Detection
 
@@ -17,6 +20,9 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference Sobel model with 3x3 x- and y-gradient kernels registered as
+    # (1, 1, 3, 3) buffers.
     """
     Sobel edge detection filter.
 
@@ -24,6 +30,8 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the Sobel x and y kernels.
         super(Model, self).__init__()
 
         # Sobel kernels
@@ -43,6 +51,12 @@ class Model(nn.Module):
         self.register_buffer("sobel_y", sobel_y)
 
     def forward(self, image: torch.Tensor) -> tuple:
+        # [FUNCTION DOC]
+        # Convolves the (H, W) image with both kernels (padding 1, cross-correlation as
+        # in conv2d) and returns the tuple (magnitude = sqrt(gx^2 + gy^2),
+        # angle = atan2(gy, gx)), each (H, W).
+        # KNOWN ISSUE: the evaluator's correctness check cannot convert a tuple of
+        # tensors, so this output format fails comparison.
         """
         Apply Sobel edge detection.
 
@@ -77,10 +91,14 @@ image_width = 1080
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (image_height, image_width).
     # Grayscale image
     image = torch.rand(image_height, image_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

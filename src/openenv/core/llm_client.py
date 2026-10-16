@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Async LLM client abstraction: a base LLMClient (endpoint + optional port, validated into
+# a base URL), an OpenAI-compatible client (OpenAI, vLLM, TGI, Ollama, HF Inference, ...)
+# built on AsyncOpenAI, a native Anthropic client built on AsyncAnthropic, a factory for
+# hosted providers, normalized response types (LLMResponse, ToolCall) and helpers that
+# convert MCP tool definitions and OpenAI-format messages to provider formats.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """LLM client abstraction for calling LLM endpoints.
@@ -37,6 +43,9 @@ _MIN_PORT, _MAX_PORT = 1, 65535
 
 
 def _redact_userinfo(endpoint: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the URL with any "user:password@" userinfo replaced by "***@" (unchanged
+    # when there is no scheme separator or no "@" in the authority).
     """Drop `user:password@` from a URL so it is safe to echo in an error."""
     scheme, sep, rest = endpoint.partition("://")
     authority, slash, tail = rest.partition("/")
@@ -46,6 +55,14 @@ def _redact_userinfo(endpoint: str) -> str:
 
 
 def _join_endpoint_port(endpoint: str, port: int | None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Validates an endpoint URL and merges an optional port.
+    # Requires http/https, a host, no credentials, no query/fragment, no empty port, and
+    # ports within 1-65535. Appends port when the URL has none; strips a trailing slash from
+    # the path.
+    # Returns: the normalized URL string.
+    # Raises: ValueError (with the redacted URL) for invalid URLs, or when port conflicts with
+    # the URL's own port.
     """Validate an endpoint URL and combine it with an optional port.
 
     Only `http`/`https` URLs with a host are accepted. Credentials, query
@@ -90,6 +107,8 @@ def _join_endpoint_port(endpoint: str, port: int | None) -> str:
 
 
 def _openai_base_url(base_url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns base_url with path "/v1" when it has no path (or "/"), else unchanged.
     """Append the OpenAI `/v1` prefix when `base_url` has no path.
 
     A URL that already names a path (`/v1`, or a gateway prefix such as
@@ -104,6 +123,8 @@ def _openai_base_url(base_url: str) -> str:
 
 @dataclass
 class ToolCall:
+    # [CLASS DOC]
+    # One model tool call: id, name, parsed argument dict.
     """A single tool/function call returned by the model."""
 
     id: str
@@ -113,12 +134,17 @@ class ToolCall:
 
 @dataclass
 class LLMResponse:
+    # [CLASS DOC]
+    # Normalized model reply: text content plus a list of ToolCall.
     """Normalized response from an LLM, with optional tool calls."""
 
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
 
     def to_message_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns an OpenAI-format assistant message dict with content and, if any, tool_calls
+        # (function type, JSON-encoded arguments).
         """Convert to an OpenAI-format assistant message dict."""
         msg: dict[str, Any] = {"role": "assistant", "content": self.content}
         if self.tool_calls:
@@ -137,6 +163,9 @@ class LLMResponse:
 
 
 class LLMClient(ABC):
+    # [CLASS DOC]
+    # Abstract LLM client holding endpoint and port; subclasses implement complete() and
+    # optionally complete_with_tools(). base_url is the validated endpoint+port.
     """Abstract base for LLM endpoint clients.
 
     Subclass and implement `complete()` for your protocol.
@@ -152,11 +181,15 @@ class LLMClient(ABC):
     """
 
     def __init__(self, endpoint: str, port: int | None):
+        # [FUNCTION DOC]
+        # Stores endpoint and port (no validation until base_url is read).
         self.endpoint = endpoint
         self.port = port
 
     @abstractmethod
     async def complete(self, prompt: str, **kwargs) -> str:
+        # [FUNCTION DOC]
+        # Abstract. Must send a prompt and return the response text; kwargs override defaults.
         """Send a prompt, return the text response.
 
         Args:
@@ -176,6 +209,8 @@ class LLMClient(ABC):
         tools: list[dict[str, Any]],
         **kwargs: Any,
     ) -> LLMResponse:
+        # [FUNCTION DOC]
+        # Default implementation: raises NotImplementedError (tool calling unsupported).
         """Send messages with tool definitions, return a normalized response.
 
         Messages use OpenAI-format dicts (`{"role": "...", "content": "..."}`).
@@ -198,11 +233,18 @@ class LLMClient(ABC):
 
     @property
     def base_url(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the validated base URL (endpoint plus port when needed).
+        # Raises: ValueError for invalid endpoints.
         """Base URL of the service: `endpoint` plus `port` when the URL names none."""
         return _join_endpoint_port(self.endpoint, self.port)
 
 
 class OpenAIClient(LLMClient):
+    # [CLASS DOC]
+    # Client for OpenAI-compatible chat-completions APIs using AsyncOpenAI. Holds model,
+    # system prompt, default temperature and max tokens; can use max_completion_tokens
+    # (which also omits temperature) for newer OpenAI models.
     """Client for OpenAI-compatible APIs.
 
     Works with: OpenAI, vLLM, TGI, Ollama, HuggingFace Inference API,
@@ -242,6 +284,11 @@ class OpenAIClient(LLMClient):
         max_tokens: int = 256,
         use_max_completion_tokens: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Stores settings, chooses the token-limit parameter name and whether to omit temperature,
+        # and creates an AsyncOpenAI client with base URL (validated, "/v1" appended when no
+        # path) and api_key (default "not-needed").
+        # Raises: ValueError for invalid endpoints.
         super().__init__(endpoint, port)
         self.model = model
         self.system_prompt = system_prompt
@@ -260,6 +307,10 @@ class OpenAIClient(LLMClient):
     def _chat_completion_kwargs(
         self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds create() kwargs: model, messages, the token-limit parameter (kwargs
+        # max_tokens or default) and, unless omitted, temperature (kwargs or default). Other
+        # kwargs are ignored.
         create_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -270,6 +321,9 @@ class OpenAIClient(LLMClient):
         return create_kwargs
 
     async def complete(self, prompt: str, **kwargs) -> str:
+        # [FUNCTION DOC]
+        # Sends the prompt (preceded by the system prompt if set) as a chat completion and
+        # returns the first choice's content ("" if None). Network/API errors propagate.
         """Send a chat completion request.
 
         Args:
@@ -296,6 +350,13 @@ class OpenAIClient(LLMClient):
         tools: list[dict[str, Any]],
         **kwargs: Any,
     ) -> LLMResponse:
+        # [FUNCTION DOC]
+        # Sends messages with MCP tools converted to OpenAI function tools (only if any), and
+        # returns an LLMResponse with the first choice's content ("" if None) and tool calls
+        # (arguments parsed from JSON).
+        # Raises: API errors; json.JSONDecodeError for malformed tool arguments.
+        # KNOWN ISSUE: unlike complete() and the class docstring ("prepended to every request"),
+        # the configured system_prompt is not added here.
         create_kwargs = self._chat_completion_kwargs(messages, **kwargs)
         openai_tools = _mcp_tools_to_openai(tools)
         if openai_tools:
@@ -319,6 +380,9 @@ class OpenAIClient(LLMClient):
 
 
 class AnthropicClient(LLMClient):
+    # [CLASS DOC]
+    # Client for Anthropic's Messages API using AsyncAnthropic (lazy import). Holds model,
+    # system prompt, default temperature and max tokens.
     """Client for Anthropic's Messages API.
 
     Requires the `anthropic` package (lazy-imported at construction time).
@@ -351,6 +415,10 @@ class AnthropicClient(LLMClient):
         temperature: float = 0.0,
         max_tokens: int = 256,
     ):
+        # [FUNCTION DOC]
+        # Stores settings and creates an AsyncAnthropic client with the validated base URL and
+        # api_key (default "not-needed").
+        # Raises: ImportError if anthropic is not installed; ValueError for invalid endpoints.
         super().__init__(endpoint, port)
         self.model = model
         self.system_prompt = system_prompt
@@ -371,6 +439,9 @@ class AnthropicClient(LLMClient):
         )
 
     async def complete(self, prompt: str, **kwargs) -> str:
+        # [FUNCTION DOC]
+        # Sends one user message (with system prompt if set, temperature and max_tokens from
+        # kwargs or defaults) and returns the concatenated text blocks.
         create_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -389,6 +460,10 @@ class AnthropicClient(LLMClient):
         tools: list[dict[str, Any]],
         **kwargs: Any,
     ) -> LLMResponse:
+        # [FUNCTION DOC]
+        # Converts OpenAI-format messages to Anthropic format (system text extracted), uses that
+        # system text or the default system prompt, adds converted tools if any, calls the API,
+        # and returns an LLMResponse with concatenated text and tool_use blocks as ToolCalls.
         system, anthropic_msgs = _openai_msgs_to_anthropic(messages)
 
         create_kwargs: dict[str, Any] = {
@@ -445,6 +520,11 @@ def create_llm_client(
     temperature: float = 0.0,
     max_tokens: int = 4096,
 ) -> LLMClient:
+    # [FUNCTION DOC]
+    # Creates a client for a hosted provider ("openai" or "anthropic", case-insensitive) at
+    # its public endpoint on port 443. For OpenAI models whose name starts with gpt-5-mini,
+    # o1, o3 or o4-mini, enables max_completion_tokens.
+    # Returns: the configured LLMClient. Raises: ValueError for unsupported providers.
     """Create an LLM client for a hosted provider.
 
     Args:
@@ -494,6 +574,12 @@ def create_llm_client(
 
 
 def _clean_mcp_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Normalizes an MCP inputSchema for function calling: non-dicts become an empty
+    # object schema; oneOf/anyOf are replaced by their first object-typed option (empty schema
+    # if none); allOf is merged into one object (properties and required lists combined,
+    # other keys dropped); type defaults to object and object schemas get properties.
+    # Returns a new or shallow-copied dict.
     """Normalize an MCP tool `inputSchema` for LLM function-calling APIs."""
     if not isinstance(schema, dict):
         return {"type": "object", "properties": {}, "required": []}
@@ -536,6 +622,9 @@ def _clean_mcp_schema(schema: dict[str, Any]) -> dict[str, Any]:
 def _mcp_tools_to_openai(
     mcp_tools: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Converts MCP tools to OpenAI function tools (name, description default "",
+    # cleaned parameters). Raises KeyError if a tool lacks "name".
     """Convert MCP tool definitions to OpenAI function-calling format."""
     result = []
     for tool in mcp_tools:
@@ -558,6 +647,9 @@ def _mcp_tools_to_openai(
 def _mcp_tools_to_anthropic(
     mcp_tools: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Converts MCP tools to Anthropic tools (name, description default "", cleaned
+    # input_schema). Raises KeyError if a tool lacks "name".
     """Convert MCP tool definitions to Anthropic tool format."""
     result = []
     for tool in mcp_tools:
@@ -577,6 +669,13 @@ def _mcp_tools_to_anthropic(
 def _openai_msgs_to_anthropic(
     messages: list[dict[str, Any]],
 ) -> tuple[str, list[dict[str, Any]]]:
+    # [FUNCTION DOC]
+    # HELPER: Converts OpenAI-format messages to (system_text, anthropic_messages): system
+    # contents joined by blank lines; user messages copied; assistant messages with tool calls
+    # become text plus tool_use blocks (string arguments JSON-parsed); tool messages become
+    # tool_result blocks appended to the previous user turn when its content is a list, else
+    # a new user turn. Other roles are ignored.
+    # Raises: KeyError for missing required keys; json.JSONDecodeError for bad arguments.
     """Convert OpenAI-format messages to Anthropic format.
 
     Returns `(system_text, anthropic_messages)`. System-role messages are

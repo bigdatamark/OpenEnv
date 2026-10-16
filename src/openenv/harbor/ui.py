@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Gradio web UI for the Harbor env server with three tabs: Tasks (browse datasets and
+# tasks, read files, connect a model endpoint and start a rollout), Runs (live and
+# finished runs, run pages, 2-4 run comparison, downloads) and Setup (endpoint, datasets,
+# sandboxes, deployment settings, agents, qualification evidence). Custom HTML components
+# with JS assets call server functions defined here. Every dataset argument is checked
+# against served datasets plus those added from the Hub in this process (module-level
+# list, optionally persisted). Visitor permissions come from ui_settings; API keys typed
+# into the page stay in server-side session state and are never sent back.
 """Human-facing UI for a Harbor env server.
 
 Three tabs. **Tasks**: pick a dataset and a task, read it (instruction, files, settings), and run an
@@ -49,16 +58,22 @@ _HUB_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 
 
 def _asset(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: reads a text file from the packaged openenv.harbor/ui_assets folder.
     return resources.files("openenv.harbor").joinpath("ui_assets", name).read_text()
 
 
 def _can_add_datasets() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns whether current UI settings allow adding datasets from the page.
     """Whether the page may download datasets from the Hub. Off by default on a Space: a public page
     that downloads any dataset a visitor names is a disk-filling button."""
     return ui_settings.load().add_datasets
 
 
 def _allowed(spec: str, served: list[str]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if spec is non-empty and is a served dataset or one added in this process.
     with _ADDED_LOCK:
         return bool(spec) and (spec in served or spec in _ADDED)
 
@@ -71,6 +86,9 @@ _INSPECTED_LOCK = threading.Lock()
 
 
 def _added_file(settings: ui_settings.UISettings) -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: path of the persisted added-datasets list (<runs_dir>/.added-datasets.json), or
+    # None when a bucket is mounted (its folders are the list) or run history is off.
     """Where datasets added from the page are listed, so they come back after a restart: next to
     the run history, whose runs may refer to them. `None` when history is off."""
     if settings.bucket and settings.bucket_mount:
@@ -79,6 +97,8 @@ def _added_file(settings: ui_settings.UISettings) -> Path | None:
 
 
 def _save_added(settings: ui_settings.UISettings) -> None:
+    # [FUNCTION DOC]
+    # HELPER: writes the sorted added-dataset list to that file; I/O errors ignored.
     path = _added_file(settings)
     if path is None:
         return
@@ -92,6 +112,9 @@ def _save_added(settings: ui_settings.UISettings) -> None:
 
 
 def _load_added(settings: ui_settings.UISettings, served: list[str]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: when adding is allowed, reads the persisted list and appends entries that look
+    # like Hub ids (no dot segments), are not served or already added, up to 20 entries.
     path = _added_file(settings)
     if path is None or not settings.add_datasets:
         return
@@ -115,6 +138,9 @@ def _load_added(settings: ui_settings.UISettings, served: list[str]) -> None:
 
 
 def _inspect_hub(spec: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns ui_data.hub_summary(spec), cached for 5 minutes in a bounded (128)
+    # LRU; errors are not cached and propagate.
     """Inspect one Hub dataset, caching only successful answers for a bounded time."""
     now = time.monotonic()
     with _INSPECTED_LOCK:
@@ -135,6 +161,11 @@ def _inspect_hub(spec: str) -> dict[str, Any]:
 def _remove_added(
     spec: str, served: list[str], settings: ui_settings.UISettings
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: removes a page-added dataset under a lock-protected "removing" set: refuses
+    # served/unknown/in-progress specs, deletes files via ui_data.remove_added (errors
+    # returned as a message), then drops it from the list and persists. Returns
+    # {"ok", "spec"} or {"error"}.
     """Serialise removal so two requests cannot delete or mutate the same dataset."""
     with _ADDED_LOCK:
         if spec in served or spec not in _ADDED or spec in _REMOVING:
@@ -158,6 +189,10 @@ def _remove_added(
 
 
 def _hub_problem(spec: str) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: returns why spec may not be added, or None: must match org/name, contain no dot
+    # segments, not exist as a local path, and be a public, non-gated Hub dataset (checked
+    # anonymously; any lookup failure counts as not public).
     """Why a dataset typed into the page may not be added, or `None`.
 
     A public Hub dataset only. Not a local path (the loader tries one first, so `src/..` would serve
@@ -194,6 +229,9 @@ from .ui_trace import (  # noqa: F401 - re-exported: tests and callers read them
 
 
 def _contract(r: dict[str, Any]) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the training-contract export for a result dict, or None for eval
+    # rollouts or results without turns. Raises ValueError for unexportable captures.
     """Keep the legacy audit export, including excluded turns and task rewards.
 
     Eval rollouts return None; malformed captures raise ValueError.
@@ -208,6 +246,9 @@ def _contract(r: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _training_trace(r: dict[str, Any]) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the strict TrainingTrace (JSON mode dict) for a result dict, or None for
+    # eval/no-turn results. Raises ValueError for invalid captures.
     """Download the same validated token objects returned by HarborSession."""
     if not r.get("turns") or r.get("rollout_type", "train") == "eval":
         return None
@@ -229,6 +270,10 @@ _CAPS_LOCK = threading.Lock()
 
 
 def _capabilities(datasets: list[str], *, refresh: bool = False) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: returns Capabilities cached process-wide (recomputed when refresh): served
+    # datasets plus the current service's LLM status (reachable; ok when capture is tokens).
+    # Runs sandbox credential checks when (re)computed.
     from .capabilities import capabilities
     from .serving import HarborService
 
@@ -253,6 +298,13 @@ def _capabilities(datasets: list[str], *, refresh: bool = False) -> Any:
 def _agent_choices(
     caps: Any, *, purpose: str, provider: str, include_experimental: bool
 ) -> tuple[list[tuple[str, str]], dict[str, str], int]:
+    # [FUNCTION DOC]
+    # HELPER: returns ((label, harness) choices, {harness: qualification profile}, number of
+    # hidden experimental agents). Maturity tiers come from the qualification report at
+    # OPENENV_HARBOR_QUALIFICATION_REPORT (all experimental when absent/invalid). Profiles are
+    # taken from report cells for the provider (vllm for train purpose) and agents whose
+    # profile cannot be resolved are dropped. Stable agents are always offered,
+    # experimental ones only when requested; unstable ones never. Validated agents sort first.
     """Which agents to offer, per the qualification evidence, and the profile each was qualified with.
 
     Stable agents are offered by default and experimental ones only on request, as the provider
@@ -316,6 +368,10 @@ def _server_engine(
     include_experimental: bool = False,
     settings: ui_settings.UISettings | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns the page's default engine dict for the server's own endpoint (no key):
+    # model, host, capture level, train/eval purpose, provider, allowed agents and profiles;
+    # or a not-ok engine asking to connect a model when the endpoint is not shared.
     """The endpoint the server was started with, as the page's default engine.
 
     It carries no key: the capture proxy already holds the server's credential and uses it for any
@@ -371,6 +427,14 @@ def validate_endpoint(
     private_urls: bool = True,
     kind: str = "custom URL",
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Probes a visitor-supplied endpoint and returns an engine dict. Fails (ok False with a
+    # reason) for an empty URL, a disallowed URL (url_problem), no model given and the endpoint
+    # not serving exactly one, or an unreachable endpoint / non-trainable endpoint for train
+    # purpose. On success returns url, model, host, capture level, trainable, api_key (server
+    # side only), provider, purpose, agent choices/profiles, hidden count, available sandboxes
+    # and notes (model alias rewrite, upstream fixes, tool/behaviour findings, not the server
+    # default). Side effects: network probes (list models, validate_llm 45s), sandbox checks.
     """Probe an endpoint typed into the page and describe it as an engine for this browser session.
 
     A rollout reaches it through the capture proxy's pool, so the tier comes from a real probe of
@@ -511,6 +575,8 @@ def validate_endpoint(
 
 
 def _local_token() -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns this machine's Hugging Face token from huggingface_hub, or "" on any error.
     try:
         from huggingface_hub import get_token
 
@@ -527,6 +593,14 @@ def connect_endpoint(
     settings: ui_settings.UISettings | None = None,
     account_token: str | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Turns the run card's form into an engine. Refuses when visitor endpoints are disabled.
+    # Source "hf": requires a model; key from the form, else the signed-in account token (when
+    # use_account and HF login are enabled; error if expired), else the local token (when
+    # allowed); validates against the HF router with provider "hf", eval purpose and optional
+    # ":route" suffix. Source "url": validates the given URL/model/key with openai or anthropic
+    # provider, train or eval purpose and the private-URL policy. Adds source and the form
+    # (without key) under "custom". Returns the engine dict.
     """The run card's endpoint form, validated into an engine.
 
     Two sources. `hf`: a model on Hugging Face Inference Providers, reached through the router with
@@ -625,6 +699,12 @@ def _card(
     settings: ui_settings.UISettings | None = None,
     profile: Any = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: builds the JSON state the run card renders: selected task, rollouts flag,
+    # available endpoint sources, shared server endpoint info, local-token availability, HF
+    # login user, private-URL flag, a key-free engine summary, agent options (with host-side
+    # flag) and default (opencode if offered), hidden agent count, sandboxes and default (e2b
+    # if available), whether the capture proxy is loopback-only, and an optional message.
     """What the run card shows. Everything the browser receives about the engine is chosen here, so
     the API key held in the engine never reaches the page. `profile` is the signed-in visitor's
     Hugging Face profile, where sign-in is set up and they used it."""
@@ -719,16 +799,22 @@ def _card(
 
 
 def _payload(evt: Any) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns the event's private _data dict, or {}.
     data = getattr(evt, "_data", None)
     return data if isinstance(data, dict) else {}
 
 
 def _signature(listing: list[dict[str, Any]]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: JSON of (id, status) pairs of a run listing, used to detect state changes.
     """What changes when a run changes state; ticks that change nothing re-render nothing."""
     return json.dumps([(r.get("id"), r.get("status")) for r in listing])
 
 
 def _js(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the shared JS icon prelude followed by the named component script.
     """A component's script, with the shared icon set in front of it."""
     return js_prelude() + _asset(name)
 
@@ -738,6 +824,15 @@ def harbor_gradio_builder(
     datasets: list[str] | None = None,
     title: str | None = None,
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Builds the gr.Blocks app. Loads settings and the run manager, installs the redirect
+    # guard when private URLs are disallowed, restores page-added datasets (file and bucket).
+    # Defines visibility helpers, server functions for the JS components (datasets, tasks, Hub
+    # search/inspect/add/status/remove, task files, HF models, served models, downloads), event
+    # handlers (load, open task, tab re-click, open/pick/compare runs, run page links,
+    # experimental toggle, connect, server default, run, 2s timer tick, setup refresh), the
+    # layout (Tasks, Runs, Setup tabs with HTML components and states including a
+    # browser-stored, encrypted visitor id) and the wiring. Returns the app.
     """Build the Harbor UI.
 
     Args:
@@ -765,12 +860,16 @@ def harbor_gradio_builder(
                 _ADDED.append(spec)
 
     def viewer(visitor: str | None) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: returns None (see all runs) under "all" visibility, else the visitor's owner digest.
         """Whose runs this visitor may see: everyone's (`None`), or their own."""
         return (
             None if settings.run_visibility == "all" else ui_settings.owner_of(visitor)
         )
 
     def listing(visitor: str | None) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: run summaries visible to the visitor.
         return runs.list(viewer(visitor))
 
     # History is any `*.json` in the runs folder, so a record can be old or hand-edited. One that
@@ -778,6 +877,9 @@ def harbor_gradio_builder(
     def runs_page(
         visitor: str | None, selected: str = "", compare: list[str] | None = None
     ) -> str:
+        # [FUNCTION DOC]
+        # HELPER: renders the run list for the visitor (with selection and compare picks); renders
+        # an "unreadable" page on any exception.
         try:
             return ui_pages.runs_html(
                 listing(visitor),
@@ -790,6 +892,8 @@ def harbor_gradio_builder(
             return ui_pages.unreadable("Runs", exc)
 
     def run_page(run_id: str, visitor: str | None) -> str:
+        # [FUNCTION DOC]
+        # HELPER: renders one run visible to the visitor (live or finished); "unreadable" page on error.
         owner = viewer(visitor)
         try:
             return ui_pages.run_html(
@@ -804,6 +908,9 @@ def harbor_gradio_builder(
     # Gradio passes a server function one value: nothing becomes `[]`, one argument arrives as is,
     # several arrive as a list. So each takes exactly one parameter.
     def hb_datasets(_: Any = None) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: lists served then added datasets with label, added/removable flags and
+        # task count (or error), plus whether adding is allowed.
         from .tasks import resolve_task_dirs
 
         out = []
@@ -827,6 +934,8 @@ def harbor_gradio_builder(
         return {"datasets": out, "can_add": _can_add_datasets()}
 
     def hb_tasks(spec: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: returns task rows for an allowed dataset, or an error dict.
         if not _allowed(spec, served):
             return {"error": "That dataset is not served here."}
         try:
@@ -835,6 +944,8 @@ def harbor_gradio_builder(
             return {"error": f"{type(exc).__name__}: {str(exc)[:300]}"}
 
     def hb_hub(query: str) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Server function: Hub dataset search results when adding is allowed; [] otherwise or on error.
         if not _can_add_datasets():
             return []
         try:
@@ -843,6 +954,10 @@ def harbor_gradio_builder(
             return []
 
     def hb_add(spec: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: starts adding a Hub dataset when allowed: returns done if already
+        # present, an error for invalid/non-public specs or when 20 are already added, else the
+        # background job state.
         """Start adding a Hub dataset; the page follows it with `hb_add_status`."""
         spec = (spec or "").strip()
         if not _can_add_datasets():
@@ -867,6 +982,8 @@ def harbor_gradio_builder(
         return ui_data.start_add(spec, _remember_added, settings)
 
     def hb_remove(spec: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: removes a page-added dataset when adding is allowed.
         """Remove a dataset added from the page, files and all: its bucket folder, or its download.
         One the server was started with is not the page's to remove."""
         spec = str(spec or "")
@@ -877,9 +994,14 @@ def harbor_gradio_builder(
         return _remove_added(spec, served, settings)
 
     def hb_add_status(spec: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: returns the add job state, or state "unknown".
         return ui_data.add_status(str(spec or "")) or {"spec": spec, "state": "unknown"}
 
     def hb_inspect(spec: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: returns a Hub dataset's task count and size (cached), nulls when
+        # adding is off or the id is invalid, or an error message on Hub failure.
         """A Hub dataset's task count (null when not in Harbor's layout) and size, before adding it."""
         spec = str(spec or "").strip()
         if not _can_add_datasets() or not _HUB_ID.match(spec):
@@ -895,12 +1017,16 @@ def harbor_gradio_builder(
             }
 
     def _remember_added(spec: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: callback recording a newly added dataset spec and persisting the list.
         with _ADDED_LOCK:
             if spec not in _ADDED:
                 _ADDED.append(spec)
             _save_added(settings)
 
     def hb_file(args: list[Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: [spec, index, path] -> a task file for the viewer, for allowed datasets only; errors as dicts.
         spec, index, path = (list(args or []) + ["", 0, ""])[:3]
         if not _allowed(str(spec), served):
             return {"error": "That dataset is not served here."}
@@ -910,6 +1036,8 @@ def harbor_gradio_builder(
             return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
     def hb_models(_: Any = None) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: Inference Providers model list when visitor endpoints are enabled.
         if not settings.visitor_endpoints:
             return {"models": []}
         try:
@@ -918,6 +1046,9 @@ def harbor_gradio_builder(
             return {"models": [], "error": f"Could not list models: {str(exc)[:160]}"}
 
     def hb_served(args: list[Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: [url, key] -> models listed by that endpoint (max 200), subject to the
+        # visitor-endpoint and URL policies; error dict when refused or empty.
         """The models an endpoint serves, for the card's model field. Guarded like a connect."""
         from openenv.core.harness.capture.validate_llm import list_models
 
@@ -936,6 +1067,10 @@ def harbor_gradio_builder(
         return {"models": models[:200]}
 
     def hb_download(args: list[Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Server function: [grant token, kind] -> a downloadable file for the granted run: the
+        # result JSON, the capture audit contract or the training trace; errors for expired grants,
+        # eval rollouts or exporter refusals.
         token, kind = (list(args or []) + ["", ""])[:2]
         run_id = ui_pages.granted(str(token))
         rec = runs.get(run_id) if run_id else None
@@ -976,6 +1111,9 @@ def harbor_gradio_builder(
         # Not the run card or its engine: those belong to the task page and are written when a task
         # opens. A `#task=` link opens one while this is still running, and writing the card here too
         # would replace that task's card with an empty one whenever this finished second.
+        # [FUNCTION DOC]
+        # Page load: ensures a visitor id and returns header, setup view, run list, its signature
+        # and the visitor id.
         visitor = visitor or ui_settings.new_visitor()
         caps = _capabilities(served)
         return (
@@ -989,6 +1127,10 @@ def harbor_gradio_builder(
     def open_task(
         engine: dict, visitor: str | None, spec: str, index: int, profile: Any = None
     ):
+        # [FUNCTION DOC]
+        # HELPER: returns (selection, task head, task body, card state, engine) for a task,
+        # defaulting the engine to the server endpoint; skips all outputs for disallowed datasets;
+        # shows an error page if the task cannot be read. Includes the visitor's runs of the task.
         """The task page for one task: (selection, head, body, card, engine)."""
         caps = _capabilities(served)
         # The first task a page opens starts from the server's endpoint.
@@ -1031,6 +1173,8 @@ def harbor_gradio_builder(
         evt: gr.EventData,
         profile: gr.OAuthProfile | None = None,
     ):
+        # [FUNCTION DOC]
+        # Task list click: opens the clicked task.
         data = _payload(evt)
         return open_task(
             engine,
@@ -1041,9 +1185,13 @@ def harbor_gradio_builder(
         )
 
     def on_back_to_tasks():
+        # [FUNCTION DOC]
+        # Clears the task head (returns to the task list).
         return ""
 
     def on_tab_again(sel: dict, visitor: str | None, evt: gr.EventData):
+        # [FUNCTION DOC]
+        # Tab re-click: back to the task list or the run list (clearing the open run).
         """Tasks or Runs clicked while already showing: back to that tab's list."""
         skip = gr.skip()
         if _payload(evt).get("back") == "tasks":
@@ -1052,18 +1200,26 @@ def harbor_gradio_builder(
         return skip, state, "", runs_page(visitor, "", sel.get("compare", []))
 
     def show_run(run_id: str, visitor: str | None, sel: dict):
+        # [FUNCTION DOC]
+        # HELPER: returns the run selection state and the rendered run page.
         return {"id": run_id, "compare": sel.get("compare", [])}, run_page(
             run_id, visitor
         )
 
     def on_open_run(sel: dict, visitor: str | None, evt: gr.EventData):
+        # [FUNCTION DOC]
+        # Run list click: opens the run.
         return show_run(str(_payload(evt).get("id") or ""), visitor, sel)
 
     def on_pick_runs(sel: dict, evt: gr.EventData):
+        # [FUNCTION DOC]
+        # Records up to four run ids picked for comparison.
         ids = [str(i) for i in (_payload(evt).get("ids") or [])][:4]
         return {**sel, "compare": ids}
 
     def on_compare(sel: dict, visitor: str | None, evt: gr.EventData):
+        # [FUNCTION DOC]
+        # Shows a comparison of up to four visible runs.
         ids = [str(i) for i in (_payload(evt).get("ids") or [])][:4]
         owner = viewer(visitor)
         return {"id": "", "compare": ids}, ui_pages.compare_html(
@@ -1071,6 +1227,8 @@ def harbor_gradio_builder(
         )
 
     def on_task_page(sel: dict, visitor: str | None, evt: gr.EventData):
+        # [FUNCTION DOC]
+        # Run clicked on a task page: switches to the Runs tab and opens it.
         """A run listed on a task page was clicked: show it on the Runs tab."""
         run_id = str(_payload(evt).get("run") or "")
         if not run_id:
@@ -1085,6 +1243,8 @@ def harbor_gradio_builder(
         evt: gr.EventData,
         profile: gr.OAuthProfile | None = None,
     ):
+        # [FUNCTION DOC]
+        # Run page links: open another run, open the run's task on the Tasks tab, or go back to the list.
         """The run page's own links: back to the list, another run, or the task it ran."""
         data = _payload(evt)
         skip = gr.skip()
@@ -1108,6 +1268,9 @@ def harbor_gradio_builder(
         evt: gr.EventData,
         profile: gr.OAuthProfile | None = None,
     ):
+        # [FUNCTION DOC]
+        # Toggles offering experimental agents, recomputing the engine's agent choices (or the
+        # server default engine), and returns the card and engine.
         include = bool(_payload(evt).get("include_experimental"))
         caps = _capabilities(served)
         if engine.get("server_default") or not engine:
@@ -1142,6 +1305,9 @@ def harbor_gradio_builder(
         profile: gr.OAuthProfile | None = None,
         token: gr.OAuthToken | None = None,
     ):
+        # [FUNCTION DOC]
+        # Connect form submit: validates the endpoint; on failure keeps the old engine and shows
+        # the reason, on success switches to the new engine. Returns card and engine.
         new = connect_endpoint(
             _payload(evt),
             include_experimental=bool(engine.get("include_experimental")),
@@ -1173,6 +1339,8 @@ def harbor_gradio_builder(
     def on_server_default(
         engine: dict, selection: dict, profile: gr.OAuthProfile | None = None
     ):
+        # [FUNCTION DOC]
+        # Switches the card back to the server's own endpoint engine.
         caps = _capabilities(served)
         new = _server_engine(
             caps,
@@ -1188,6 +1356,14 @@ def harbor_gradio_builder(
         evt: gr.EventData,
         profile: gr.OAuthProfile | None = None,
     ):
+        # [FUNCTION DOC]
+        # Run button: refuses (card message) when rollouts are off, no engine, endpoint policy
+        # forbids it, the agent is not allowed, no allowed task is selected, the sandbox is
+        # unavailable, the task cannot be read, the task reads server environment/files and is
+        # not a served dataset or not on the server endpoint, or no capture service runs.
+        # Otherwise starts the rollout via the run manager (owner digest, per-visitor cap keyed by
+        # HF account when signed in) and switches to the Runs tab showing it; start errors are
+        # shown on the card.
         """Start a rollout and show it on the Runs tab. It keeps running if the page is closed."""
         data = _payload(evt)
         harness, sandbox = str(data.get("agent") or ""), str(data.get("sandbox") or "")
@@ -1195,6 +1371,8 @@ def harbor_gradio_builder(
         keep = (gr.skip(),) * 5
 
         def say(text: str):
+            # [FUNCTION DOC]
+            # HELPER: returns the card with an error message and skips the other outputs.
             return (
                 _card(
                     engine, selection, caps, ("bad", text), settings, profile=profile
@@ -1283,6 +1461,9 @@ def harbor_gradio_builder(
         )
 
     def on_tick(sel: dict, sig: str, visitor: str | None):
+        # [FUNCTION DOC]
+        # Timer: re-renders the run list when the listing signature changed, and the open run
+        # while it is live or when the listing changed; returns the new signature.
         """Refresh the run list when a run changes state, and the open run while it is live."""
         items = listing(visitor)
         new_sig = _signature(items)
@@ -1301,6 +1482,8 @@ def harbor_gradio_builder(
         return list_out, view, new_sig
 
     def on_refresh_setup():
+        # [FUNCTION DOC]
+        # Recomputes capabilities and returns the setup view and header.
         caps = _capabilities(served, refresh=True)
         return ui_pages.setup_html(caps, served, settings), ui_pages.header_html(
             title, served, caps, settings
@@ -1440,6 +1623,10 @@ def harbor_gradio_builder(
 
 
 def _qualification_panel() -> None:
+    # [FUNCTION DOC]
+    # HELPER: adds an accordion to the current Gradio context showing qualification evidence
+    # (maturity, per-provider status, details) read from OPENENV_HARBOR_QUALIFICATION_REPORT,
+    # with a status line and a refresh button.
     """The recorded harness/provider evidence: what was qualified, where, and with what."""
     from .qualification import (
         harness_maturity_rows,
@@ -1451,6 +1638,9 @@ def _qualification_panel() -> None:
     report_path = os.environ.get("OPENENV_HARBOR_QUALIFICATION_REPORT", "")
 
     def read_evidence():
+        # [FUNCTION DOC]
+        # HELPER: loads and validates the report, returning (status rows, detail rows, maturity
+        # rows, status text); on read/validation errors returns rows without evidence and the error text.
         try:
             evidence = (
                 json.loads(Path(report_path).read_text()) if report_path else None

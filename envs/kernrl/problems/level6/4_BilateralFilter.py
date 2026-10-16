@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 6): 9 x 9 bilateral filter (sigma_spatial 3,
+# sigma_range 0.1) of a 256 x 256 grayscale image; the reference loops over
+# pixels in Python.
 """
 Bilateral Filter
 
@@ -18,6 +22,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference bilateral filter model storing kernel size, spatial and range
+    # sigmas, and radius (k // 2).
     """
     Bilateral filter for edge-preserving smoothing.
 
@@ -27,6 +34,8 @@ class Model(nn.Module):
     def __init__(
         self, kernel_size: int = 9, sigma_spatial: float = 3.0, sigma_range: float = 0.1
     ):
+        # [FUNCTION DOC]
+        # Stores the filter parameters.
         super(Model, self).__init__()
         self.kernel_size = kernel_size
         self.sigma_spatial = sigma_spatial
@@ -34,6 +43,14 @@ class Model(nn.Module):
         self.radius = kernel_size // 2
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Reflect-pads the image by the radius; for each pixel computes spatial
+        # Gaussian weights over the window and range weights from the intensity
+        # difference to the center pixel, and writes the weighted average of the
+        # window. Returns the (H, W) filtered image.
+        # KNOWN ISSUE: reflect padding of a plain 2D tensor with a 4-value pad may be
+        # rejected by some PyTorch versions, which expect a batched/channel dimension
+        # for 2D reflect padding.
         """
         Apply bilateral filter.
 
@@ -91,10 +108,14 @@ image_width = 256
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [image] uniform random of shape (image_height, image_width).
     # Grayscale image with some noise
     image = torch.rand(image_height, image_width)
     return [image]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [9, 3.0, 0.1] (kernel_size, sigma_spatial, sigma_range).
     return [9, 3.0, 0.1]  # kernel_size, sigma_spatial, sigma_range

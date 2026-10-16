@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# FinQA environment package: MCP tool environment for answering financial questions over SEC 10-K tables.
+# Re-exports the FinQAEnv client, FinQAState and the MCP CallToolAction / ListToolsAction types.
 # envs/finqa_env/__init__.py
 """
 FinQA Environment for OpenEnv.

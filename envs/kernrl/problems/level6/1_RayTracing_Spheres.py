@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 6, graphics and image processing): closest ray-sphere
+# intersection for 65536 pinhole-camera rays against 256 random spheres. The
+# reference uses a doubly nested Python loop.
 """
 Ray Tracing - Sphere Intersection
 
@@ -18,6 +22,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference ray-sphere intersection model. No parameters.
     """
     Ray-sphere intersection testing.
 
@@ -25,6 +31,8 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def forward(
@@ -34,6 +42,16 @@ class Model(nn.Module):
         sphere_centers: torch.Tensor,
         sphere_radii: torch.Tensor,
     ) -> tuple:
+        # [FUNCTION DOC]
+        # For every ray and sphere solves the quadratic for the intersection, taking
+        # the nearer positive root, and keeps the smallest positive t and its sphere
+        # index. Then computes hit points origin + t * direction and unit normals at
+        # hit points for rays that hit (zero normals otherwise). Returns the tuple
+        # (t_hit (N,), sphere_idx (N,) with -1 for misses, hit_points (N, 3),
+        # hit_normals (N, 3)).
+        # KNOWN ISSUE: for missed rays t is inf, so hit points contain inf (and NaN
+        # where a direction component is 0); and the evaluator's correctness check
+        # cannot convert a tuple of tensors, so this output format fails comparison.
         """
         Find closest ray-sphere intersection for each ray.
 
@@ -111,6 +129,11 @@ num_spheres = 256
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Builds a 256 x 256 grid of normalized rays from origin (0, 0, 5) toward the
+    # z = 0 plane over [-1, 1]^2, plus random sphere centers (normal * 2) and radii
+    # in [0.1, 0.6). Returns [ray_origins, ray_directions, sphere_centers,
+    # sphere_radii].
     # Camera rays (simple pinhole camera looking at origin)
     # Create a grid of rays
     W, H = 256, 256
@@ -137,4 +160,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

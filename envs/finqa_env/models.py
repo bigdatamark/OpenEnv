@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# State model and static tool-name list (AVAILABLE_TOOLS) for the FinQA environment.
 # envs/finqa_env/models.py
 """
 State types for the FinQA environment.
@@ -19,6 +21,8 @@ AVAILABLE_TOOLS = ["get_descriptions", "get_table_info", "sql_query", "submit_an
 
 
 class FinQAState(State):
+    # [CLASS DOC]
+    # Episode state: current question text (user query), company, ground-truth answer string and question id.
     """
     Internal environment state for tracking the current episode.
 

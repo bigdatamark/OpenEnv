@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 7): direct 1D filtering of a 1M-sample signal with a
+# 127-tap random kernel, "same" zero padding.
 """
 1D Convolution (Direct)
 
@@ -17,11 +20,15 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference 1D filter model with a random (1, 1, kernel_size) kernel buffer.
     """
     1D convolution with a filter kernel.
     """
 
     def __init__(self, kernel_size: int = 127):
+        # [FUNCTION DOC]
+        # Stores kernel_size and registers a random normal kernel.
         super(Model, self).__init__()
         self.kernel_size = kernel_size
 
@@ -30,6 +37,10 @@ class Model(nn.Module):
         self.register_buffer("kernel", kernel)
 
     def forward(self, signal: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Reshapes (N,) or (B, N) input to (B, 1, N), applies conv1d (cross-correlation,
+        # i.e. unflipped kernel) with padding kernel_size // 2, and restores the input
+        # rank. Returns the filtered signal (same length for odd kernel sizes).
         """
         Apply 1D convolution.
 
@@ -64,9 +75,13 @@ signal_length = 1024 * 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [signal] random normal of length signal_length.
     signal = torch.randn(signal_length)
     return [signal]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [127] (kernel_size).
     return [127]  # kernel_size

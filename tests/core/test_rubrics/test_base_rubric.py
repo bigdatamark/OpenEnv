@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for the synchronous Rubric base class: abstract forward, calling and last_score tracking,
+# automatic child registration and traversal (children, named_children, rubrics, named_rubrics,
+# get_rubric), forward and pre-forward hooks, default reset, and state_dict defaults.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the base Rubric class."""
@@ -9,43 +14,63 @@ from openenv.core.rubrics.base import Rubric
 
 
 class SimpleRubric(Rubric):
+    # [CLASS DOC]
+    # HELPER: Rubric returning a fixed score (default 1.0).
     """Concrete rubric that returns a fixed score."""
 
     def __init__(self, score: float = 1.0):
+        # [FUNCTION DOC]
+        # HELPER: Stores the score.
         super().__init__()
         self.score = score
 
     def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns the score.
         return self.score
 
 
 class CompositeRubric(Rubric):
+    # [CLASS DOC]
+    # HELPER: Rubric with two SimpleRubric children (0.5 and 0.7) returning their mean.
     """Rubric with child rubrics."""
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Creates the children.
         super().__init__()
         self.child1 = SimpleRubric(0.5)
         self.child2 = SimpleRubric(0.7)
 
     def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Calls both children and returns their mean.
         return (self.child1(action, observation) + self.child2(action, observation)) / 2
 
 
 class TestRubricBasics:
+    # [CLASS DOC]
+    # Tests basic Rubric behavior.
     """Test basic Rubric functionality."""
 
     def test_forward_is_abstract(self):
+        # [FUNCTION DOC]
+        # Rubric cannot be instantiated directly.
         """Cannot instantiate Rubric directly."""
         with pytest.raises(TypeError):
             Rubric()
 
     def test_simple_rubric_call(self):
+        # [FUNCTION DOC]
+        # Calling a rubric returns forward's result.
         """Calling a rubric invokes forward()."""
         rubric = SimpleRubric(0.8)
         result = rubric("action", "observation")
         assert result == 0.8
 
     def test_last_score_tracked(self):
+        # [FUNCTION DOC]
+        # last_score is None initially and updated after a call.
         """last_score is updated after each call."""
         rubric = SimpleRubric(0.6)
         assert rubric.last_score is None
@@ -55,9 +80,13 @@ class TestRubricBasics:
 
 
 class TestChildRegistration:
+    # [CLASS DOC]
+    # Tests child registration and traversal.
     """Test auto-registration of child rubrics."""
 
     def test_children_registered(self):
+        # [FUNCTION DOC]
+        # Rubric attributes are registered as children.
         """Child rubrics are registered when assigned as attributes."""
         rubric = CompositeRubric()
 
@@ -67,6 +96,8 @@ class TestChildRegistration:
         assert rubric.child2 in children
 
     def test_named_children(self):
+        # [FUNCTION DOC]
+        # named_children yields attribute names with child rubrics.
         """named_children returns name-rubric pairs."""
         rubric = CompositeRubric()
 
@@ -77,14 +108,22 @@ class TestChildRegistration:
         assert named["child2"].score == 0.7
 
     def test_rubrics_recursive(self):
+        # [FUNCTION DOC]
+        # rubrics() yields all three descendants of a nested rubric.
         """rubrics() returns all descendants."""
 
         class NestedRubric(Rubric):
+            # [CLASS DOC]
+            # HELPER: Rubric wrapping a CompositeRubric as attribute inner.
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Creates the inner composite.
                 super().__init__()
                 self.inner = CompositeRubric()
 
             def forward(self, action, observation):
+                # [FUNCTION DOC]
+                # HELPER: Returns the inner rubric's score.
                 return self.inner(action, observation)
 
         rubric = NestedRubric()
@@ -94,14 +133,22 @@ class TestChildRegistration:
         assert len(all_rubrics) == 3
 
     def test_named_rubrics_paths(self):
+        # [FUNCTION DOC]
+        # named_rubrics() yields dotted paths.
         """named_rubrics() returns dot-separated paths."""
 
         class NestedRubric(Rubric):
+            # [CLASS DOC]
+            # HELPER: Rubric wrapping a CompositeRubric as attribute inner.
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Creates the inner composite.
                 super().__init__()
                 self.inner = CompositeRubric()
 
             def forward(self, action, observation):
+                # [FUNCTION DOC]
+                # HELPER: Returns the inner rubric's score.
                 return self.inner(action, observation)
 
         rubric = NestedRubric()
@@ -112,14 +159,22 @@ class TestChildRegistration:
         assert "inner.child2" in paths
 
     def test_get_rubric_by_path(self):
+        # [FUNCTION DOC]
+        # get_rubric resolves dotted paths.
         """get_rubric() navigates dot-separated paths."""
 
         class NestedRubric(Rubric):
+            # [CLASS DOC]
+            # HELPER: Rubric wrapping a CompositeRubric as attribute inner.
             def __init__(self):
+                # [FUNCTION DOC]
+                # HELPER: Creates the inner composite.
                 super().__init__()
                 self.inner = CompositeRubric()
 
             def forward(self, action, observation):
+                # [FUNCTION DOC]
+                # HELPER: Returns the inner rubric's score.
                 return self.inner(action, observation)
 
         rubric = NestedRubric()
@@ -128,6 +183,8 @@ class TestChildRegistration:
         assert rubric.get_rubric("inner.child1") is rubric.inner.child1
 
     def test_get_rubric_invalid_path(self):
+        # [FUNCTION DOC]
+        # get_rubric raises KeyError for unknown paths.
         """get_rubric() raises KeyError for invalid paths."""
         rubric = CompositeRubric()
 
@@ -136,14 +193,20 @@ class TestChildRegistration:
 
 
 class TestHooks:
+    # [CLASS DOC]
+    # Tests forward hooks.
     """Test forward hook functionality."""
 
     def test_forward_hook_called(self):
+        # [FUNCTION DOC]
+        # A forward hook receives action, observation and result.
         """Forward hooks are called after forward()."""
         rubric = SimpleRubric(0.9)
         hook_calls = []
 
         def hook(r, action, obs, result):
+            # [FUNCTION DOC]
+            # HELPER: Records (action, observation, result).
             hook_calls.append((action, obs, result))
 
         rubric.register_forward_hook(hook)
@@ -153,11 +216,15 @@ class TestHooks:
         assert hook_calls[0] == ("my_action", "my_obs", 0.9)
 
     def test_forward_pre_hook_called(self):
+        # [FUNCTION DOC]
+        # A pre-forward hook receives action and observation.
         """Pre-forward hooks are called before forward()."""
         rubric = SimpleRubric(0.9)
         hook_calls = []
 
         def pre_hook(r, action, obs):
+            # [FUNCTION DOC]
+            # HELPER: Records (action, observation).
             hook_calls.append((action, obs))
 
         rubric.register_forward_pre_hook(pre_hook)
@@ -167,6 +234,8 @@ class TestHooks:
         assert hook_calls[0] == ("my_action", "my_obs")
 
     def test_multiple_hooks(self):
+        # [FUNCTION DOC]
+        # Multiple hooks run in registration order.
         """Multiple hooks can be registered."""
         rubric = SimpleRubric(0.5)
         results = []
@@ -180,23 +249,33 @@ class TestHooks:
 
 
 class TestReset:
+    # [CLASS DOC]
+    # Tests reset.
     """Test reset functionality."""
 
     def test_default_reset_is_noop(self):
+        # [FUNCTION DOC]
+        # The default reset does not raise.
         """Default reset() does nothing (for stateless rubrics)."""
         rubric = SimpleRubric(0.5)
         rubric.reset()  # Should not raise
 
 
 class TestStateDictSerialization:
+    # [CLASS DOC]
+    # Tests state_dict defaults.
     """Test state_dict serialization."""
 
     def test_default_state_dict_empty(self):
+        # [FUNCTION DOC]
+        # state_dict defaults to an empty dict.
         """Default state_dict returns empty dict."""
         rubric = SimpleRubric(0.5)
         assert rubric.state_dict() == {}
 
     def test_load_state_dict_accepts_empty(self):
+        # [FUNCTION DOC]
+        # load_state_dict accepts an empty dict.
         """load_state_dict accepts empty dict."""
         rubric = SimpleRubric(0.5)
         rubric.load_state_dict({})  # Should not raise

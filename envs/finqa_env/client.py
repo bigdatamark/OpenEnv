@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# MCP client for the FinQA environment.
 # envs/finqa_env/client.py
 """
 Client for the FinQA environment.
@@ -20,6 +22,8 @@ from openenv.core.mcp_client import MCPToolClient
 
 
 class FinQAEnv(MCPToolClient):
+    # [CLASS DOC]
+    # MCPToolClient subclass with no additions (list_tools, call_tool, reset, step come from the base).
     """
     Client for the FinQA environment.
 

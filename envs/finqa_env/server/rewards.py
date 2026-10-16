@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Answer scoring for FinQA: fuzzy numeric matching of predicted vs ground-truth answers, supporting \boxed{} answers,
+# percentages, fractions, currency, thousands separators, parenthesized negatives and multi-value answers.
 # envs/finqa_env/server/rewards.py
 """
 Reward computation for the FinQA environment.
@@ -12,6 +15,8 @@ from typing import Optional, Tuple
 
 
 def extract_boxed_answer(text: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Returns the stripped content of the first \boxed{...} (no nested braces), or None.
     """
     Extract answer from \boxed{...} format.
 
@@ -28,6 +33,8 @@ def extract_boxed_answer(text: str) -> Optional[str]:
 
 
 def extract_all_boxed_answers(text: str) -> list:
+    # [FUNCTION DOC]
+    # Returns the stripped contents of all \boxed{...} occurrences.
     """
     Extract all answers from \boxed{...} format.
 
@@ -42,6 +49,10 @@ def extract_all_boxed_answers(text: str) -> list:
 
 
 def parse_number(text: str, convert_percent: bool = True) -> Optional[float]:
+    # [FUNCTION DOC]
+    # Parses text into a float after removing \text{...} annotations and $ signs. Percent values are divided by 100 when
+    # convert_percent is True (else the sign is just stripped); "(x)" means negative; fractions (also negative) are
+    # supported; commas are removed. Returns None for empty/None or unparsable input.
     """
     Parse a string into a float, handling various formats.
 
@@ -111,6 +122,8 @@ def parse_number(text: str, convert_percent: bool = True) -> Optional[float]:
 def normalize_answer(
     answer: str, convert_percent: bool = True
 ) -> Tuple[Optional[float], str]:
+    # [FUNCTION DOC]
+    # Uses the first \boxed{} content if present, strips it, and returns (parsed number or None, lowercased string).
     """
     Normalize an answer string to a comparable format.
 
@@ -139,6 +152,8 @@ def normalize_answer(
 
 
 def extract_numbers_from_multi_value(text: str) -> list:
+    # [FUNCTION DOC]
+    # Returns just the numbers from _split_multi_value.
     """
     Extract all numbers from a comma/semicolon separated string.
     Handles formats like "2022: 0.933, 2023: 0.930" or "0.933, 0.931, 0.930".
@@ -148,6 +163,10 @@ def extract_numbers_from_multi_value(text: str) -> list:
 
 
 def _split_multi_value(text: str) -> list:
+    # [FUNCTION DOC]
+    # HELPER: Splits on commas/semicolons (including LaTeX \, \;), removes LaTeX spacing, detects a year label ("2022" or
+    # "2022 to 2023", arrows normalized), strips any "label:" prefix and parses the number. Returns (year key or None,
+    # number) pairs for parsable parts.
     """
     Extract (key, number) pairs from a comma/semicolon separated string.
 
@@ -183,6 +202,9 @@ def compare_single_values(
     tolerance: float = 0.01,
     max_absolute_diff: float = 1.0,
 ) -> bool:
+    # [FUNCTION DOC]
+    # Numeric comparison when both parse: truth 0 requires |pred| < 0.001; otherwise both relative error <= tolerance
+    # (1%) and absolute difference <= max_absolute_diff (1.0). If exactly one parses, False. Otherwise compares strings.
     """Compare two single values."""
     # If both are numbers, compare numerically with tolerance
     if pred_num is not None and truth_num is not None:
@@ -211,6 +233,13 @@ def compute_reward(
     tolerance: float = 0.01,
     max_absolute_diff: float = 1.0,
 ) -> float:
+    # [FUNCTION DOC]
+    # Returns 1.0 if the prediction matches the ground truth, else 0.0. With several \boxed{} truths, the prediction is
+    # split on commas/semicolons, counts must match, and each pair (label prefix removed) must match, also trying without
+    # percent conversion. With one value, tries normal then no-percent comparison; if the single boxed truth is not one
+    # number, compares multi-value pairs by matching year keys when both sides have the same key set, else positionally.
+    # KNOWN ISSUE: in multi-value mode predictions are split on commas, so numbers with thousands separators are broken
+    # apart; the no-percent fallback uses the uncleaned value with its label prefix, which then fails to parse.
     """
     Compute reward based on answer correctness.
 

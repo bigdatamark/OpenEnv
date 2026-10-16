@@ -1,9 +1,16 @@
+# [MODULE DOC]
+# Tests for textarena_env's TextArenaEnvironment: message coalescing, Wordle reset not accumulating
+# observation history, and the Wordle web playground board. The last two are skipped without
+# textarena.
 import pytest
 from textarena_env.models import TextArenaAction, TextArenaMessage
 from textarena_env.server.environment import TextArenaEnvironment
 
 
 def test_convert_messages_coalesces_consecutive_characters():
+    # [FUNCTION DOC]
+    # _convert_messages (on an uninitialised instance) merges consecutive raw messages with the same
+    # sender and category into one TextArenaMessage.
     env = object.__new__(TextArenaEnvironment)
 
     raw_messages = [
@@ -25,6 +32,8 @@ def test_convert_messages_coalesces_consecutive_characters():
 
 
 def test_wordle_reset_clears_accumulated_state():
+    # [FUNCTION DOC]
+    # Across three resets with moves in between, the Wordle prompt is identical each time.
     """Test that resetting Wordle environment clears accumulated observation state.
 
     This test verifies the workaround for TextArena's LLMObservationWrapper,
@@ -68,6 +77,9 @@ def test_wordle_reset_clears_accumulated_state():
 
 
 def test_textarena_web_playground():
+    # [FUNCTION DOC]
+    # After guessing "crane", render_web shows a 6x5 Wordle board with C and E tiles and no hex colours;
+    # observations without messages render None.
     pytest.importorskip("textarena", reason="textarena not installed")
     env = TextArenaEnvironment(env_id="Wordle-v0", num_players=1)
     env.reset()

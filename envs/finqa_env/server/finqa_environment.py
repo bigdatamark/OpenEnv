@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FinQA environment: each episode poses one benchmark question about a company; the agent explores tables with
+# MCP tools (get_descriptions, get_table_info, sql_query) backed by FinQATools and ends with submit_answer, scored
+# by compute_reward (1.0 correct / 0.0 otherwise).
 # envs/finqa_env/server/finqa_environment.py
 """
 FinQA Environment Implementation.
@@ -26,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 
 class FinQAEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment holding the question list, a seeded shuffle order, the tools helper and FinQAState. Episodes end
+    # on submit_answer or after max_steps steps (reward 0.0).
     """
     Financial QA environment for RL training.
 
@@ -47,6 +54,10 @@ class FinQAEnvironment(MCPEnvironment):
         max_steps: int = 50,
         task: str = "finqa",
     ):
+        # [FUNCTION DOC]
+        # Stores settings, loads questions, creates FinQATools and registers the four MCP tools, initializes the MCP base and
+        # an unseeded RNG with a first shuffled pass, and an empty state.
+        # Raises: AssertionError if task is not "finqa"; FileNotFoundError if the benchmark CSV is missing.
         # Create MCP server and define tools inline
         mcp = FastMCP("finqa_env")
 
@@ -64,6 +75,8 @@ class FinQAEnvironment(MCPEnvironment):
         # Register tools with FastMCP
         @mcp.tool
         def get_descriptions(company_name: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: returns the JSON list of table names for a company.
             """
             Get a list of available table names for a company.
 
@@ -77,6 +90,8 @@ class FinQAEnvironment(MCPEnvironment):
 
         @mcp.tool
         def get_table_info(company_name: str, table_name: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: returns JSON table metadata (description, columns, types, unique values).
             """
             Get table metadata: description, columns, types, unique values.
 
@@ -91,6 +106,9 @@ class FinQAEnvironment(MCPEnvironment):
 
         @mcp.tool
         def sql_query(company_name: str, table_name: str, query: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: runs a filtered SQL query on a company table (SELECT * and unfiltered queries are rejected by the
+            # helper) and returns JSON results.
             """
             Execute a SQL query on a table. Select * not allowed.
 
@@ -110,6 +128,8 @@ class FinQAEnvironment(MCPEnvironment):
 
         @mcp.tool
         def submit_answer(answer: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: forwards the answer to the helper and returns its confirmation; scoring happens in step.
             """
             Submit a final answer for the question.
 
@@ -133,6 +153,10 @@ class FinQAEnvironment(MCPEnvironment):
         self._history: List[Dict[str, Any]] = []
 
     def _load_questions(self) -> List[Dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Reads <data_path>/benchmark_questions/<task>.csv into dicts with id, user_query, company, question, answer,
+        # question_type and explanation.
+        # Raises: FileNotFoundError if the CSV is missing; KeyError for missing required columns.
         """Load questions from the benchmark CSV."""
         csv_path = os.path.join(
             self.data_path, "benchmark_questions", f"{self.task}.csv"
@@ -160,12 +184,16 @@ class FinQAEnvironment(MCPEnvironment):
         return questions
 
     def _start_new_pass(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Shuffles a copy of the questions with the env RNG and resets the cursor.
         """Shuffle the full dataset into a new order and start from the top."""
         self._shuffled_questions = self.questions.copy()
         self._rng.shuffle(self._shuffled_questions)
         self._question_index = 0
 
     def _get_next_question(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the next question, starting a new shuffled pass when exhausted.
         """Get the next question using sequential shuffle selection."""
         if self._question_index >= len(self._shuffled_questions):
             self._start_new_pass()
@@ -180,6 +208,12 @@ class FinQAEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Optionally reseeds the RNG (and restarts the pass) for reproducible order, takes the next question, creates a new
+        # state (given or random episode id) and clears history. Returns an Observation (reward 0.0) whose metadata carries
+        # the question, company, empty tool result/history, step count 0 and available tool names.
+        # KNOWN ISSUE: answers read from CSV may be non-string values (e.g. floats), which the string-typed ground_truth field
+        # may reject.
         """
         Reset the environment for a new episode.
 
@@ -230,6 +264,8 @@ class FinQAEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Fallback for non-MCP actions: returns an observation with an "Unknown action type" error.
         """
         Handle non-MCP actions. Returns an error since this env is MCP-only.
         """
@@ -248,6 +284,12 @@ class FinQAEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count and delegates to the MCP base. For a submit_answer call, returns a done Observation with the
+        # computed reward and metadata extended with ground_truth and submitted_answer. Otherwise, at max_steps returns a done
+        # Observation with reward 0.0 and an error message. Else returns the base observation.
+        # Note: the replacement observations are plain Observations, so tool result fields of the call observation are dropped
+        # (metadata is kept). Steps after the episode ended are not blocked.
         """
         Execute a step in the environment.
 
@@ -299,6 +341,8 @@ class FinQAEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async variant of step with identical termination and reward logic, awaiting the MCP base step_async.
         """
         Async step used by the WebSocket handler.
 
@@ -344,5 +388,7 @@ class FinQAEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> FinQAState:
+        # [FUNCTION DOC]
+        # Property: returns the FinQAState.
         """Get the current environment state."""
         return self._state

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI app for FinQA. Reads FINQA_DATA_PATH (default /app/env/data), FINQA_MAX_STEPS (50) and FINQA_TASK
+# (finqa) at import and builds the app with a per-session environment factory and a call-tool action that
+# accepts JSON-string arguments.
 # envs/finqa_env/server/app.py
 """
 FastAPI server for the FinQA environment.
@@ -25,6 +29,8 @@ TASK = os.environ.get("FINQA_TASK", "finqa")
 
 
 def _env_factory():
+    # [FUNCTION DOC]
+    # HELPER: Returns a new FinQAEnvironment with the configured data path, max steps and task.
     """Create a new FinQAEnvironment instance for each session."""
     return FinQAEnvironment(
         data_path=DATA_PATH,
@@ -34,11 +40,16 @@ def _env_factory():
 
 
 class FinQACallToolAction(CallToolAction):
+    # [CLASS DOC]
+    # CallToolAction whose arguments may also be given as a JSON string (as the web UI sends).
     """CallToolAction that accepts JSON strings for arguments (web UI sends strings)."""
 
     @field_validator("arguments", mode="before")
     @classmethod
     def parse_arguments(cls, v: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Before-validator: parses string arguments as JSON; other values pass through.
+        # Raises: json.JSONDecodeError for invalid JSON strings.
         if isinstance(v, str):
             return json.loads(v)
         return v
@@ -54,6 +65,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

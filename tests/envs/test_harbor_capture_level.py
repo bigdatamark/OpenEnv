@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for capture-level selection by validate_llm (probing an endpoint and
+# negotiating down through 400s: tokens/train, logprobs/eval, text/eval) and
+# its downstream consequences: eval exports keep the trace but claim nothing
+# trainable, and training contracts cannot be built from eval rollouts.
+# Skipped without the capture validate_llm/export/contract/graph modules.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -27,6 +33,8 @@ validate_llm = validate_llm_mod.validate_llm
 
 
 def http_400(payload: dict) -> urllib.error.HTTPError:
+    # [FUNCTION DOC]
+    # HELPER: returns a urllib HTTPError 400 whose body is the JSON payload.
     import io
     import json
 
@@ -40,6 +48,9 @@ def http_400(payload: dict) -> urllib.error.HTTPError:
 
 
 def unsupported(param: str, code: str = "unsupported_parameter", message="") -> dict:
+    # [FUNCTION DOC]
+    # HELPER: builds an OpenAI-style unsupported-parameter error mapping for param
+    # with the given code and message (default message mentions the param).
     return {
         "error": {
             "message": message
@@ -51,6 +62,9 @@ def unsupported(param: str, code: str = "unsupported_parameter", message="") -> 
 
 
 def reply(*, prompt_ids=None, token_ids=None, logprobs=None) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: builds a chat completion payload with optional prompt_token_ids,
+    # choice token_ids and per-token logprobs.
     choice: dict = {"message": {"content": "ok"}, "finish_reason": "stop"}
     if token_ids is not None:
         choice["token_ids"] = token_ids
@@ -63,11 +77,17 @@ def reply(*, prompt_ids=None, token_ids=None, logprobs=None) -> dict:
 
 
 def probe(monkeypatch, script):
+    # [FUNCTION DOC]
+    # HELPER: monkeypatches validate_llm's _post to replay the script (raising
+    # exceptions in it) and list_models to return ["m"]; runs validate_llm without
+    # logprobs-mode and tool checks. Returns (report, list of request bodies sent).
     """Run `validate_llm` against a scripted endpoint. Returns the report and the bodies sent."""
     sent: list[dict] = []
     remaining = list(script)
 
     def fake_post(url, body, timeout, api_key=None, auth_header="Authorization"):
+        # [FUNCTION DOC]
+        # Records the request body and returns or raises the next scripted outcome.
         sent.append(dict(body))
         outcome = remaining.pop(0)
         if isinstance(outcome, Exception):
@@ -88,6 +108,8 @@ def probe(monkeypatch, script):
 
 # --- the probe decides the level --------------------------------------------
 def test_a_full_capture_engine_is_trainable(monkeypatch):
+    # [FUNCTION DOC]
+    # Token ids plus logprobs give tokens/train, trainable, one request, no fixes.
     report, sent = probe(
         monkeypatch,
         [reply(prompt_ids=[1, 2], token_ids=[7, 8], logprobs=[-0.1, -0.2])],
@@ -99,6 +121,8 @@ def test_a_full_capture_engine_is_trainable(monkeypatch):
 
 
 def test_token_ids_returned_as_null_land_on_the_logprobs_level(monkeypatch):
+    # [FUNCTION DOC]
+    # Null token_ids with logprobs give logprobs/eval.
     """The HF router's shape: it accepts `return_token_ids` and answers `token_ids: null`. The level
     must come from what came back, not from the request having been accepted."""
     report, _ = probe(monkeypatch, [reply(token_ids=None, logprobs=[-0.1])])
@@ -107,6 +131,8 @@ def test_token_ids_returned_as_null_land_on_the_logprobs_level(monkeypatch):
 
 
 def test_a_provider_rejecting_return_token_ids_is_retried_without_it(monkeypatch):
+    # [FUNCTION DOC]
+    # A 400 about return_token_ids triggers a retry without it, recorded as a fix.
     report, sent = probe(
         monkeypatch,
         [
@@ -127,6 +153,8 @@ def test_a_provider_rejecting_return_token_ids_is_retried_without_it(monkeypatch
 
 
 def test_a_provider_rejecting_logprobs_too_lands_on_text(monkeypatch):
+    # [FUNCTION DOC]
+    # Rejecting both params ends at text/eval with logprobs fields dropped.
     """Every current OpenAI model: `return_token_ids` unknown, `logprobs` unsupported."""
     report, sent = probe(
         monkeypatch,
@@ -149,6 +177,8 @@ def test_a_provider_rejecting_logprobs_too_lands_on_text(monkeypatch):
 
 
 def test_max_tokens_is_renamed_during_the_probe(monkeypatch):
+    # [FUNCTION DOC]
+    # A max_tokens rejection renames it to max_completion_tokens.
     report, sent = probe(
         monkeypatch,
         [
@@ -167,6 +197,8 @@ def test_max_tokens_is_renamed_during_the_probe(monkeypatch):
 
 
 def test_an_unreachable_endpoint_is_neither_trainable_nor_eval(monkeypatch):
+    # [FUNCTION DOC]
+    # Connection errors give unreachable with empty capture level.
     report, _ = probe(monkeypatch, [OSError("connection refused")])
     assert not report.reachable
     assert report.capture_level == ""
@@ -174,6 +206,8 @@ def test_an_unreachable_endpoint_is_neither_trainable_nor_eval(monkeypatch):
 
 
 def test_a_model_the_endpoint_does_not_serve_fails_before_any_completion(monkeypatch):
+    # [FUNCTION DOC]
+    # An unlisted model fails without any completion request.
     monkeypatch.setattr(
         validate_llm_mod, "list_models", lambda *a, **k: ["other-model"]
     )
@@ -187,6 +221,8 @@ def test_a_model_the_endpoint_does_not_serve_fails_before_any_completion(monkeyp
 
 
 def test_an_endpoint_that_publishes_no_model_list_is_still_probed(monkeypatch):
+    # [FUNCTION DOC]
+    # An empty model list still allows probing.
     """Some hosted gateways gate `/v1/models` differently from inference, or omit it. Refusing there
     would reject an endpoint that serves completions perfectly well."""
     monkeypatch.setattr(validate_llm_mod, "list_models", lambda *a, **k: [])
@@ -200,6 +236,9 @@ def test_an_endpoint_that_publishes_no_model_list_is_still_probed(monkeypatch):
 
 
 def test_require_llm_accepts_an_eval_endpoint_but_can_be_told_not_to(monkeypatch):
+    # [FUNCTION DOC]
+    # require_llm accepts a text-level endpoint unless require_tokens is set,
+    # which raises RuntimeError "needs trainable rollouts".
     monkeypatch.setattr(validate_llm_mod, "list_models", lambda *a, **k: ["m"])
     monkeypatch.setattr(validate_llm_mod, "_post", lambda *a, **k: reply())
 
@@ -212,7 +251,11 @@ def test_require_llm_accepts_an_eval_endpoint_but_can_be_told_not_to(monkeypatch
 
 # --- what an eval level means downstream ------------------------------------
 class FakeSession:
+    # [CLASS DOC]
+    # Minimal capture session holding a graph, id "s1", metadata and findings.
     def __init__(self, graph):
+        # [FUNCTION DOC]
+        # Stores the graph and initializes id, metadata and findings.
         self.session_id = "s1"
         self.metadata: dict = {}
         self.findings: list[str] = []
@@ -220,6 +263,9 @@ class FakeSession:
 
 
 def eval_graph():
+    # [FUNCTION DOC]
+    # HELPER: returns a two-turn RolloutGraph without token ids, linked by
+    # message prefix.
     graph = graph_mod.RolloutGraph()
     messages = [{"role": "user", "content": "go"}]
     graph.add_turn(
@@ -250,6 +296,9 @@ def eval_graph():
 
 
 def test_an_eval_export_keeps_the_whole_trace_and_claims_nothing_trainable():
+    # [FUNCTION DOC]
+    # Eval export keeps both turns and one sequence of node ids but has trainable
+    # False, empty input ids and zero trainable tokens.
     graph = eval_graph()
     document = export_mod.export_session(
         FakeSession(graph), include_messages=True, capture_level="logprobs"
@@ -276,6 +325,9 @@ def test_an_eval_export_keeps_the_whole_trace_and_claims_nothing_trainable():
 
 
 def test_an_eval_rollout_still_rebuilds_its_conversations():
+    # [FUNCTION DOC]
+    # conversations_from_document and turns_from_document rebuild the transcript
+    # from an eval export (skipped without openenv.harbor.models).
     """The regression a live run found: an eval result with a reward, six turns and no transcript."""
     models = pytest.importorskip("openenv.harbor.models")
     document = export_mod.export_session(
@@ -297,6 +349,9 @@ def test_an_eval_rollout_still_rebuilds_its_conversations():
 
 
 def test_a_training_contract_cannot_be_built_from_an_eval_rollout():
+    # [FUNCTION DOC]
+    # to_turn_records and to_trace_entries raise ValueError "EVAL rollout" for an
+    # eval export.
     graph = eval_graph()
     document = export_mod.export_session(FakeSession(graph), capture_level="text")
     for build in (contract_mod.to_turn_records, contract_mod.to_trace_entries):
@@ -305,6 +360,9 @@ def test_a_training_contract_cannot_be_built_from_an_eval_rollout():
 
 
 def test_a_train_export_is_unchanged():
+    # [FUNCTION DOC]
+    # A token-level single-turn export is train/tokens with full input ids and
+    # one turn record.
     """The regression that matters: nothing on the trainable path may move."""
     graph = graph_mod.RolloutGraph()
     graph.add_turn(
@@ -328,6 +386,9 @@ def test_a_train_export_is_unchanged():
 
 # --- the proxy reports its level, and never its credential ------------------
 def app_client(**kwargs):
+    # [FUNCTION DOC]
+    # HELPER: returns a TestClient for a capture server app on a dead upstream
+    # URL, forwarding kwargs to create_app. Skips if the server module is missing.
     from fastapi.testclient import TestClient
 
     server = pytest.importorskip("openenv.core.harness.capture.server")
@@ -337,6 +398,8 @@ def app_client(**kwargs):
 
 
 def test_health_states_the_rollout_type():
+    # [FUNCTION DOC]
+    # /health reports capture level and rollout type.
     with app_client(capture_level="logprobs") as client:
         body = client.get("/health").json()
     assert body["capture_level"] == "logprobs"
@@ -344,6 +407,8 @@ def test_health_states_the_rollout_type():
 
 
 def test_health_confirms_auth_without_revealing_the_key():
+    # [FUNCTION DOC]
+    # /health reports upstream_auth True without leaking the key.
     """On a Space this endpoint is public, and the key it holds buys paid inference."""
     with app_client(api_key="sk-secret-value") as client:
         body = client.get("/health").json()
@@ -352,6 +417,8 @@ def test_health_confirms_auth_without_revealing_the_key():
 
 
 def test_health_says_train_by_default():
+    # [FUNCTION DOC]
+    # Default is tokens/train with no upstream auth.
     with app_client() as client:
         body = client.get("/health").json()
     assert (body["capture_level"], body["rollout_type"]) == ("tokens", "train")
@@ -359,6 +426,10 @@ def test_health_says_train_by_default():
 
 
 def test_an_eval_rollout_is_recorded_without_fatal_findings(monkeypatch):
+    # [FUNCTION DOC]
+    # With InferenceClient.completion patched to text-only replies, two chat calls
+    # through a text-level proxy produce one linked root, an eval rollout and no
+    # FATAL validation findings.
     """`check_turn`'s FATALs (`no_prompt_ids`, `no_logprobs`) are the expected condition here.
     Letting them fire would mark every eval turn unusable and teach everyone to ignore findings.
 
@@ -367,6 +438,8 @@ def test_an_eval_rollout_is_recorded_without_fatal_findings(monkeypatch):
     replies = [reply(), reply()]
 
     async def fake_completion(_self, _request):
+        # [FUNCTION DOC]
+        # Async patched completion returning the next scripted reply.
         return replies.pop(0)
 
     server = pytest.importorskip("openenv.core.harness.capture.server")
@@ -416,6 +489,11 @@ def test_an_eval_rollout_is_recorded_without_fatal_findings(monkeypatch):
 # with every field a trainer reads pinned. A change to the eval path that leaks into the token path
 # fails here rather than in a loss curve days later.
 def test_the_trainable_path_end_to_end_is_unchanged(monkeypatch):
+    # [FUNCTION DOC]
+    # Three scripted vLLM-shaped token responses through the full proxy produce a
+    # train/tokens rollout with one agent sequence whose input ids, loss mask,
+    # logprobs, prompt length, turn lengths and trainable counts are pinned, plus
+    # matching turn records.
     server = pytest.importorskip("openenv.core.harness.capture.server")
     upstream = pytest.importorskip("openenv.core.harness.capture.upstream")
     from fastapi.testclient import TestClient
@@ -438,6 +516,8 @@ def test_the_trainable_path_end_to_end_is_unchanged(monkeypatch):
     remaining = list(scripted)
 
     async def fake_completion(_self, _request):
+        # [FUNCTION DOC]
+        # Async patched completion normalizing the next scripted token response.
         step = remaining.pop(0)
         return upstream.normalize_response(
             {
@@ -516,6 +596,8 @@ def test_the_trainable_path_end_to_end_is_unchanged(monkeypatch):
 
 
 def test_the_probe_does_not_restate_the_tier_as_fatal_findings(monkeypatch):
+    # [FUNCTION DOC]
+    # A text-only endpoint grades as text with no findings.
     """An eval endpoint's findings must not read like a broken one.
 
     `no_prompt_token_ids` is reported FATAL by `check_upstream_response`, and it is the *definition*
@@ -528,6 +610,8 @@ def test_the_probe_does_not_restate_the_tier_as_fatal_findings(monkeypatch):
 
 
 def test_a_genuinely_broken_response_still_reports(monkeypatch):
+    # [FUNCTION DOC]
+    # A response without choices reports a no_choices finding.
     """`no_choices` is not "merely eval-only" — the endpoint answered with nothing at all."""
     report, _ = probe(monkeypatch, [{"id": "x"}])
     assert any("no_choices" in f for f in report.findings)
@@ -540,10 +624,16 @@ def test_a_genuinely_broken_response_still_reports(monkeypatch):
 # logprobs that are pre-temperature — and grades as fully trainable. vLLM's `logprobs_mode` defaults
 # to `raw_logprobs`. The test follows from the definition: raw values cannot move with temperature.
 def temperature_scripted(monkeypatch, by_temperature, *, fail=False):
+    # [FUNCTION DOC]
+    # HELPER: patches validate_llm._post to return first-position top_logprobs
+    # from by_temperature keyed by the request temperature (or raise OSError when
+    # fail is set); returns the list of temperatures requested.
     """Serve first-position `top_logprobs` per temperature. Returns the calls made."""
     calls: list[float] = []
 
     def fake_post(url, body, timeout, api_key=None, auth_header="Authorization"):
+        # [FUNCTION DOC]
+        # Records the temperature and returns the scripted top-logprob payload.
         if fail:
             raise OSError("endpoint refused")
         calls.append(body["temperature"])
@@ -574,6 +664,8 @@ def temperature_scripted(monkeypatch, by_temperature, *, fail=False):
 
 
 def test_an_unchanged_gap_is_raw(monkeypatch):
+    # [FUNCTION DOC]
+    # An identical top-two gap at T=1 and T=2 gives "raw", probing at 1.0 then 2.0.
     """Live measurement: gap 6.7500 at both temperatures on a default-flags vLLM."""
     calls = temperature_scripted(
         monkeypatch,
@@ -584,6 +676,8 @@ def test_an_unchanged_gap_is_raw(monkeypatch):
 
 
 def test_a_halved_gap_is_processed(monkeypatch):
+    # [FUNCTION DOC]
+    # A gap halved at T=2 gives "processed".
     """Live measurement: gap 6.7500 -> 3.3750, i.e. exactly T1/T2, on a processed_logprobs vLLM."""
     temperature_scripted(
         monkeypatch,
@@ -593,6 +687,8 @@ def test_a_halved_gap_is_processed(monkeypatch):
 
 
 def test_a_constant_offset_between_calls_does_not_change_the_verdict(monkeypatch):
+    # [FUNCTION DOC]
+    # A constant shift of all values keeps the "raw" verdict.
     """Why the gap, not the value: a data-parallel engine answers consecutive calls from different
     replicas, and comparing values directly misread one such engine (DP=4) as processed. A constant
     shift cancels in a difference, so the same gap survives it."""
@@ -604,6 +700,8 @@ def test_a_constant_offset_between_calls_does_not_change_the_verdict(monkeypatch
 
 
 def test_a_distribution_too_flat_to_divide_is_unknown(monkeypatch):
+    # [FUNCTION DOC]
+    # Near-zero gaps give "unknown".
     """Guessing from noise is how a check becomes something people override on principle."""
     temperature_scripted(
         monkeypatch, {1.0: {"a": -0.5, "b": -0.6}, 2.0: {"a": -0.5, "b": -0.9}}
@@ -612,18 +710,24 @@ def test_a_distribution_too_flat_to_divide_is_unknown(monkeypatch):
 
 
 def test_a_single_top_logprob_is_unknown(monkeypatch):
+    # [FUNCTION DOC]
+    # A single top logprob gives "unknown".
     """A gap needs two values."""
     temperature_scripted(monkeypatch, {1.0: {"a": -0.5}, 2.0: {"a": -0.5}})
     assert validate_llm_mod.probe_logprobs_mode("http://engine", "m") == "unknown"
 
 
 def test_an_unreachable_endpoint_is_unknown(monkeypatch):
+    # [FUNCTION DOC]
+    # Request failures give "unknown".
     """Absence of evidence, not evidence of a problem."""
     temperature_scripted(monkeypatch, {}, fail=True)
     assert validate_llm_mod.probe_logprobs_mode("http://engine", "m") == "unknown"
 
 
 def test_a_provider_that_refused_temperature_cannot_be_asked(monkeypatch):
+    # [FUNCTION DOC]
+    # With a temperature ParamFix, the probe returns "unknown" without any calls.
     """gpt-5.6 drops `temperature`, so a question about temperature has no meaning — and must cost
     no calls at all."""
     compat = pytest.importorskip("openenv.core.harness.capture.compat")
@@ -638,6 +742,10 @@ def test_a_provider_that_refused_temperature_cannot_be_asked(monkeypatch):
 
 
 def test_raw_logprobs_demote_a_trainable_endpoint_to_eval(monkeypatch):
+    # [FUNCTION DOC]
+    # Without OPENENV_ALLOW_RAW_LOGPROBS, raw mode demotes tokens to logprobs,
+    # not trainable, still reachable, with a FATAL raw_logprobs finding and no
+    # token_strings finding.
     """The endpoint answers fine and is a good eval backend; what it cannot do is train."""
     monkeypatch.delenv("OPENENV_ALLOW_RAW_LOGPROBS", raising=False)
     monkeypatch.setattr(validate_llm_mod, "list_models", lambda *a, **k: ["m"])
@@ -662,6 +770,9 @@ def test_raw_logprobs_demote_a_trainable_endpoint_to_eval(monkeypatch):
 
 
 def test_the_override_keeps_it_trainable_but_says_so(monkeypatch):
+    # [FUNCTION DOC]
+    # With OPENENV_ALLOW_RAW_LOGPROBS=1 it stays trainable with a
+    # raw_logprobs_forced finding.
     """A refusal that cannot be overridden becomes a reason to stop trusting the tool."""
     monkeypatch.setenv("OPENENV_ALLOW_RAW_LOGPROBS", "1")
     monkeypatch.setattr(validate_llm_mod, "list_models", lambda *a, **k: ["m"])
@@ -678,6 +789,8 @@ def test_the_override_keeps_it_trainable_but_says_so(monkeypatch):
 
 
 def test_the_mode_is_not_probed_below_the_tokens_tier(monkeypatch):
+    # [FUNCTION DOC]
+    # Below tokens level the logprobs-mode probe is never called.
     """Nothing below `tokens` is trainable, so the answer would inform no decision."""
     monkeypatch.setattr(validate_llm_mod, "list_models", lambda *a, **k: ["m"])
     monkeypatch.setattr(
@@ -695,6 +808,9 @@ def test_the_mode_is_not_probed_below_the_tokens_tier(monkeypatch):
 # only signal about agent viability, and it caught a real failure that `harbor info` previously
 # reported as a perfectly healthy endpoint.
 def tool_reply(*, tool_call=True, finish="stop"):
+    # [FUNCTION DOC]
+    # HELPER: builds a chat completion with either a bash tool call or prose,
+    # and the given finish reason.
     message = {"role": "assistant", "content": None if tool_call else "I'd run ls."}
     if tool_call:
         message["tool_calls"] = [
@@ -708,11 +824,15 @@ def tool_reply(*, tool_call=True, finish="stop"):
 
 
 def test_a_tool_call_means_agents_can_work(monkeypatch):
+    # [FUNCTION DOC]
+    # probe_tool_support reports "ok" for a tool call.
     monkeypatch.setattr(validate_llm_mod, "_post", lambda *a, **k: tool_reply())
     assert validate_llm_mod.probe_tool_support("http://engine", "m")[0] == "ok"
 
 
 def test_prose_instead_of_a_tool_call_is_reported(monkeypatch):
+    # [FUNCTION DOC]
+    # Prose instead of a tool call reports "no-tool-call".
     monkeypatch.setattr(
         validate_llm_mod, "_post", lambda *a, **k: tool_reply(tool_call=False)
     )
@@ -722,6 +842,8 @@ def test_prose_instead_of_a_tool_call_is_reported(monkeypatch):
 
 
 def test_truncation_is_inconclusive_not_a_failure(monkeypatch):
+    # [FUNCTION DOC]
+    # A length-truncated reply reports "unknown".
     """The false positive this avoids: Qwen3.6-35B-A3B spent 224 tokens reasoning and hit the cap, so
     a 64-token probe called it tool-incapable while it in fact worked with all 16 harnesses."""
     monkeypatch.setattr(
@@ -733,9 +855,13 @@ def test_truncation_is_inconclusive_not_a_failure(monkeypatch):
 
 
 def test_an_endpoint_that_refuses_tools_outright_is_flagged(monkeypatch):
+    # [FUNCTION DOC]
+    # A 400 rejecting tools reports "rejected".
     """`tools` is protected from being dropped, so this cannot be papered over."""
 
     def refuse(*a, **k):
+        # [FUNCTION DOC]
+        # Raises an HTTP 400 about tools not being supported.
         raise http_400(
             {"error": {"message": "tools are not supported", "param": "tools"}}
         )
@@ -745,6 +871,9 @@ def test_an_endpoint_that_refuses_tools_outright_is_flagged(monkeypatch):
 
 
 def test_reasoning_forced_off_warns_at_validate_time(monkeypatch):
+    # [FUNCTION DOC]
+    # When tool support requires reasoning_effort none, validate_llm adds
+    # behaviour_changed and single-model-call warnings.
     """The gpt-5.6 case: tools are accepted only with reasoning disabled, after which agentic loops
     make one model call and stop. Discovered only when the probe carries a tool manifest."""
     monkeypatch.setattr(validate_llm_mod, "list_models", lambda *a, **k: ["m"])
@@ -774,6 +903,9 @@ def test_reasoning_forced_off_warns_at_validate_time(monkeypatch):
 
 # --- roles must not depend on token counts that eval endpoints never have ----
 def test_a_toolless_harness_is_still_the_agent_on_an_eval_endpoint():
+    # [FUNCTION DOC]
+    # On an eval export with no tools, the single sequence is "agent" and turns and
+    # conversations are rebuilt (skipped without openenv.harbor.models).
     """terminus-2 parses tool calls out of raw text, so it sends no manifest. Role assignment used
     `n_trainable` as the tiebreak when nothing had tools, and on an eval endpoint that is 0 for every
     sequence — so every path was labelled auxiliary, `result.turns` came back empty and the
@@ -814,6 +946,8 @@ def test_a_toolless_harness_is_still_the_agent_on_an_eval_endpoint():
 
 
 def test_the_train_path_still_uses_trainable_tokens_as_the_tiebreak():
+    # [FUNCTION DOC]
+    # At tokens level, a toolless sequence with nothing trainable is "auxiliary".
     """Where token counts DO mean something, a toolless sequence with nothing trainable is auxiliary."""
     graph = graph_mod.RolloutGraph()
     graph.add_turn(
