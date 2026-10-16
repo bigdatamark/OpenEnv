@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Small interactive CLI client for a harness served over a WebSocket endpoint: sends user messages (from argv or
+# stdin, one per line) and prints tool calls and the agent's final response for each turn.
+# Side effects: WebSocket network I/O, reads stdin, prints to stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Chat with a harness served on `WS /harness`, one message per line.
@@ -18,6 +22,11 @@ from websockets.sync.client import connect
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Takes the WebSocket URL and optional messages from argv (IndexError if the URL is missing). Connects, waits up to 60 s
+    # for the first frame and prints it; returns unless it is "session_started". For each non-empty message, sends a
+    # "message" frame and reads frames (300 s timeout each), printing tool_call frames, returning on an "error" frame, and
+    # printing the response and moving on at "turn_complete". Other frame types are ignored.
     url, messages = sys.argv[1], sys.argv[2:]
     with connect(url) as websocket:
         started = json.loads(websocket.recv(timeout=60))

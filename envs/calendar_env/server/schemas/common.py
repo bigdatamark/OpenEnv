@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Shared Pydantic response models and plain string-constant classes used across the calendar API.
 """
 Common models and response schemas for Calendar API
 """
@@ -9,6 +11,8 @@ from pydantic import BaseModel, Field
 
 
 class BaseResponse(BaseModel):
+    # [CLASS DOC]
+    # Pydantic model with success (bool), optional message and optional timestamp string.
     """Base response model"""
 
     success: bool
@@ -17,6 +21,8 @@ class BaseResponse(BaseModel):
 
 
 class ErrorResponse(BaseResponse):
+    # [CLASS DOC]
+    # BaseResponse with success defaulting to False, a required error string and optional error_code.
     """Error response model"""
 
     success: bool = False
@@ -25,6 +31,8 @@ class ErrorResponse(BaseResponse):
 
 
 class SuccessResponse(BaseResponse):
+    # [CLASS DOC]
+    # BaseResponse with success defaulting to True and an optional arbitrary data payload.
     """Success response model"""
 
     success: bool = True
@@ -32,6 +40,8 @@ class SuccessResponse(BaseResponse):
 
 
 class PaginationModel(BaseModel):
+    # [CLASS DOC]
+    # Pagination parameters: limit (1..1000, default 100) and offset (>=0, default 0).
     """Pagination model"""
 
     limit: int = Field(
@@ -41,6 +51,9 @@ class PaginationModel(BaseModel):
 
 
 class DatabaseStateResponse(BaseModel):
+    # [CLASS DOC]
+    # Response describing a database snapshot: success, service name, database_info dict,
+    # per-table row counts and per-table row data lists, plus a timestamp string.
     """Database state response model"""
 
     success: bool
@@ -53,12 +66,16 @@ class DatabaseStateResponse(BaseModel):
 
 # Enums for calendar status and visibility
 class EventStatus:
+    # [CLASS DOC]
+    # Namespace of event status string constants: confirmed, tentative, cancelled.
     CONFIRMED = "confirmed"
     TENTATIVE = "tentative"
     CANCELLED = "cancelled"
 
 
 class EventVisibility:
+    # [CLASS DOC]
+    # Namespace of event visibility constants: default, public, private, confidential.
     DEFAULT = "default"
     PUBLIC = "public"
     PRIVATE = "private"
@@ -66,6 +83,8 @@ class EventVisibility:
 
 
 class CalendarAccessRole:
+    # [CLASS DOC]
+    # Namespace of calendar access role constants: owner, reader, writer, freeBusyReader.
     OWNER = "owner"
     READER = "reader"
     WRITER = "writer"
@@ -73,5 +92,7 @@ class CalendarAccessRole:
 
 
 class EventTransparency:
+    # [CLASS DOC]
+    # Namespace of event transparency constants: opaque, transparent.
     OPAQUE = "opaque"
     TRANSPARENT = "transparent"

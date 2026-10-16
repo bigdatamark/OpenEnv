@@ -1,3 +1,14 @@
+# [MODULE DOC]
+# ContainerProvider that runs an OpenEnv server inside a Hugging Face Hub
+# sandbox (huggingface_hub SandboxPool, billed as HF Jobs). Because the sandbox
+# proxy requires HF auth headers, the provider runs a local FastAPI/uvicorn
+# reverse proxy on 127.0.0.1 (random free port, background thread) that forwards
+# HTTP and WebSocket traffic to the sandbox's port 8000 with those headers, and
+# returns the local proxy URL. Sandbox pools are cached process-wide per
+# (image, flavor) under a lock. Constants: the shell command that launches
+# "server" in the background (log in $HOME/openenv-server.log), a 100 MiB
+# WebSocket message limit, and hop-by-hop headers stripped from proxied
+# responses.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -49,6 +60,11 @@ _POOL_LOCK = threading.Lock()
 
 
 def _find_available_port() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Binds a TCP socket to 127.0.0.1 port 0, returns the OS-assigned port
+    # and closes the socket.
+    # KNOWN ISSUE: the port is released before uvicorn binds it, so another process
+    # could take it in between (race).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         sock.listen(1)
@@ -56,6 +72,9 @@ def _find_available_port() -> int:
 
 
 def _to_ws_url(url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Converts an https:// URL to wss:// and http:// to ws://; other
+    # strings are returned unchanged.
     if url.startswith("https://"):
         return "wss://" + url[len("https://") :]
     if url.startswith("http://"):
@@ -64,11 +83,17 @@ def _to_ws_url(url: str) -> str:
 
 
 def _pool_name(image: str, flavor: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "openenv-" plus the first 12 hex chars of the SHA-1 of image
+    # and flavor joined by a NUL character.
     digest = hashlib.sha1(f"{image}\0{flavor}".encode("utf-8")).hexdigest()[:12]
     return f"openenv-{digest}"
 
 
 def _get_sandbox_pool_cls() -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Imports and returns huggingface_hub.SandboxPool. Raises RuntimeError
+    # if the installed huggingface_hub lacks it.
     try:
         from huggingface_hub import SandboxPool
     except ImportError as exc:
@@ -80,6 +105,9 @@ def _get_sandbox_pool_cls() -> Any:
 
 
 def _get_pool(image: str, flavor: str) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Returns the cached SandboxPool for (image, flavor), creating and
+    # caching one with a deterministic name under the global lock if absent.
     key = (image, flavor)
     with _POOL_LOCK:
         pool = _POOLS.get(key)
@@ -95,7 +123,14 @@ def _get_pool(image: str, flavor: str) -> Any:
 
 
 class _LocalAuthProxy:
+    # [CLASS DOC]
+    # HELPER: Local reverse proxy that injects fixed auth headers into requests to
+    # target_url. Picks a free port at construction; holds the uvicorn server and
+    # its daemon thread once started.
     def __init__(self, *, target_url: str, headers: dict[str, str]):
+        # [FUNCTION DOC]
+        # Stores target_url without trailing slash and headers, reserves a free port
+        # number; no server running yet.
         self.target_url = target_url.rstrip("/")
         self.headers = headers
         self.port = _find_available_port()
@@ -104,9 +139,16 @@ class _LocalAuthProxy:
 
     @property
     def base_url(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "http://127.0.0.1:<port>".
         return f"http://127.0.0.1:{self.port}"
 
     def start(self) -> str:
+        # [FUNCTION DOC]
+        # Builds a FastAPI app with a catch-all HTTP route and a catch-all WebSocket
+        # route, runs it with uvicorn on 127.0.0.1:<port> in a daemon thread, and busy-
+        # waits (50 ms) until the server reports started.
+        # Returns: base_url. Raises: RuntimeError if the thread dies before startup.
         app = FastAPI()
 
         @app.api_route(
@@ -114,6 +156,13 @@ class _LocalAuthProxy:
             methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         )
         async def proxy_http(path: str, request: Request) -> Response:
+            # [FUNCTION DOC]
+            # Forwards an HTTP request (GET/POST/PUT/PATCH/DELETE/OPTIONS) to
+            # "<target_url>/<path>[?query]" using requests in a worker thread (60 s
+            # timeout, redirects followed) with the auth headers plus the incoming
+            # Content-Type and body. Returns the upstream status, body and headers minus
+            # hop-by-hop ones; returns 502 "upstream HF job unreachable" on request errors.
+            # Other incoming headers are not forwarded.
             query = request.url.query
             target = f"{self.target_url}/{path}"
             if query:
@@ -151,6 +200,14 @@ class _LocalAuthProxy:
 
         @app.websocket("/{path:path}")
         async def proxy_websocket(path: str, websocket: WebSocket) -> None:
+            # [FUNCTION DOC]
+            # Opens an upstream WebSocket to the ws(s) form of "<target_url>/<path>
+            # [?query]" with the auth headers, then accepts the client socket and relays
+            # messages both ways until either direction finishes; cancels the other task,
+            # suppresses normal close errors, and always closes the upstream.
+            # KNOWN ISSUE: if the upstream connection fails, the exception is raised before
+            # the client socket is accepted, so the client sees a failed handshake without
+            # a reason.
             query = websocket.url.query
             target = f"{_to_ws_url(self.target_url)}/{path}"
             if query:
@@ -199,6 +256,10 @@ class _LocalAuthProxy:
     async def _connect_upstream_websocket(
         self, target: str, headers: dict[str, str]
     ) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Tries up to 5 times (0.5 s apart) to open an upstream WebSocket with
+        # the given headers, 100 MiB max message size and no compression. Returns the
+        # connection or re-raises the last error.
         last_error: Exception | None = None
         for _ in range(5):
             try:
@@ -216,10 +277,16 @@ class _LocalAuthProxy:
 
     async def _client_to_upstream(self, websocket: WebSocket, upstream: Any) -> None:
         # EnvClient sends JSON text frames; binary frames are only relayed downstream.
+        # [FUNCTION DOC]
+        # HELPER: Forwards each text frame from the client to upstream until the client
+        # disconnects. Binary client frames are not supported.
         async for message in websocket.iter_text():
             await upstream.send(message)
 
     async def _upstream_to_client(self, websocket: WebSocket, upstream: Any) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Forwards each upstream message to the client as bytes or text by type
+        # until upstream closes.
         async for message in upstream:
             if isinstance(message, bytes):
                 await websocket.send_bytes(message)
@@ -227,6 +294,9 @@ class _LocalAuthProxy:
                 await websocket.send_text(message)
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Signals the uvicorn server to exit, joins its thread (up to 5 s) and clears
+        # references. No-op if not started.
         if self._server is None or self._thread is None:
             return
         self._server.should_exit = True
@@ -236,6 +306,10 @@ class _LocalAuthProxy:
 
 
 class HFSandboxProvider(ContainerProvider):
+    # [CLASS DOC]
+    # ContainerProvider with one active HF sandbox and its local auth proxy at a
+    # time. Configured with a default image, env vars and hardware flavor
+    # (default "cpu-basic").
     """Run an OpenEnv server on Hugging Face infrastructure.
 
     The server runs in a `huggingface_hub` sandbox pool, which bills its hosts as
@@ -259,6 +333,8 @@ class HFSandboxProvider(ContainerProvider):
         env_vars: dict[str, str] | None = None,
         flavor: str = "cpu-basic",
     ):
+        # [FUNCTION DOC]
+        # Stores image, env_vars and flavor; no sandbox or proxy yet.
         self.image = image
         self.env_vars = env_vars
         self.flavor = flavor
@@ -272,6 +348,15 @@ class HFSandboxProvider(ContainerProvider):
         env_vars: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Creates a sandbox from the pool for the effective image (argument or
+        # default) and flavor with the effective env vars, runs the server launch
+        # command in it via a shell, starts a local auth proxy targeting the sandbox's
+        # port 8000 proxy URL, and returns the local proxy URL.
+        # Raises: RuntimeError if a sandbox is already active or the SDK lacks
+        # proxy_url_for/proxy_headers; ValueError for any extra kwargs or a port other
+        # than None/8000. Any failure after creation calls stop_container and
+        # re-raises. Side effects: remote sandbox creation, local thread/server.
         if self._sandbox is not None:
             raise RuntimeError("HFSandboxProvider already has an active service")
         if kwargs:
@@ -311,6 +396,9 @@ class HFSandboxProvider(ContainerProvider):
             raise
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the local proxy if any, then kills the sandbox, ignoring kill errors.
+        # Safe to call repeatedly.
         if self._proxy is not None:
             self._proxy.stop()
             self._proxy = None
@@ -321,6 +409,9 @@ class HFSandboxProvider(ContainerProvider):
                 sandbox.kill()
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 120.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health (5 s timeout) once per second until 200.
+        # Raises TimeoutError after timeout_s.
         deadline = time.time() + timeout_s
         health_url = f"{base_url}/health"
         while time.time() < deadline:
@@ -336,6 +427,8 @@ class HFSandboxProvider(ContainerProvider):
         )
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Same as stop_container.
         self.stop_container()
 
 

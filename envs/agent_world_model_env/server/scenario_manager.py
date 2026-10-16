@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Runs one AWM scenario's generated FastAPI app as a local subprocess and keeps a persistent MCP client
+# connection to it. Scenario code is patched to use the session's SQLite DB, to mount an MCP HTTP endpoint
+# (fastapi_mcp) at /mcp and to listen on an assigned localhost port. Scenario code is treated as trusted (no sandbox).
 """
 Subprocess lifecycle management for AWM sub-environments.
 Each AWM scenario is a self-contained FastAPI application. This module handles:
@@ -48,6 +52,9 @@ logger = logging.getLogger(__name__)
 
 
 def _get_random_port() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Asks the OS for a free TCP port by binding to port 0, returns it, and releases the socket.
+    # KNOWN ISSUE: the port can be taken by another process before the subprocess binds it (mitigated by retries).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.listen(1)
@@ -55,6 +62,14 @@ def _get_random_port() -> int:
 
 
 def _patch_env_code(full_code: str, db_path: str, host: str, port: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Rewrites generated server source line by line and returns the new source. Prepends a filter silencing
+    # DeprecationWarning; replaces any line containing a create_engine call with one pointing at sqlite:///db_path with
+    # check_same_thread disabled (anything after the call on that line is dropped); before the line containing
+    # "uvicorn.run(app" inserts FastApiMCP creation + mount_http (indented 4 spaces) and replaces that line with a
+    # uvicorn.run on the given host/port.
+    # KNOWN ISSUE: assumes create_engine is a single-line call and uvicorn.run sits at 4-space indentation (inside an
+    # if __name__ block); other layouts produce broken code.
     """
     Patch the generated FastAPI code:
     1. Replace create_engine() call to point to the session-specific DB.
@@ -93,6 +108,8 @@ def _patch_env_code(full_code: str, db_path: str, host: str, port: int) -> str:
 # Persistent MCP connection
 # ---------------------------------------------------------------------------
 class _MCPConnection:
+    # [CLASS DOC]
+    # HELPER: Async MCP client session over streamable HTTP, kept open across calls via an AsyncExitStack.
     """Persistent MCP client session backed by AsyncExitStack.
 
     Keeps the streamable HTTP transport and ClientSession alive across
@@ -101,14 +118,21 @@ class _MCPConnection:
     """
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Initializes with no exit stack and no session.
         self._stack: contextlib.AsyncExitStack | None = None
         self._session: ClientSession | None = None
 
     @property
     def connected(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True when a session exists.
         return self._session is not None
 
     async def connect(self, mcp_url: str) -> None:
+        # [FUNCTION DOC]
+        # Opens the streamable HTTP transport to mcp_url, creates and initializes a ClientSession. On any failure closes
+        # everything and re-raises.
         self._stack = contextlib.AsyncExitStack()
         try:
             read_stream, write_stream, _ = await self._stack.enter_async_context(
@@ -123,6 +147,9 @@ class _MCPConnection:
             raise
 
     async def list_tools(self) -> list[dict]:
+        # [FUNCTION DOC]
+        # Returns the server's tools as dicts with name, description ("" if missing) and inputSchema ({} if missing).
+        # Raises: AssertionError if not connected.
         assert self._session is not None, "Not connected"
         result = await self._session.list_tools()
         return [
@@ -135,6 +162,10 @@ class _MCPConnection:
         ]
 
     async def call_tool(self, tool_name: str, arguments: dict) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Calls a tool and joins the text of each content part (str() for non-text parts) with newlines.
+        # Returns: dict with success, result (text or None) and error (text when the tool reported an error, else None).
+        # Raises: AssertionError if not connected; transport errors propagate.
         assert self._session is not None, "Not connected"
         result = await self._session.call_tool(tool_name, arguments)
 
@@ -151,6 +182,8 @@ class _MCPConnection:
         return {"success": True, "result": text, "error": None}
 
     async def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the exit stack (errors ignored) and clears stack/session; no-op if never connected.
         if self._stack is not None:
             try:
                 await self._stack.aclose()
@@ -164,9 +197,14 @@ class _MCPConnection:
 # ScenarioProcess
 # ---------------------------------------------------------------------------
 class ScenarioProcess:
+    # [CLASS DOC]
+    # Owns one scenario subprocess: its port, server.py/server.log under the session dir, and a dedicated asyncio event
+    # loop used to drive the persistent MCP connection synchronously. Not safe for use from inside a running event loop.
     """Manages a single sub-environment subprocess with persistent MCP connection."""
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes all process, port, file, MCP and loop fields to None/False.
         self._process: subprocess.Popen | None = None
         self._port: int | None = None
         self._temp_dir: str | None = None
@@ -180,19 +218,32 @@ class ScenarioProcess:
 
     @property
     def port(self) -> int | None:
+        # [FUNCTION DOC]
+        # Property: assigned port or None.
         return self._port
 
     @property
     def mcp_url(self) -> str | None:
+        # [FUNCTION DOC]
+        # Property: "http://127.0.0.1:<port>/mcp", or None when no port is assigned.
         if self._port is None:
             return None
         return f"http://127.0.0.1:{self._port}/mcp"
 
     @property
     def is_running(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True if a subprocess exists and has not exited.
         return self._process is not None and self._process.poll() is None
 
     def start(self, full_code: str, db_path: str, session_dir: str) -> str:
+        # [FUNCTION DOC]
+        # Stops any previous process, then up to 1 + MAX_PORT_RETRIES times: picks a random port, writes patched code to
+        # <session_dir>/server.py, launches it with the current Python in a new process group (stdout+stderr to
+        # <session_dir>/server.log), waits for the port to accept connections (READY_TIMEOUT first, RETRY_READY_TIMEOUT
+        # afterwards) and opens the MCP connection. On a failed attempt the log is read for diagnostics and the process is
+        # stopped. Returns: the MCP URL. Raises: RuntimeError after all attempts fail.
+        # Side effects: files written, subprocesses spawned, logging. The session dir is not owned (never deleted here).
         """
         Start the sub-environment subprocess and establish persistent MCP
         connection.
@@ -279,6 +330,10 @@ class ScenarioProcess:
         )
 
     def _wait_for_ready(self, timeout: float = READY_TIMEOUT) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Polls until a TCP connection to the port succeeds (then sleeps 0.5s and returns True), the process exits
+        # (False) or the timeout elapses (False).
+        # KNOWN ISSUE: docstring says it polls the MCP endpoint, but it only checks that the TCP port is open.
         """Poll the MCP endpoint until the server is ready."""
         start = time.time()
         while time.time() - start < timeout:
@@ -299,12 +354,16 @@ class ScenarioProcess:
     # -- Persistent MCP connection management ---------------------------------
 
     def _connect_mcp(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Creates a new event loop and a connection object and runs connect() on it. Raises on connection failure.
         """Create a dedicated event loop and establish persistent MCP session."""
         self._loop = asyncio.new_event_loop()
         self._mcp = _MCPConnection()
         self._loop.run_until_complete(self._mcp.connect(self.mcp_url))
 
     def _disconnect_mcp(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Closes the MCP connection on its loop and closes the loop, ignoring errors; clears both fields.
         """Tear down the persistent MCP session and event loop."""
         if self._mcp is not None:
             if self._loop is not None and not self._loop.is_closed():
@@ -321,6 +380,9 @@ class ScenarioProcess:
             self._loop = None
 
     def list_tools(self, timeout: float = 15.0) -> list[dict]:
+        # [FUNCTION DOC]
+        # Synchronously lists tools with a timeout (default 15s). Raises RuntimeError if not connected; any other failure is
+        # logged and an empty list is returned.
         """List MCP tools via persistent connection (sync)."""
         if self._mcp is None or self._loop is None:
             raise RuntimeError("MCP connection not established")
@@ -335,6 +397,9 @@ class ScenarioProcess:
     def call_tool(
         self, tool_name: str, arguments: dict, timeout: float = 30.0
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Synchronously calls a tool with a timeout (default 30s). Returns the success/result/error dict; never raises -
+        # not-connected, timeouts and exceptions become error dicts.
         """Call an MCP tool via persistent connection (sync).
 
         Returns:
@@ -365,6 +430,10 @@ class ScenarioProcess:
     # -- Subprocess lifecycle --------------------------------------------------
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the MCP connection, then terminates the subprocess's process group with SIGTERM, waits 5s, escalates to
+        # SIGKILL and waits 3s more. Closes the log file, deletes the temp dir only if owned, and clears port and server path.
+        # The process field is cleared before killing so concurrent callers do not double-kill. Idempotent.
         """Stop the subprocess and clean up resources.
 
         Thread-safe: captures ``self._process`` in a local variable and

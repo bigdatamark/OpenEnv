@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic schemas for the Calendar Settings API (Google Calendar API v3 shaped):
+# single setting resources, paginated setting lists, watch channels and the
+# request body used to subscribe a webhook to settings changes.
 """
 Settings models for Calendar Settings API following Google Calendar API v3 structure
 """
@@ -9,6 +13,9 @@ from pydantic import BaseModel, Extra, Field, field_validator
 
 
 class SettingItem(BaseModel):
+    # [CLASS DOC]
+    # One user setting (id such as "timezone", string value, owning user_id, optional etag).
+    # Can be built from ORM objects (from_attributes enabled).
     """Single settings resource (Google Calendar API v3 style)"""
 
     model_config = {"from_attributes": True}
@@ -20,6 +27,8 @@ class SettingItem(BaseModel):
 
 
 class SettingsListResponse(BaseModel):
+    # [CLASS DOC]
+    # Settings collection response: optional etag, list of SettingItem, optional nextPageToken.
     """Paginated list of settings (Google Calendar API v3 style)"""
 
     etag: Optional[str] = Field(None, description="ETag of the collection")
@@ -32,6 +41,9 @@ class SettingsListResponse(BaseModel):
 
 
 class Channel(BaseModel):
+    # [CLASS DOC]
+    # Watch channel resource returned to clients: kind (defaults to "api#channel"), id,
+    # optional resourceId, resourceUri, token and expiration string.
     """Channel model for watch notifications"""
 
     kind: str = Field(default="api#channel", description="Resource type identifier")
@@ -43,16 +55,24 @@ class Channel(BaseModel):
 
 
 class WatchParams(BaseModel):
+    # [CLASS DOC]
+    # Optional watch parameters; only "ttl" (seconds as a string). Unknown keys are rejected.
     """Watch parameters"""
 
     ttl: Optional[str] = Field(None, description="Time to live (seconds)")
 
     class Config:
+        # [CLASS DOC]
+        # HELPER: Pydantic config forbidding extra fields.
         extra = Extra.forbid
 
     @field_validator("ttl")
     @classmethod
     def _validate_ttl(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Validator for ttl. None passes through; otherwise the stripped string must
+        # be all digits and > 0. Returns the stripped string.
+        # Raises: ValueError if not a digit string or not positive.
         if v is None:
             return v
         s = str(v).strip()
@@ -66,6 +86,9 @@ class WatchParams(BaseModel):
 
 
 class SettingsWatchRequest(BaseModel):
+    # [CLASS DOC]
+    # Body of a settings watch request: channel id, channel type, https webhook address,
+    # optional token and optional WatchParams. Extra fields are ignored.
     """Request model for watching settings changes"""
 
     id: str = Field(..., description="Channel identifier")
@@ -80,6 +103,10 @@ class SettingsWatchRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def _validate_type(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Validator for type. Accepts "web_hook" or "webhook" (case-insensitive,
+        # trimmed) and normalizes to "web_hook".
+        # Raises: ValueError for None or any other value.
         if v is None:
             raise ValueError("type is required")
         s = str(v).strip().lower()
@@ -91,6 +118,10 @@ class SettingsWatchRequest(BaseModel):
     @field_validator("address")
     @classmethod
     def _validate_address(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Validator for address. Trims it and requires an https scheme with a host.
+        # Returns the trimmed URL.
+        # Raises: ValueError if None or not a valid https URL.
         if v is None:
             raise ValueError("address is required")
         s = str(v).strip()
@@ -100,4 +131,6 @@ class SettingsWatchRequest(BaseModel):
         return s
 
     class Config:
+        # [CLASS DOC]
+        # HELPER: Pydantic config ignoring unknown fields.
         extra = "ignore"

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for the opt-in NeMo shell agent profile (openenv.harbor.nemo_profile) and the packaged
+# example shell tool. Skipped entirely when harbor's nemo_agent module is not installed.
 """The opt-in NeMo profile keeps endpoint routing and exercises real sandbox commands."""
 
 import importlib.util
@@ -13,6 +16,10 @@ from openenv.harbor.nemo_profile import NemoShellProfile
 
 
 def test_nemo_react_profile_reuses_harbor_provider_configuration(tmp_path):
+    # [FUNCTION DOC]
+    # Builds a NemoShellProfile with an OPENAI_BASE_URL extra env and parses its generated YAML config;
+    # asserts the selected LLM uses that base URL, the session id as api key, the bare model name,
+    # native tool calling, and only the "shell" tool. Side effects: writes logs under tmp_path.
     agent = NemoShellProfile(
         logs_dir=tmp_path,
         model_name="openai/Qwen3.5-4B",
@@ -30,6 +37,9 @@ def test_nemo_react_profile_reuses_harbor_provider_configuration(tmp_path):
 
 
 def shell_module():
+    # [FUNCTION DOC]
+    # HELPER: Dynamically imports examples/harbor/nemo_shell_profile/src/openenv_nat_shell/shell.py
+    # (resolved relative to the repo root) under the name "qualification_shell" and returns the module.
     path = (
         Path(__file__).parents[2]
         / "examples/harbor/nemo_shell_profile/src/openenv_nat_shell/shell.py"
@@ -42,6 +52,9 @@ def shell_module():
 
 @pytest.mark.asyncio
 async def test_shell_executes_and_reports_failure_without_faking_success(tmp_path):
+    # [FUNCTION DOC]
+    # Runs a shell command that writes a file, prints it and exits 7 through the example shell's async
+    # execute; asserts the JSON result reports exit_code 7 and stdout "data" and the file exists.
     shell = shell_module()
     result = json.loads(
         await shell.execute(
@@ -55,6 +68,9 @@ async def test_shell_executes_and_reports_failure_without_faking_success(tmp_pat
 
 @pytest.mark.asyncio
 async def test_shell_timeout_terminates_command_group(tmp_path):
+    # [FUNCTION DOC]
+    # Asserts execute raises TimeoutError for a sleeping command with a 0.1s timeout and that the
+    # command's later "touch" never ran (the whole process group was killed).
     shell = shell_module()
     with pytest.raises(TimeoutError):
         await shell.execute(
@@ -64,6 +80,10 @@ async def test_shell_timeout_terminates_command_group(tmp_path):
 
 
 def test_explicit_profile_uses_packaged_workflow_without_mutating_generic_seam():
+    # [FUNCTION DOC]
+    # Fetches the generic "nemo-agent" seam and the "shell-1.9.0" profile variant; asserts the profile
+    # resolves to NemoShellProfile with version 1.9.0 and a workflow_package dir containing pyproject.toml,
+    # and that the generic seam is unchanged (same object, different import path).
     from pathlib import Path
 
     from openenv.harbor.seams import get

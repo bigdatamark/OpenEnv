@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Process-wide registry of live AWMEnvironment sessions with last-activity timestamps, plus a daemon thread that
+# periodically tears down idle sessions. Exposes the singleton "registry".
 """
 Module-level session registry for AWM environments.
 
@@ -23,9 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 class SessionRegistry:
+    # [CLASS DOC]
+    # Lock-protected mapping from session id to an entry holding a weak reference to the environment, monotonic
+    # last-active time, scenario name and wall-clock registration time. Starts its cleanup daemon on first register.
     """Thread-safe singleton tracking active AWMEnvironment instances."""
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Initializes the lock, empty session map and daemon-started flag.
         self._lock = threading.Lock()
         # session_id -> {env: weakref, last_active: float, scenario: str|None}
         self._sessions: dict[str, dict[str, Any]] = {}
@@ -34,6 +42,9 @@ class SessionRegistry:
     def register(
         self, session_id: str, env: "AWMEnvironment", scenario: str | None = None
     ) -> None:
+        # [FUNCTION DOC]
+        # Adds or replaces the entry for session_id (weakref to env, now as last-active, scenario) and starts the cleanup
+        # daemon if not yet running.
         with self._lock:
             self._sessions[session_id] = {
                 "env": weakref.ref(env),
@@ -44,10 +55,14 @@ class SessionRegistry:
         self._ensure_daemon()
 
     def unregister(self, session_id: str) -> None:
+        # [FUNCTION DOC]
+        # Removes the session entry if present.
         with self._lock:
             self._sessions.pop(session_id, None)
 
     def touch(self, session_id: str) -> None:
+        # [FUNCTION DOC]
+        # Sets the session's last-active time to now; no-op for unknown ids.
         """Update last_active timestamp for a session."""
         with self._lock:
             entry = self._sessions.get(session_id)
@@ -56,10 +71,15 @@ class SessionRegistry:
 
     @property
     def active_count(self) -> int:
+        # [FUNCTION DOC]
+        # Property: number of registered sessions.
         with self._lock:
             return len(self._sessions)
 
     def get_stats(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a dict with total_sessions, the three idle-config values, max_idle_s (largest idle seconds rounded to 0.1,
+        # 0 if none) and a count of sessions per scenario ("unknown" when unset).
         """Return registry stats for the /stats endpoint."""
         now = time.monotonic()
         with self._lock:
@@ -81,6 +101,10 @@ class SessionRegistry:
             }
 
     def cleanup_idle(self) -> int:
+        # [FUNCTION DOC]
+        # Only when the number of sessions exceeds ALLOWED_IDLE_SESSIONS: removes every session idle longer than
+        # MAX_IDLE_TIME and calls the live environment's _cleanup_session(). Errors during cleanup are logged.
+        # Returns: number of sessions whose environment was successfully cleaned (removed dead refs are not counted).
         """Kill sessions that have been idle longer than MAX_IDLE_TIME.
 
         Only triggers when total sessions exceed ALLOWED_IDLE_SESSIONS.
@@ -124,6 +148,9 @@ class SessionRegistry:
         return cleaned
 
     def _ensure_daemon(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Starts the cleanup daemon thread once (flag-guarded).
+        # KNOWN ISSUE: the flag check is not under the lock, so concurrent first registrations could start two daemons.
         """Start the cleanup daemon thread if not already running."""
         if self._daemon_started:
             return
@@ -133,6 +160,9 @@ class SessionRegistry:
         logger.info("[cleanup] Daemon thread started")
 
     def _daemon_loop(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Infinite loop: sleeps CLEANUP_INTERVAL, runs cleanup_idle (errors logged), then drops entries whose
+        # environment has been garbage-collected.
         """Background loop that periodically cleans idle sessions."""
         while True:
             time.sleep(CLEANUP_INTERVAL)

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for openenv.harbor.qualification: the per-harness/per-provider qualification table,
+# eval-capture evaluation, evidence requirements and harness maturity classification.
 import pytest
 from openenv.harbor.models import HarborRolloutResult
 from openenv.harbor.qualification import evaluate_eval_capture, qualification_rows
@@ -5,12 +8,17 @@ from openenv.harbor.seams import SEAMS
 
 
 def test_all_current_adapters_start_unqualified_for_every_provider():
+    # [FUNCTION DOC]
+    # qualification_rows over all SEAMS yields 29 rows each with "not_run" for all 4 providers.
     rows = qualification_rows(list(SEAMS))
     assert len(rows) == 29
     assert all(row[1:] == ["not_run"] * 4 for row in rows)
 
 
 def test_eval_export_rejection_is_expected_and_zero_reward_is_valid():
+    # [FUNCTION DOC]
+    # An eval/text result with 2 turns and reward 0.0 passes every eval-capture check; with reward None
+    # the "verifier_graded" check fails.
     result = HarborRolloutResult(
         rollout_type="eval", capture_level="text", n_turns=2, reward=0.0
     )
@@ -20,11 +28,16 @@ def test_eval_export_rejection_is_expected_and_zero_reward_is_valid():
 
 
 def test_no_capture_cannot_be_certified_as_success():
+    # [FUNCTION DOC]
+    # A result with no turns fails the "model_calls_captured" check.
     result = HarborRolloutResult(rollout_type="eval", capture_level="text", reward=0.0)
     assert not evaluate_eval_capture(result)["model_calls_captured"]
 
 
 def test_pass_requires_evidence_and_is_not_promoted_to_optimizer():
+    # [FUNCTION DOC]
+    # A passing cell without evidence raises ValueError ("evidence"); with evidence its status is kept;
+    # duplicate cells raise ValueError ("duplicate").
     cell = {
         "harness": "opencode",
         "provider": "vllm",
@@ -42,6 +55,10 @@ def test_pass_requires_evidence_and_is_not_promoted_to_optimizer():
 
 
 def test_optimizer_status_requires_proof_for_current_captures():
+    # [FUNCTION DOC]
+    # optimizer_pass requires optimizer_evidence matching current captures (ValueError "matching,
+    # scoped" otherwise); valid proof keeps the status and its scope appears in qualification_details;
+    # a non-optimizer cell's detail is prefixed "previous captures only:".
     from openenv.harbor.qualification import qualification_details
 
     cell = {
@@ -81,11 +98,17 @@ def test_optimizer_status_requires_proof_for_current_captures():
 
 
 def test_unrecognized_provider_is_not_silently_hidden():
+    # [FUNCTION DOC]
+    # An unknown provider in a report raises ValueError mentioning "provider".
     with pytest.raises(ValueError, match="provider"):
         qualification_rows([], {"cells": [{"harness": "opencode", "provider": "typo"}]})
 
 
 def test_maturity_requires_all_providers_and_current_optimizer():
+    # [FUNCTION DOC]
+    # harness_maturity_rows: all-failed -> "unstable", unmeasured -> "experimental", passes without an
+    # optimizer proof -> "experimental", with a valid optimizer_pass on one provider and all others
+    # passing -> "stable", and any failure drops back to "experimental".
     from openenv.harbor.qualification import harness_maturity_rows, PROVIDERS
 
     cells = [

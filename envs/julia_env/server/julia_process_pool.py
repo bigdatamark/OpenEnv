@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pool of persistent Julia worker processes running julia_repl_worker.jl (in
+# the same directory). Each worker reads code from stdin terminated by an
+# END_CODE line and answers on stdout with delimited sections (START_OUTPUT,
+# START_ERROR, "<<<EXIT_CODE:n>>>", END_EXECUTION). The pool hands out workers
+# thread-safely, restarts unhealthy ones, and shuts down at interpreter exit.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -46,6 +52,9 @@ logger = logging.getLogger("julia_env.pool")
 
 
 class JuliaWorkerProcess:
+    # [CLASS DOC]
+    # One persistent Julia process plus its protocol delimiters, health and busy
+    # flags, and a lock serializing executions.
     """
     Single Julia worker process that can execute code repeatedly.
 
@@ -67,6 +76,9 @@ class JuliaWorkerProcess:
         worker_script: str,
         optimization_flags: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration, initializes flags and lock, and starts the process
+        # immediately. Raises whatever _start_process raises.
         """
         Initialize a Julia worker process.
 
@@ -89,6 +101,13 @@ class JuliaWorkerProcess:
         self._start_process()
 
     def _start_process(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Launches julia (optionally with --compile=min --optimize=2
+        # --startup-file=no --history-file=no) on the worker script with piped,
+        # line-buffered text stdin/stdout/stderr, then blocks reading one stderr line
+        # and requires it to contain "ready". Marks healthy on success.
+        # Raises: RuntimeError if the ready line is wrong; spawn errors (worker marked
+        # unhealthy and the error re-raised).
         """Start the Julia worker process."""
         cmd = [self.julia_path]
 
@@ -130,6 +149,19 @@ class JuliaWorkerProcess:
             raise
 
     def execute(self, code: str, timeout: Optional[int] = None) -> CodeExecResult:
+        # [FUNCTION DOC]
+        # Under the worker lock, writes the code and the END_CODE delimiter to stdin,
+        # then reads stdout in a daemon thread, collecting lines into stdout/stderr
+        # sections and parsing the exit code until END_EXECUTION. Waits up to timeout
+        # (JULIA_EXECUTION_TIMEOUT or 120 when None). On timeout marks the worker
+        # unhealthy, kills it and returns exit -1 with a timeout message. On reader
+        # error/EOF marks unhealthy and returns exit -1 with the error as stderr.
+        # Otherwise returns stdout/stderr joined with newlines (trailing newline when
+        # non-empty) and the parsed exit code.
+        # Raises: RuntimeError if the worker is unhealthy or has no process.
+        # KNOWN ISSUE: the process's real stderr pipe is never drained after startup,
+        # so heavy direct stderr output could fill the pipe and block the worker; on the
+        # error path stdout lines are joined without newlines.
         """
         Execute Julia code in this worker process.
 
@@ -168,6 +200,10 @@ class JuliaWorkerProcess:
                 }
 
                 def read_output():
+                    # [FUNCTION DOC]
+                    # HELPER: Reader thread body. Parses delimited stdout lines into the shared
+                    # result dict (stdout lines, stderr lines, exit code, completed flag) or sets
+                    # its "error" on EOF or exception.
                     """Read output in a separate thread."""
                     stdout_lines = []
                     stderr_lines = []
@@ -269,6 +305,9 @@ class JuliaWorkerProcess:
                 self.is_busy = False
 
     def _kill_process(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Terminates the process (wait 2 s), falling back to kill (wait 1 s);
+        # errors are logged at debug level and swallowed.
         """Kill the worker process."""
         if self.process is not None:
             try:
@@ -287,6 +326,8 @@ class JuliaWorkerProcess:
                     )
 
     def shutdown(self) -> None:
+        # [FUNCTION DOC]
+        # Under the lock, kills the process, clears it and marks the worker unhealthy.
         """Shutdown the worker process gracefully."""
         with self.lock:
             if self.process is not None:
@@ -297,6 +338,9 @@ class JuliaWorkerProcess:
 
 
 class JuliaProcessPool:
+    # [CLASS DOC]
+    # Thread-safe pool of JuliaWorkerProcess objects with a deque of available
+    # workers, a pool lock, a shutdown flag, default timeout and auto-recovery.
     """
     Pool of persistent Julia processes for high-performance code execution.
 
@@ -327,6 +371,12 @@ class JuliaProcessPool:
         optimization_flags: bool = True,
         auto_recover: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Initializes containers first (so shutdown is safe), resolves timeout
+        # (JULIA_EXECUTION_TIMEOUT or 120 when None), finds julia and the worker script,
+        # and starts size workers. On any worker failure shuts down the partial pool and
+        # raises RuntimeError. Registers shutdown with atexit.
+        # Raises: RuntimeError if julia, the worker script, or a worker is unavailable.
         """
         Initialize the Julia process pool.
 
@@ -393,6 +443,10 @@ class JuliaProcessPool:
         atexit.register(self.shutdown)
 
     def _find_julia_executable(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns julia's path from PATH or common install locations
+        # (~/.juliaup/bin, ~/.julia/bin, /usr/local/bin, /usr/bin).
+        # Raises: RuntimeError if none is found.
         """Find Julia executable in PATH or common locations."""
         # Try shutil.which first
         julia_path = shutil.which("julia")
@@ -417,6 +471,9 @@ class JuliaProcessPool:
         )
 
     def _find_worker_script(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the path of julia_repl_worker.jl next to this module.
+        # Raises: RuntimeError if it does not exist.
         """Find the julia_repl_worker.jl script."""
         # Try relative to this file
         this_dir = Path(__file__).parent
@@ -433,6 +490,13 @@ class JuliaProcessPool:
     def _get_available_worker(
         self, timeout: float = 30.0
     ) -> Optional[JuliaWorkerProcess]:
+        # [FUNCTION DOC]
+        # HELPER: Polls (every 0.1 s, up to timeout seconds) for a worker from the
+        # available deque, returning the first healthy one; unhealthy ones are
+        # recovered (if enabled and not shut down) and returned if recovery succeeds,
+        # otherwise dropped from the deque. Returns None on timeout.
+        # KNOWN ISSUE: an unhealthy worker whose recovery fails is not put back in the
+        # available deque, so the pool can shrink permanently.
         """
         Get an available worker from the pool.
 
@@ -467,6 +531,10 @@ class JuliaProcessPool:
         return None
 
     def _recover_worker(self, worker: JuliaWorkerProcess) -> JuliaWorkerProcess:
+        # [FUNCTION DOC]
+        # HELPER: Shuts down the worker and starts a replacement with the same id,
+        # replacing it in the workers list (indexed by worker id). Returns the new
+        # worker, or the original one if restarting failed.
         """
         Attempt to recover an unhealthy worker by restarting it.
 
@@ -495,6 +563,9 @@ class JuliaProcessPool:
             return worker
 
     def _return_worker(self, worker: JuliaWorkerProcess) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Under the pool lock, unless shut down, recovers an unhealthy worker
+        # (if auto_recover) and appends the worker back to the available deque.
         """
         Return a worker to the available pool.
 
@@ -515,6 +586,11 @@ class JuliaProcessPool:
             self.available_workers.append(worker)
 
     def execute(self, code: str, timeout: Optional[int] = None) -> CodeExecResult:
+        # [FUNCTION DOC]
+        # Executes code on an available worker (waiting up to 30 s) with the given or
+        # default timeout and returns its result; the worker is always returned to the
+        # pool. Returns exit -1 results if the pool is shut down or no worker became
+        # available. Propagates RuntimeError from an unhealthy worker.
         """
         Execute Julia code using an available worker from the pool.
 
@@ -555,6 +631,9 @@ class JuliaProcessPool:
             self._return_worker(worker)
 
     def shutdown(self) -> None:
+        # [FUNCTION DOC]
+        # Idempotent: sets the shutdown flag and, under the lock, shuts down every
+        # worker (errors logged) and clears the lists.
         """
         Shutdown all worker processes gracefully.
 
@@ -579,6 +658,9 @@ class JuliaProcessPool:
         logger.info("Julia process pool shutdown complete")
 
     def get_stats(self) -> dict:
+        # [FUNCTION DOC]
+        # Returns a dict with total_workers (configured size), healthy_workers,
+        # available_workers (deque length) and the shutdown flag.
         """Get pool statistics."""
         with self.pool_lock:
             healthy_workers = sum(1 for w in self.workers if w.is_healthy)
@@ -592,13 +674,19 @@ class JuliaProcessPool:
         }
 
     def __enter__(self):
+        # [FUNCTION DOC]
+        # Context manager entry; returns the pool.
         """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # [FUNCTION DOC]
+        # Context manager exit; shuts the pool down. Exceptions are not suppressed.
         """Context manager exit."""
         self.shutdown()
 
     def __del__(self):
+        # [FUNCTION DOC]
+        # Finalizer; calls shutdown.
         """Ensure cleanup on garbage collection."""
         self.shutdown()

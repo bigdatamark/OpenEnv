@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests that BrowserGymEnvironment._create_observation converts array-like
+# and scalar-like values (objects with tolist/item) to plain JSON values and
+# honours include_screenshot. Skipped without gymnasium.
 """Unit tests for BrowserGym observation serialization."""
 
 from __future__ import annotations
@@ -16,16 +20,27 @@ from envs.browsergym_env.server.browsergym_environment import BrowserGymEnvironm
 
 
 class _ArrayLike:
+    # [CLASS DOC]
+    # HELPER: numpy-like object exposing tolist.
     def tolist(self):
+        # [FUNCTION DOC]
+        # Returns a 1x1 red pixel nested list.
         return [[[255, 0, 0]]]
 
 
 class _ScalarLike:
+    # [CLASS DOC]
+    # HELPER: numpy-scalar-like object exposing item.
     def item(self):
+        # [FUNCTION DOC]
+        # Returns 3.5.
         return 3.5
 
 
 def test_create_observation_serializes_array_like_fields() -> None:
+    # [FUNCTION DOC]
+    # With screenshots enabled, screenshot and nested obs/info scalars are
+    # converted; raw obs and info land in metadata.
     env = BrowserGymEnvironment.__new__(BrowserGymEnvironment)
     env.include_screenshot = True
     env._state = BrowserGymState()
@@ -49,6 +64,8 @@ def test_create_observation_serializes_array_like_fields() -> None:
 
 
 def test_create_observation_omits_screenshot_by_default() -> None:
+    # [FUNCTION DOC]
+    # With include_screenshot False, screenshot is None.
     env = BrowserGymEnvironment.__new__(BrowserGymEnvironment)
     env.include_screenshot = False
     env._state = BrowserGymState()

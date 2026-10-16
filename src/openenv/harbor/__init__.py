@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Harbor integration package: runs Harbor tasks (datasets, sandboxes, agents,
+# verifiers) as OpenEnv environments for evaluation and training, adds capture of
+# model traffic, a Gradio UI, rollout/serving helpers and qualification tooling.
+# Contains no code itself; Harbor is an optional dependency imported lazily by submodules.
 """Harbor integration: run Harbor tasks as OpenEnv environments, for eval and training.
 
 Harbor owns what it is good at — task datasets, sandbox backends, coding agents, verifiers, trial

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Severity policy: loads the packaged versioned JSON policy (policies/severity-<v>.json)
+# mapping each check id to level, lane and severity plus declaration bounds, and turns
+# a run's check results into a single Verdict.
 """Severity policy: the only place a check acquires a severity.
 
 The policy is a versioned data artifact (`policies/severity-v1.json`), independent of
@@ -15,10 +19,14 @@ from .types import CheckStatus, Lane, Level, Severity, Verdict
 
 
 class PolicyError(Exception):
+    # [CLASS DOC]
+    # Internal policy error (unknown check id or missing policy version); maps to CLI exit code 3.
     """Internal policy error (unknown check id, missing policy file). CLI exit code 3."""
 
 
 class PolicyEntry(BaseModel):
+    # [CLASS DOC]
+    # One policy row: check_id, level, lane and severity.
     """One check id's lane and severity under this policy version."""
 
     model_config = ConfigDict(extra="forbid")
@@ -30,6 +38,9 @@ class PolicyEntry(BaseModel):
 
 
 class DeclarationBounds(BaseModel):
+    # [CLASS DOC]
+    # Maximum oracle/variance tolerances and episode timeout, and minimum floor margin, that
+    # authors may declare.
     """
     Ceilings on author-declared manifest values.
 
@@ -46,6 +57,8 @@ class DeclarationBounds(BaseModel):
 
 
 class SeverityPolicy(BaseModel):
+    # [CLASS DOC]
+    # Parsed policy: version string, entries and declaration bounds.
     """A versioned severity policy: every known check id, exactly one lane each."""
 
     model_config = ConfigDict(extra="forbid")
@@ -56,12 +69,17 @@ class SeverityPolicy(BaseModel):
 
     @model_validator(mode="after")
     def _unique_check_ids(self) -> "SeverityPolicy":
+        # [FUNCTION DOC]
+        # HELPER: validator rejecting duplicate check ids (ValueError).
         ids = [entry.check_id for entry in self.entries]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate check ids in policy")
         return self
 
     def entries_for_lane(self, lane: Lane) -> dict[str, PolicyEntry]:
+        # [FUNCTION DOC]
+        # Returns a mapping check_id -> entry: only LOCAL-lane entries for the local lane,
+        # all entries for any other lane.
         """
         Return the applicable entries keyed by check id.
 
@@ -84,6 +102,10 @@ class SeverityPolicy(BaseModel):
 
 
 def load_policy(version: str = "v1") -> SeverityPolicy:
+    # [FUNCTION DOC]
+    # Reads policies/severity-<version>.json from the openenv.validation package resources
+    # and validates it. Raises PolicyError if the file cannot be read; JSON/validation
+    # errors propagate. Returns SeverityPolicy.
     """
     Load a committed severity policy by version.
 
@@ -107,6 +129,11 @@ def load_policy(version: str = "v1") -> SeverityPolicy:
 def apply_policy(
     results: list[CheckResult], policy: SeverityPolicy, lane: Lane
 ) -> Verdict:
+    # [FUNCTION DOC]
+    # Looks up every result in the lane's entries first (PolicyError for any unknown id).
+    # Then: any ERROR status -> FAIL; a FAIL status with policy severity FAIL -> FAIL;
+    # a FAIL with any other severity, or any SKIP, downgrades to WARN; otherwise PASS.
+    # Returns the Verdict.
     """
     Map check results to the run verdict. The only severity-assigning code path.
 

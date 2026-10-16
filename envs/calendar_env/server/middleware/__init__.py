@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Middleware package; re-exports get_user_context from the auth module as its only public name.
 """
 Middleware package
 """

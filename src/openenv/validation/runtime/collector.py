@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Collects bounded raw protocol evidence from a running OpenEnv server in a single orchestration
+# session: fetches GET /schema over HTTP, then opens one WebSocket at /ws and performs reset,
+# state, and step/state pairs per the runtime plan, recording every raw request/response as
+# WireExchange records. Message size is capped at 1 MiB and total trace size at 8 MiB.
+
 """Bounded raw protocol collection in one OpenEnv orchestration session."""
 
 import json
@@ -17,12 +23,23 @@ MAX_TRACE_BYTES = 8 * 1024 * 1024
 
 
 def _bounded_call(connection, operation, timeout_s):
+    # [FUNCTION DOC]
+    # HELPER: Runs a blocking operation on a websocket connection with a wall-clock deadline.
+    # Starts a daemon timer that, on expiry, marks the call expired and aborts the connection's socket.
+    # Inputs: connection (sync websocket connection), operation (zero-argument callable), timeout_s (float).
+    # Returns None.
+    # Raises: TimeoutError("episode deadline exceeded") if timeout_s <= 0; TimeoutError("transport
+    # deadline exceeded") if the operation failed after expiry or the deadline passed/expired after it
+    # completed (socket is aborted in that case); KeyboardInterrupt re-raised after aborting the socket;
+    # other exceptions re-raised unchanged. The timer is always cancelled and joined.
     if timeout_s <= 0:
         raise TimeoutError("episode deadline exceeded")
     expired = threading.Event()
     deadline = time.monotonic() + timeout_s
 
     def abort():
+        # [FUNCTION DOC]
+        # HELPER: Timer callback: sets the expired flag and aborts the connection's socket.
         expired.set()
         abort_socket(connection.socket)
 
@@ -47,9 +64,14 @@ def _bounded_call(connection, operation, timeout_s):
 
 
 class RuntimeCollectionInterrupted(KeyboardInterrupt):
+    # [CLASS DOC]
+    # Raised when collection is cancelled by KeyboardInterrupt; subclasses KeyboardInterrupt and
+    # carries the partial evidence collected so far.
     """Cancellation carrying the completed, immutable episode prefix."""
 
     def __init__(self, evidence: RuntimeEvidence):
+        # [FUNCTION DOC]
+        # Stores the given RuntimeEvidence on the evidence attribute with a fixed message.
         super().__init__("runtime collection interrupted")
         self.evidence = evidence
 
@@ -61,6 +83,22 @@ def collect_runtime_evidence(
     episode_timeout_s: float,
     request_timeout_s: float | None = None,
 ) -> RuntimeEvidence:
+    # [FUNCTION DOC]
+    # Performs the full collection and returns a RuntimeEvidence.
+    # Steps: (1) GET <base_url>/schema with trust_env off, no redirects, identity encoding; rejects
+    # non-identity Content-Encoding and bodies over 1 MiB; requires a dict with "observation";
+    # stores compact JSON of observation and optional reset_observation schemas. (2) Builds ws/wss URL
+    # <base path>/ws and connects with no proxy, max size 1 MiB, no compression. (3) Sends reset with
+    # plan reset options plus seed and episode_id, then state; for each plan action, stops early if the
+    # last observation had done true, else sends step then state. (4) On success, best-effort sends a
+    # close message, then closes the connection (aborting the socket if closing fails).
+    # Inputs: base_url, plan (RuntimePlan), episode_timeout_s (overall deadline), request_timeout_s
+    # (optional per-operation cap).
+    # Returns: RuntimeEvidence with exchanges and schemas; on any Exception, returns evidence with the
+    # completed prefix, failure_phase (schema/connect/reset/step/state) and failure_reason
+    # "<phase> failed (<protocol error code or exception type name>)" (never exception text).
+    # Raises: RuntimeCollectionInterrupted (with partial evidence) on KeyboardInterrupt.
+    # Side effects: network I/O, background timer threads.
     """
     Preserve schema and reset/step/state responses without model coercion.
 
@@ -90,6 +128,9 @@ def collect_runtime_evidence(
     server_code = None
 
     def remaining() -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns seconds remaining until the episode deadline, capped by request_timeout_s if
+        # given; raises TimeoutError("episode deadline exceeded") when none remain.
         value = deadline - time.monotonic()
         if request_timeout_s is not None:
             value = min(request_timeout_s, value)
@@ -166,6 +207,13 @@ def collect_runtime_evidence(
         try:
 
             def exchange(operation: str, data: dict | None = None) -> dict:
+                # [FUNCTION DOC]
+                # HELPER: Sends one protocol message of the given type (with optional data) over the websocket and
+                # receives the response, both under the deadline. Sets the current phase, accumulates trace bytes
+                # (raises ValueError past 8 MiB), and appends a WireExchange before parsing.
+                # Returns the response "data" dict. Raises ValueError for binary frames, error envelopes (recording
+                # the error code into server_code only if it is a known WSErrorCode value), or envelopes whose type
+                # is not "state" (for state) / "observation" (otherwise) or whose data is not a dict.
                 nonlocal phase, trace_bytes, server_code
                 phase = operation
                 request = {"type": operation}

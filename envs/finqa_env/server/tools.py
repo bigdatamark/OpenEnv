@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Implements the agent-facing tools of the FinQA environment over a local data
+# directory of per-company financial tables (JSON files) plus a combined metadata
+# file. Tools: list a company's tables, describe a table, run a filtered SQL query
+# against one table (loaded into an in-memory SQLite DB via pandas), and submit a
+# final answer. All tool results are strings; errors are returned as strings
+# starting with "Error" rather than raised.
 # envs/finqa_env/server/tools.py
 """
 Tool implementations for the FinQA environment.
@@ -17,6 +24,10 @@ import pandas as pd
 
 
 class FinQATools:
+    # [CLASS DOC]
+    # Stateless-ish tool executor bound to a data directory. Holds the data path,
+    # the "input_companies" subdirectory path, and a lazily loaded cache of the
+    # cleaned table metadata.
     """
     Tool implementations for financial QA tasks.
 
@@ -25,12 +36,19 @@ class FinQATools:
     """
 
     def __init__(self, data_path: str):
+        # [FUNCTION DOC]
+        # Stores data_path, derives companies_path = data_path/input_companies, and
+        # initializes the metadata cache to None. No I/O.
         self.data_path = data_path
         self.companies_path = os.path.join(data_path, "input_companies")
         self._tables_cleaned = None
 
     @property
     def tables_cleaned(self) -> Dict:
+        # [FUNCTION DOC]
+        # Property. On first access reads input_companies/tables_cleaned_all_companies.json
+        # into a dict (keys "company/table") and caches it; returns the cached dict.
+        # Raises: FileNotFoundError / JSON errors if the file is missing or malformed.
         """Lazy load the cleaned tables metadata."""
         if self._tables_cleaned is None:
             tables_path = os.path.join(
@@ -41,6 +59,9 @@ class FinQATools:
         return self._tables_cleaned
 
     def get_available_companies(self) -> List[str]:
+        # [FUNCTION DOC]
+        # Returns the names of all subdirectories of companies_path (one per company).
+        # Raises OSError if companies_path does not exist.
         """Get list of available company names."""
         return [
             d
@@ -49,6 +70,12 @@ class FinQATools:
         ]
 
     def _resolve_within(self, *parts: str) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Joins the given path components under companies_path, resolves symlinks
+        # and "..", and returns the absolute path only if it lies strictly inside
+        # companies_path (equal to the root is rejected). Returns None on escape or when
+        # paths cannot be compared (ValueError). Guards against path traversal from
+        # agent-supplied names.
         """
         Join agent-supplied path components under ``companies_path`` and confirm the
         result stays inside it.
@@ -79,6 +106,12 @@ class FinQATools:
     def execute_tool(
         self, tool_name: str, tool_args: Dict[str, Any]
     ) -> Tuple[str, bool]:
+        # [FUNCTION DOC]
+        # Dispatches a tool call by name: get_descriptions, get_table_info, sql_query
+        # (all returning (result, False)) and submit_answer (returning (result, True)).
+        # Unknown names return an error string with False. tool_args are passed as
+        # keyword arguments, so unexpected/missing keys raise TypeError.
+        # Returns: tuple (result string, is_final_answer flag).
         """
         Execute a tool and return its result.
 
@@ -101,6 +134,11 @@ class FinQATools:
             return f"Error: Unknown tool '{tool_name}'", False
 
     def get_descriptions(self, company_name: str) -> str:
+        # [FUNCTION DOC]
+        # Lists the table names (JSON filenames without the ".json" suffix) in the
+        # company's directory, returned as a JSON array string. If the company directory
+        # is missing or escapes the root, returns an error string listing available
+        # companies.
         """
         Get a list of available table names for a company.
 
@@ -127,6 +165,16 @@ class FinQATools:
         return json.dumps(tables)
 
     def get_table_info(self, company_name: str, table_name: str) -> str:
+        # [FUNCTION DOC]
+        # Returns a single-line JSON string of a table's metadata from the cached
+        # metadata, keyed "company/table" (".json"/".txt" stripped from the table name).
+        # Adds "column_dtypes" (column -> pandas dtype string) and
+        # "unique_vals_per_col" (unique values for columns that are not all-numeric,
+        # judged by stripping non-alphanumerics from all rows except the first; the
+        # first column is always kept), and removes the raw "table" field.
+        # Returns error strings for an unknown company or table.
+        # KNOWN ISSUE: unique values are put through json.dumps without conversion, so
+        # non-JSON-native values (e.g. numpy scalars) would raise TypeError.
         """
         Get table metadata: description, columns, types, unique values.
 
@@ -185,6 +233,15 @@ class FinQATools:
         return json.dumps(table_info, indent=0).replace("\n", "")
 
     def sql_query(self, company_name: str, table_name: str, query: str) -> str:
+        # [FUNCTION DOC]
+        # Runs an agent SQL query against one company table. Rejects queries containing
+        # "select *" (case-insensitive) and queries lacking any filter keyword (WHERE,
+        # HAVING, IN, LIKE, BETWEEN, CASE, etc.; matched as whole words after
+        # normalizing whitespace). Resolves the table file safely, loads it with pandas
+        # into a fresh in-memory SQLite DB under the cleaned table name, executes the
+        # query, and returns the result as a JSON records string.
+        # Returns error strings for rejected queries, missing tables, or any execution
+        # exception (the connection is not closed when the query fails).
         """
         Execute a SQL query on a table. Select * not allowed (too inefficient).
 
@@ -257,6 +314,9 @@ class FinQATools:
             return f"Error executing query: {str(e)}"
 
     def submit_answer(self, answer: str) -> str:
+        # [FUNCTION DOC]
+        # Returns the confirmation string "Answer submitted: <answer>". Grading happens
+        # elsewhere.
         """
         Submit a final answer for the question.
 

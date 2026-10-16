@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Demonstration script that prints example code and explanations for using the OpenApp client
+# (connection options, action types, observation fields, workflows, tasks, visualization). It does
+# not connect to anything. At import time it prepends a directory to sys.path and imports the
+# package client and action classes.
+# KNOWN ISSUE: the inserted path is four levels above this file (the parent of the repo root), so
+# the "envs.openapp_env" import only works if the repo root is already importable.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,6 +48,8 @@ from envs.openapp_env import OpenAppAction, OpenAppEnv
 
 
 def example_basic_usage():
+    # [FUNCTION DOC]
+    # Prints the two ways of creating a client (base URL or docker image). Side effect: stdout only.
     """Basic usage example."""
     print("=" * 60)
     print("OpenApp Environment - Basic Usage Example")
@@ -58,6 +67,8 @@ def example_basic_usage():
 
 
 def example_actions():
+    # [FUNCTION DOC]
+    # Prints example action constructions for goto, click, fill, select_option, scroll and noop.
     """Example of different action types."""
     print("\nExample Actions")
     print("-" * 60)
@@ -111,6 +122,8 @@ def example_actions():
 
 
 def example_observations():
+    # [FUNCTION DOC]
+    # Prints the list of observation fields available on step results.
     """Example of observation structure."""
     print("\n\nObservation Structure")
     print("-" * 60)
@@ -129,6 +142,8 @@ def example_observations():
 
 
 def example_complete_workflow():
+    # [FUNCTION DOC]
+    # Prints a full client workflow example as a code string (docker start, reset, several steps, close).
     """Complete workflow example."""
     print("\n\nComplete Workflow Example")
     print("=" * 60)
@@ -189,6 +204,8 @@ finally:
 
 
 def example_with_tasks():
+    # [FUNCTION DOC]
+    # Prints an example of configuring the server environment with a task name and running an agent loop.
     """Example using OpenApps tasks."""
     print("\n\nUsing Tasks (Task-Based RL)")
     print("=" * 60)
@@ -225,6 +242,8 @@ env.close()
 
 
 def example_visualization():
+    # [FUNCTION DOC]
+    # Prints ways to watch the browser (non-headless mode, OpenApps web URLs, example script flag).
     """Example of visualization options."""
     print("\n\nVisualization Options")
     print("=" * 60)
@@ -257,6 +276,8 @@ obs = env.reset()
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs all example printers in sequence and prints pointers to further docs.
     """Run all examples."""
     example_basic_usage()
     example_actions()

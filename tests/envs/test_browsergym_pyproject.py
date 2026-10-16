@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Packaging regression test for the BrowserGym environment's pyproject.
 """Regression tests for BrowserGym packaging constraints."""
 
 from __future__ import annotations
@@ -7,6 +9,9 @@ from pathlib import Path
 
 
 def test_browsergym_default_dependencies_match_miniwob_runtime() -> None:
+    # [FUNCTION DOC]
+    # Reads envs/browsergym_env/pyproject.toml and asserts pinned browsergym-core,
+    # browsergym-miniwob 0.14.3 and playwright 1.44.0, and no browsergym-webarena.
     """Default installs should avoid the known WebArena/playwright resolver conflict."""
     pyproject_path = (
         Path(__file__).resolve().parents[2]

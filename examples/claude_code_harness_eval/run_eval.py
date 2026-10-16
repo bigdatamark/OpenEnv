@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# CLI evaluation of Claude Code on tau2-bench tasks via Tau2Harness: each task gets a fresh Tau2Environment and Claude
+# Code process; the simulated customer's messages are fed as harness steps until the conversation ends, and the
+# tau2-bench reward is reported. Prints per-task PASS/FAIL/ERROR and a pass^1 score over tasks that did not error.
+# Side effects: spawns Claude Code subprocesses, temp directories, LLM calls, stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Evaluate Claude Code on τ²-bench tasks through `HarnessEnvironment`.
@@ -27,6 +32,11 @@ from tau2_harness import Tau2Harness
 
 
 def run_task(task_id: str, args: argparse.Namespace) -> Optional[float]:
+    # [FUNCTION DOC]
+    # Runs one task: builds a HarnessConfig (CLI path, temp working dir, model, per-turn timeout), a Tau2Environment
+    # (domain, split, customer model) and a Tau2Harness; resets and steps with each customer message until done, printing
+    # customer messages, tool calls and agent replies; always closes the harness.
+    # Returns: the observation reward, or None if the final observation carries an error_type.
     """Play one task. Returns its reward, or `None` if Claude Code failed."""
     config = HarnessConfig(
         name="claude-code",
@@ -67,6 +77,9 @@ def run_task(task_id: str, args: argparse.Namespace) -> Optional[float]:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry: parses domain, split, task count or explicit task ids, Claude model, customer model, CLI path and turn
+    # timeout; runs each task (default: first N task ids of the split), prints statuses (reward >= 1.0 is PASS) and pass^1.
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--domain", default="airline", help="τ²-bench domain")
     parser.add_argument("--split", default="test")

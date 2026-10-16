@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Inference example that asks an OpenAI-compatible model on the Hugging Face router to write Python code for a fixed
+# task (print the sum of squares 1..100 as "Result: 338350"), executes it in a Docker-launched CodingEnv, and feeds the
+# execution output back until solved or MAX_STEPS is reached. Side effects: Docker container, network calls, stdout.
 """Solve a coding task with a hosted LLM via Hugging Face Inference.
 
 This script mirrors ``textarena_wordle_inference.py`` but targets the Coding
@@ -70,6 +74,8 @@ SYSTEM_PROMPT = (
 
 
 def extract_python_code(text: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the stripped body of the first fenced code block (optionally tagged python, case-insensitive), or the whole stripped text if there is none.
     """Extract the first Python code block from the model output."""
 
     code_blocks = re.findall(
@@ -88,6 +94,8 @@ def format_feedback(
     stderr: str,
     exit_code: int,
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats execution feedback text with step number, exit code, stdout and stderr ("<empty>" when blank) and a request to improve the script.
     """Generate feedback text describing the previous execution."""
 
     stdout_display = stdout if stdout.strip() else "<empty>"
@@ -102,6 +110,8 @@ def format_feedback(
 
 
 def build_initial_prompt(task: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the first user prompt describing the task and asking for a single python code block.
     """Construct the first user prompt for the coding task."""
 
     return (
@@ -121,6 +131,12 @@ def solve_coding_task(
     env: CodingEnv,
     client: OpenAI,
 ) -> Tuple[bool, List[str]]:
+    # [FUNCTION DOC]
+    # Runs the solve loop: resets the env, then each step queries the model (2048 tokens, temperature 0.2), extracts and
+    # executes the code, records a transcript entry, and returns success if exit code is 0 and stdout contains the expected
+    # line; otherwise appends feedback, keeping at most 20 messages (system message plus the latest 19).
+    # Returns: tuple of (solved flag, list of transcript strings).
+    # KNOWN ISSUE: fails with AttributeError if the model returns no content (None has no strip).
     """Iteratively ask the model for code until the task is solved."""
 
     history = [
@@ -194,6 +210,9 @@ def solve_coding_task(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: requires API_KEY or HF_TOKEN (SystemExit otherwise), creates the client and a CodingEnv from the
+    # coding-env:latest image (port 8000), runs the solve loop, always closes the env, and prints the outcome and transcripts.
     if not API_KEY:
         raise SystemExit(
             "HF_TOKEN (or API_KEY) must be set to query the model."

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket client for the kernrl environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -49,6 +51,8 @@ except ImportError:
 
 
 class kernrl_env(EnvClient[KernelAction, KernelObservation, KernelState]):
+    # [CLASS DOC]
+    # EnvClient specialization for kernrl implementing the serialization hooks.
     """
     Client for the kernrl GPU kernel optimization environment.
 
@@ -82,6 +86,8 @@ class kernrl_env(EnvClient[KernelAction, KernelObservation, KernelState]):
     """
 
     def _step_payload(self, action: KernelAction) -> Dict:
+        # [FUNCTION DOC]
+        # Builds the step payload with the single key "code".
         """
         Convert KernelAction to JSON payload for step request.
 
@@ -96,6 +102,12 @@ class kernrl_env(EnvClient[KernelAction, KernelObservation, KernelState]):
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[KernelObservation]:
+        # [FUNCTION DOC]
+        # Builds a KernelObservation from the nested "observation" dict (defaults: empty
+        # strings, turn 0, max_turns 10, compilation_success False, optional fields
+        # None) with top-level done/reward; metadata from top level, falling back to the
+        # observation's, then {}. Returns a StepResult with reward, done and top-level
+        # metadata.
         """
         Parse server response into StepResult[KernelObservation].
 
@@ -132,6 +144,9 @@ class kernrl_env(EnvClient[KernelAction, KernelObservation, KernelState]):
         )
 
     def _parse_state(self, payload: Dict) -> KernelState:
+        # [FUNCTION DOC]
+        # Builds a KernelState from episode_id, step_count, problem_id, turn,
+        # max_turns (default 10), best_speedup (default 0.0) and solved.
         """
         Parse server response into KernelState object.
 

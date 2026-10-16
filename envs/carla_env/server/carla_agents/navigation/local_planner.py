@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Vendored CARLA LocalPlanner: follows a queue of (waypoint, RoadOption) pairs with a
+# VehiclePIDController, generating random waypoints ahead when no global plan stops it. Also
+# defines the RoadOption enum and helpers classifying branch directions.
 # Copyright (c) 2018-2020 CVC.
 #
 # This work is licensed under the terms of the MIT license.
@@ -16,6 +20,9 @@ from carla_env.server.carla_agents.tools.misc import draw_waypoints, get_speed
 
 
 class RoadOption(IntEnum):
+    # [CLASS DOC]
+    # Integer enum of topological moves: VOID, LEFT, RIGHT, STRAIGHT, LANEFOLLOW, CHANGELANELEFT,
+    # CHANGELANERIGHT.
     """
     RoadOption represents the possible topological configurations when moving from a segment of lane to other.
 
@@ -31,6 +38,9 @@ class RoadOption(IntEnum):
 
 
 class LocalPlanner(object):
+    # [CLASS DOC]
+    # Waypoint follower. Holds a bounded deque (10000) of planned waypoints, the current target
+    # waypoint/option, PID parameters, speed (km/h) and the speed-limit following flag.
     """
     LocalPlanner implements the basic behavior of following a
     trajectory of waypoints that is generated on-the-fly.
@@ -43,6 +53,10 @@ class LocalPlanner(object):
     """
 
     def __init__(self, vehicle, opt_dict=None, map_inst=None):
+        # [FUNCTION DOC]
+        # Configures defaults (dt 0.05, 20 km/h, 2 m sampling, PID gains, throttle/brake/steer limits,
+        # min-distance parameters) overridden by opt_dict keys, resolves the map (invalid map_inst ignored
+        # with a printed warning) and initializes the controller and first waypoint.
         """
         :param vehicle: actor to apply to local planner logic onto
         :param opt_dict: dictionary of arguments with different parameters:
@@ -128,10 +142,15 @@ class LocalPlanner(object):
         self._init_controller()
 
     def reset_vehicle(self):
+        # [FUNCTION DOC]
+        # Clears the vehicle reference (sets it to None).
         """Reset the ego-vehicle"""
         self._vehicle = None
 
     def _init_controller(self):
+        # [FUNCTION DOC]
+        # HELPER: Builds the VehiclePIDController and seeds the queue with the vehicle's current waypoint
+        # as LANEFOLLOW.
         """Controller initialization"""
         self._vehicle_controller = VehiclePIDController(
             self._vehicle,
@@ -152,6 +171,9 @@ class LocalPlanner(object):
         self._waypoints_queue.append((self.target_waypoint, self.target_road_option))
 
     def set_speed(self, speed):
+        # [FUNCTION DOC]
+        # Sets the target speed (km/h); prints a warning if speed-limit following is active (which will
+        # override it in run_step).
         """
         Changes the target speed
 
@@ -166,6 +188,8 @@ class LocalPlanner(object):
         self._target_speed = speed
 
     def follow_speed_limits(self, value=True):
+        # [FUNCTION DOC]
+        # Enables/disables using the vehicle speed limit as target speed.
         """
         Activates a flag that makes the max speed dynamically vary according to the spped limits
 
@@ -175,6 +199,11 @@ class LocalPlanner(object):
         self._follow_speed_limits = value
 
     def _compute_next_waypoints(self, k=1):
+        # [FUNCTION DOC]
+        # HELPER: Appends up to k waypoints (bounded by free queue space) by stepping sampling_radius from
+        # the last one; at forks picks a random branch option. Stops early at dead ends.
+        # KNOWN ISSUE: when several branches share the same RoadOption, only the first such branch can ever
+        # be chosen.
         """
         Add new waypoints to the trajectory queue.
 
@@ -206,6 +235,9 @@ class LocalPlanner(object):
     def set_global_plan(
         self, current_plan, stop_waypoint_creation=True, clean_queue=True
     ):
+        # [FUNCTION DOC]
+        # Optionally clears the queue, grows the deque if the combined plan exceeds its capacity, appends
+        # the plan and sets whether random waypoint creation stops.
         """
         Adds a new plan to the local planner. A plan must be a list of [carla.Waypoint, RoadOption] pairs
         The 'clean_queue` parameter erases the previous plan if True, otherwise, it adds it to the old one
@@ -233,10 +265,17 @@ class LocalPlanner(object):
         self._stop_waypoint_creation = stop_waypoint_creation
 
     def set_offset(self, offset):
+        # [FUNCTION DOC]
+        # Sets the lateral offset on the PID controller.
         """Sets an offset for the vehicle"""
         self._vehicle_controller.set_offset(offset)
 
     def run_step(self, debug=False):
+        # [FUNCTION DOC]
+        # Optionally adopts the speed limit, tops up random waypoints when allowed, pops waypoints closer
+        # than base_min_distance + ratio * speed (m/s) (the last only within 1 m), then returns PID control
+        # toward the first queued waypoint, or full brake if the queue is empty. With debug, draws the
+        # target waypoint. Returns a carla.VehicleControl.
         """
         Execute one step of local planning which involves running the longitudinal and lateral PID controllers to
         follow the waypoints trajectory.
@@ -297,6 +336,9 @@ class LocalPlanner(object):
         return control
 
     def get_incoming_waypoint_and_direction(self, steps=3):
+        # [FUNCTION DOC]
+        # Returns the (waypoint, option) steps ahead in the queue, the last entry if fewer, or
+        # (None, VOID) if the queue is empty.
         """
         Returns direction and waypoint at a distance ahead defined by the user.
 
@@ -313,10 +355,14 @@ class LocalPlanner(object):
                 return None, RoadOption.VOID
 
     def get_plan(self):
+        # [FUNCTION DOC]
+        # Returns the live waypoint queue.
         """Returns the current plan of the local planner"""
         return self._waypoints_queue
 
     def done(self):
+        # [FUNCTION DOC]
+        # True when the waypoint queue is empty.
         """
         Returns whether or not the planner has finished
 
@@ -326,6 +372,9 @@ class LocalPlanner(object):
 
 
 def _retrieve_options(list_waypoints, current_waypoint):
+    # [FUNCTION DOC]
+    # HELPER: For each candidate waypoint, classifies the connection from the current waypoint to the
+    # point 3 m beyond the candidate. Returns the list of RoadOptions.
     """
     Compute the type of connection between the current active waypoint and the multiple waypoints present in
     list_waypoints. The result is encoded as a list of RoadOption enums.
@@ -348,6 +397,9 @@ def _retrieve_options(list_waypoints, current_waypoint):
 
 
 def _compute_connection(current_waypoint, next_waypoint, threshold=35):
+    # [FUNCTION DOC]
+    # HELPER: Compares yaw angles modulo 180: within threshold (35 deg) of 0/180 -> STRAIGHT, above 90
+    # -> LEFT, else RIGHT.
     """
     Compute the type of topological connection between an active waypoint (current_waypoint) and a target waypoint
     (next_waypoint).

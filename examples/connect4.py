@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example playing a random Connect 4 game against a Connect4 environment server at localhost:8000 and optionally
+# animating the recorded boards with matplotlib. Side effects: appends repo src to sys.path, network calls, opens a plot window.
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
@@ -11,6 +14,11 @@ from connect4_env import Connect4Action, Connect4Env
 
 
 def render_connect4_board(board, ax, player_colors={1: "red", 2: "yellow", -1: "yellow"}, show=True):
+    # [FUNCTION DOC]
+    # Draws a Connect 4 board on the given axes: a blue background with one circle per cell, red for value 1, the player-2
+    # color for values 2 or -1, white otherwise; row 0 is drawn at the top. Accepts an object with a board attribute or any
+    # array-like. Calls tight_layout; if show is true displays the figure and returns None, else returns the axes.
+    # KNOWN ISSUE: the docstring says the figure and axis are returned when show is false, but only the axis is returned.
     """
     Render a Connect 4 board using matplotlib.
 
@@ -69,6 +77,9 @@ def render_connect4_board(board, ax, player_colors={1: "red", 2: "yellow", -1: "
     
 
 def main(render=True):
+    # [FUNCTION DOC]
+    # Connects to the server, resets, plays up to 100 random legal moves recording 6x7 board frames, rewards and step
+    # numbers, and if render is true shows a non-blitting animation of the frames. Always closes the env.
     print("Connecting to Connect4 environment...")
     env = Connect4Env(base_url="http://localhost:8000")
 
@@ -107,6 +118,8 @@ def main(render=True):
             fig, ax = plt.subplots(figsize=(7, 6))
             
             def animate_frame(i):
+                # [FUNCTION DOC]
+                # HELPER: Animation callback: redraws frame i with a title showing step, reward and cumulative reward; returns the axes patches.
                 ax.clear()
                 # Use the render function but don't show immediately
                 render_connect4_board(frames[i], ax=ax, show=False)

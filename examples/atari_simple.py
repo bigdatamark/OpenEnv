@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Minimal example running a random-action Atari episode. Starts the Atari env from a Docker image, resets, takes up to
+# 100 random legal actions printing progress every 10 steps, prints total reward and the environment state, then closes.
+# Side effects: prepends the repo src directory to sys.path, launches a Docker container, prints to stdout.
 """
 Simple example demonstrating Atari Environment usage.
 
@@ -30,6 +34,9 @@ from atari_env import AtariEnv, AtariAction
 # print(envs.__path__)
 
 async def main():
+    # [FUNCTION DOC]
+    # Executes the episode described in the module doc and always closes the environment (stopping the container) at the end.
+    # KNOWN ISSUE: the progress print formats result.reward with a float format, which fails if reward is None.
     """Run a simple Atari episode."""
     # Connect to the Atari environment server
     print("Connecting to Atari environment...")

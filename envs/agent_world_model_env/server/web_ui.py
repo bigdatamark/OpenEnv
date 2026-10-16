@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Custom Gradio "Web Console" for the AWM environment, mounted at /web by app.py. Provides a setup panel (scenario,
+# task index, verifier mode, LLM config, reward config JSON, reset), a Human mode tab (list tools/scenarios, call a
+# tool with JSON args, verify, done, download trajectory), an Agent mode tab (runs AwmAgent with streaming log), a
+# Trajectory tab (table from the web manager's action logs) and an optional README tab. All environment interaction
+# goes through openenv's WebInterfaceManager.
 """
 Custom Gradio UI for the AWM environment.
 """
@@ -27,6 +33,10 @@ _DEFAULT_REWARD_JSON = json.dumps(
 
 
 def _format_obs_md(payload: dict | None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Renders a step/reset result (or bare observation) as Markdown: reward, done, selected observation fields,
+    # tool_result and verify_result as code blocks truncated to 2000 chars, and trajectory_path. Returns a placeholder
+    # string when the payload is empty or yields no lines.
     if not payload:
         return "*No observation yet.*"
     obs = payload.get("observation") if isinstance(payload, dict) else None
@@ -76,6 +86,10 @@ def _format_obs_md(payload: dict | None) -> str:
 
 
 def _make_args_template(input_schema: dict | None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds a pretty-printed JSON object template from a JSON-schema's properties, using a type-appropriate
+    # empty value per property ("" for string/missing type, 0, 0.0, false, [], {}; null for unknown types).
+    # Returns "{}" for missing/non-dict schemas.
     if not input_schema or not isinstance(input_schema, dict):
         return "{}"
     props = input_schema.get("properties") or {}
@@ -101,6 +115,12 @@ def build_awm_gradio_app(
     title: str = "AWM Environment",
     quick_start_md: str | None = None,
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Builds and returns the gr.Blocks console. Inputs: the WebInterfaceManager, optional metadata (its readme_content
+    # becomes a README tab), and title; action_fields, is_chat_env and quick_start_md are accepted but unused.
+    # Creates its own AWMDataLoader for the scenario dropdown. Detects whether the manager's reset_environment accepts
+    # reset kwargs; if not, resets the env directly (see _safe_reset). Wires all buttons to the nested handlers below.
+    # KNOWN ISSUE: uses a second AWMDataLoader instance rather than the app's shared one, duplicating cached data in memory.
     data_loader = AWMDataLoader(cache_dir=os.environ.get("AWM_DATA_DIR"))
 
     readme_md = ""
@@ -125,6 +145,12 @@ def build_awm_gradio_app(
     )
 
     async def _safe_reset(reset_kwargs: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Resets the environment with the given kwargs. Uses the manager's reset_environment(kwargs) when supported;
+        # otherwise calls env.reset in a thread executor with only the kwargs the reset signature accepts, serializes the
+        # observation, updates the manager's episode state (episode id, step count 0, current observation, cleared logs,
+        # is_reset) and tries to broadcast a state update (errors ignored). Returns the serialized result dict.
+        # Side effects: mutates manager/env state; relies on the manager's private _send_state_update.
         if _reset_env_supports_kwargs:
             return await web_manager.reset_environment(reset_kwargs)
 
@@ -158,6 +184,11 @@ def build_awm_gradio_app(
         llm_model: str,
         reward_config_json: str,
     ):
+        # [FUNCTION DOC]
+        # HELPER: Reset button handler. Validates scenario, builds reset kwargs (scenario, int task_idx, optional LLM
+        # settings, reward_config parsed from JSON), resets, and on success lists tools. Returns a 6-tuple: status text, task
+        # Markdown, observation Markdown, raw JSON, tool dropdown update, and a JSON string mapping tool name to its metadata.
+        # Errors (no scenario, bad JSON, reset exception) produce failure values instead of raising.
         if not scenario:
             return (
                 "❌ Pick a scenario first.",
@@ -247,6 +278,9 @@ def build_awm_gradio_app(
         )
 
     async def _refresh_scenarios():
+        # [FUNCTION DOC]
+        # HELPER: Loads scenario names from the data loader (sorted) and returns a dropdown update plus a status message;
+        # on failure returns empty choices and an error message.
         try:
             scens = data_loader.list_scenarios()
             names = sorted(s["name"] for s in scens)
@@ -258,6 +292,9 @@ def build_awm_gradio_app(
             return gr.update(choices=[]), f"❌ Failed to load scenarios: {e}"
 
     async def _on_tool_change(tool_name: str, tool_lookup_json: str):
+        # [FUNCTION DOC]
+        # HELPER: Given the selected tool and the tool-lookup JSON, returns an argument template JSON and the tool
+        # description; returns "{}" and "" when the tool is unknown or the lookup is invalid.
         try:
             lookup = json.loads(tool_lookup_json or "{}")
         except json.JSONDecodeError:
@@ -269,6 +306,9 @@ def build_awm_gradio_app(
         return _make_args_template(schema), meta.get("description", "")
 
     async def _do_call_tool(tool_name: str, args_json: str):
+        # [FUNCTION DOC]
+        # HELPER: Parses the args JSON and steps the env with a call_tool action. Returns (observation Markdown, raw JSON);
+        # validation or step errors return an error message and "{}".
         if not tool_name:
             return "*Pick a tool first.*", "{}"
         try:
@@ -284,6 +324,8 @@ def build_awm_gradio_app(
         return _format_obs_md(result), json.dumps(result, indent=2, default=str)
 
     async def _do_list_tools():
+        # [FUNCTION DOC]
+        # HELPER: Steps the env with list_tools. Returns (Markdown, raw JSON) or an error message and "{}".
         try:
             result = await web_manager.step_environment({"type": "list_tools"})
         except Exception as e:
@@ -291,6 +333,9 @@ def build_awm_gradio_app(
         return _format_obs_md(result), json.dumps(result, indent=2, default=str)
 
     async def _do_verify(verifier_mode: Any, final_answer: str):
+        # [FUNCTION DOC]
+        # HELPER: Normalizes the verifier mode (a dict uses its first key; anything not "code"/"sql" becomes "code"), steps
+        # the env with the "verify" tool (plus final_answer if given). Returns (Markdown, raw JSON) or an error pair.
         if isinstance(verifier_mode, dict):
             verifier_mode = next(iter(verifier_mode.keys()), "code")
         verifier_mode = str(verifier_mode).strip().lower() or "code"
@@ -308,6 +353,9 @@ def build_awm_gradio_app(
         return _format_obs_md(result), json.dumps(result, indent=2, default=str)
 
     async def _do_done(keep_session: bool):
+        # [FUNCTION DOC]
+        # HELPER: Steps the env with the "done" tool and keep_session flag. Returns (Markdown, raw JSON, trajectory file
+        # path if it exists else None); on error an error message, "{}", None.
         try:
             result = await web_manager.step_environment(
                 {
@@ -327,6 +375,8 @@ def build_awm_gradio_app(
         )
 
     async def _do_list_scenarios_via_tool():
+        # [FUNCTION DOC]
+        # HELPER: Steps the env with the hidden "__list_scenarios__" tool. Returns (Markdown, raw JSON) or an error pair.
         try:
             result = await web_manager.step_environment(
                 {
@@ -355,6 +405,11 @@ def build_awm_gradio_app(
         auto_verify: bool,
         auto_done: bool,
     ):
+        # [FUNCTION DOC]
+        # HELPER: Async generator for the Start Agent button. Normalizes verifier mode, requires a scenario and full LLM config,
+        # resets the env (with LLM config), creates an AwmAgent, stores it in the shared agent state and streams its events,
+        # yielding (accumulated Markdown log, trajectory path or None) after each event and at the end. The trajectory path
+        # is captured from the "done" event when the file exists. Validation/reset failures yield one error message and stop.
         if isinstance(verifier_mode, dict):
             verifier_mode = next(iter(verifier_mode.keys()), "code")
         verifier_mode = str(verifier_mode).strip().lower() or "code"
@@ -457,6 +512,8 @@ def build_awm_gradio_app(
         yield "\n\n".join(log_lines), traj_path
 
     def _do_stop_agent():
+        # [FUNCTION DOC]
+        # HELPER: Sets the shared stop flag and asks the current agent (if any) to stop. Returns a status message.
         agent_state["stop"] = True
         a = agent_state["agent"]
         if a is not None:
@@ -464,6 +521,10 @@ def build_awm_gradio_app(
         return "🛑 Stop requested. The agent will exit before its next iteration."
 
     async def _load_trajectory_from_state():
+        # [FUNCTION DOC]
+        # HELPER: Builds table rows (index, action type, tool name, reward_type, reward, 200-char preview of result or
+        # error) from the manager's episode action logs. Returns (rows, None); ([], None) if logs are unavailable.
+        # KNOWN ISSUE: the second output is wired to the Human-mode trajectory download, so refreshing clears that file.
         try:
             logs = web_manager.episode_state.action_logs
         except Exception:

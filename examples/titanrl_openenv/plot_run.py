@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# CLI tool that plots a TitanRL-on-OpenEnv training run from the artifacts the run
+# already writes: TensorBoard scalar events (four-panel figure: reward with std band,
+# reward components, untrainable-group fraction, rollout turns/truncation) and a JSON
+# summary of rollout_samples.jsonl. Needs matplotlib and tensorboard (imported lazily).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -50,6 +55,9 @@ from typing import Optional
 
 
 def _load_scalars(run_dir: str) -> dict[str, list[tuple[int, float]]]:
+    # [FUNCTION DOC]
+    # HELPER: loads all scalar series from the TensorBoard events in run_dir.
+    # Returns: mapping from tag to list of (step, value) pairs. Side effects: reads files.
     """Read every scalar series out of the run's TensorBoard event file."""
     from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
@@ -64,6 +72,9 @@ def _load_scalars(run_dir: str) -> dict[str, list[tuple[int, float]]]:
 def _series(
     scalars: dict[str, list[tuple[int, float]]], *tags: str
 ) -> tuple[list[int], list[float]]:
+    # [FUNCTION DOC]
+    # HELPER: returns (steps, values) lists for the first tag among the candidates that
+    # has a non-empty series, or two empty lists if none exist.
     """First of ``tags`` that exists, as ``(steps, values)``.
 
     Several candidates per series because the metric namespace has moved
@@ -78,6 +89,9 @@ def _series(
 
 
 def _plot_reward(ax, scalars) -> None:
+    # [FUNCTION DOC]
+    # HELPER: draws train mean reward (with a +/-1 std band when lengths match),
+    # validation mean reward, a zero line, title, labels and legend on ax.
     steps, mean = _series(scalars, "rollout_reward/_mean", "reward/_mean")
     _, std = _series(scalars, "rollout_reward/_std", "reward/_std")
     if steps:
@@ -108,6 +122,9 @@ _COMPONENTS = {
 
 
 def _plot_components(ax, scalars) -> None:
+    # [FUNCTION DOC]
+    # HELPER: draws the mean of each known reward component (env reward and shaping
+    # reward) when present, a zero line and labels; legend only if something was plotted.
     plotted = False
     for name, (label, color) in _COMPONENTS.items():
         steps, values = _series(
@@ -127,6 +144,9 @@ def _plot_components(ax, scalars) -> None:
 
 
 def _plot_rollouts(ax, scalars) -> None:
+    # [FUNCTION DOC]
+    # HELPER: draws mean turns per rollout on ax and, if present, the truncation rate on
+    # a twin y axis fixed to roughly 0..1.
     steps, turns = _series(scalars, "rollout/num_turns/mean", "num_turns/mean")
     if steps:
         ax.plot(steps, turns, label="turns per rollout", color="#9467bd")
@@ -147,6 +167,9 @@ def _plot_rollouts(ax, scalars) -> None:
 
 
 def _plot_trainability(ax, scalars) -> None:
+    # [FUNCTION DOC]
+    # HELPER: draws the fraction of groups with zero reward std (line and filled area)
+    # with y limits around 0..1 and a reference line at 1.0.
     """Fraction of GRPO groups whose rollouts all scored the same.
 
     The metric this example exists to keep at zero. A group with zero reward
@@ -170,6 +193,10 @@ def _plot_trainability(ax, scalars) -> None:
 
 
 def plot_scalars(run_dir: str, out_path: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Loads scalars and, if any exist, writes a 2x2 figure (Agg backend, 140 dpi) to
+    # out_path. Returns: out_path, or None (after printing a message) if no scalars.
+    # KNOWN ISSUE: docstring says three-panel, but the figure has four panels.
     """Write the three-panel training figure. Returns the path, or None."""
     import matplotlib
 
@@ -194,6 +221,13 @@ def plot_scalars(run_dir: str, out_path: str) -> Optional[str]:
 
 
 def summarize_rollouts(run_dir: str) -> dict[str, object]:
+    # [FUNCTION DOC]
+    # Parses run_dir/rollout_samples.jsonl (skipping blank lines). Validation rows are
+    # only counted. Returns: an empty dict if the file is missing; only the validation
+    # count if there are no train rows; otherwise counts of recorded train rollouts,
+    # validation rollouts, distinct groups, status histogram, turns histogram, distinct
+    # rewards (rounded to 6 places) and rows with nonzero advantage.
+    # Raises: json decode errors on malformed lines.
     """Summarize ``rollout_samples.jsonl``: statuses, rewards, advantage spread.
 
     Two things about this file are easy to misread:
@@ -251,6 +285,10 @@ def summarize_rollouts(run_dir: str) -> dict[str, object]:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point: parses run_dir, --out (default run folder) and --name (default
+    # training_curves.png); errors if run_dir is not a directory; creates the output
+    # directory, writes the figure and prints the rollout summary as JSON.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", help="Run dump folder (--dump-folder).")
     parser.add_argument(

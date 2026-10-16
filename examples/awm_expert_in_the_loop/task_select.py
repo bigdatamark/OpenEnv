@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Task selection utilities for AWM benchmarking/training: identifies usable tasks (having a code verifier and not
+# passing trivially with no actions) and builds a deterministic shuffled train/val split.
 """Task selection for honest AWM benchmarking and training.
 
 Some AWM tasks pass with no actions (a no-op ``reset -> verify`` already returns
@@ -21,6 +24,9 @@ from openenv.core.env_server.mcp_types import CallToolAction
 
 
 async def noop_verify_complete(env, scenario: str, task_idx: int) -> bool:
+    # [FUNCTION DOC]
+    # Resets into the task, immediately runs the code verifier with an empty final answer, ends the session, and returns
+    # True if the reward_type was "complete". Side effects: network I/O. Propagates env exceptions.
     """Return `True` if ``reset -> verify`` passes with no actions (a trivial task)."""
     await env.reset(scenario=scenario, task_idx=task_idx)
     result = await env.step(
@@ -33,6 +39,9 @@ async def noop_verify_complete(env, scenario: str, task_idx: int) -> bool:
 
 
 async def is_usable_task(env, scenario: str, task_idx: int) -> bool:
+    # [FUNCTION DOC]
+    # Returns False if the task has no code verifier in the dataset; otherwise returns the negation of the no-op verify
+    # check, treating any exception as unusable (False).
     """A task is usable if it has a code verifier and is not a trivial no-op pass."""
     if awm_data.get_verifier_code(scenario, task_idx) is None:
         return False
@@ -44,6 +53,8 @@ async def is_usable_task(env, scenario: str, task_idx: int) -> bool:
 
 @dataclass
 class TaskSplit:
+    # [CLASS DOC]
+    # Dataclass holding lists of (scenario, task_idx) pairs for train and val.
     """A train/val partition of `(scenario, task_idx)` pairs."""
 
     train: list[tuple[str, int]] = field(default_factory=list)
@@ -58,6 +69,10 @@ async def build_split(
     val_fraction: float = 0.35,
     seed: int = 0,
 ) -> TaskSplit:
+    # [FUNCTION DOC]
+    # Collects verifier tasks for the prefixes, shuffles them with the seed, probes each (fresh AWMEnv per task) until
+    # max_tasks usable ones are found, then sorts, reshuffles with a new RNG of the same seed, and assigns the first
+    # floor(len * val_fraction) to val and the rest to train (each sorted). Returns the TaskSplit. Side effects: network I/O.
     """Discover usable tasks and split them into train / val.
 
     Args:

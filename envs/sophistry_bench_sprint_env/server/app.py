@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Creates the FastAPI app (module-level "app") for the Sophistry-Bench Sprint environment via
+# create_app, passing the environment class as factory and env_name "sophistry_bench_sprint_env".
+# Falls back to absolute package imports in the container runtime.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -33,6 +37,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Serves the app with uvicorn on 0.0.0.0:8000; blocks until shutdown.
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

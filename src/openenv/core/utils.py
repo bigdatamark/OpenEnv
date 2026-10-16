@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# HELPER: small async/URL utilities shared by OpenEnv core clients.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Utility functions for OpenEnv core."""
@@ -7,6 +9,14 @@ import concurrent.futures
 
 
 def run_async_safely(coro):
+    # [FUNCTION DOC]
+    # HELPER: runs a coroutine to completion from sync code and returns its result.
+    # Inputs: coro - an awaitable coroutine object.
+    # Returns: whatever the coroutine returns.
+    # Behavior: if no event loop is running in this thread, uses asyncio.run directly;
+    # otherwise spins up a one-off thread pool and runs asyncio.run in a worker thread,
+    # blocking the caller until done (so the caller's loop is blocked meanwhile).
+    # Raises: propagates any exception raised by the coroutine.
     """
     Run an async coroutine safely from any context.
 
@@ -36,6 +46,10 @@ def run_async_safely(coro):
 
 
 def convert_to_ws_url(url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: converts a base URL into a WebSocket URL.
+    # Strips trailing slashes, maps http:// -> ws:// and https:// -> wss://, leaves
+    # ws/wss URLs as-is, and prefixes ws:// when no scheme is present. Returns the string.
     """
     Convert an HTTP/HTTPS URL to a WS/WSS URL.
 

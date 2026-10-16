@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Simple LLM agent loop used by the AWM web console. It drives the already-reset environment through the web
+# interface manager's step_environment coroutine, prompting an OpenAI-compatible model that answers with
+# <tool_call> JSON blocks for two meta-functions (list_tools, call_tool), and streams progress as AgentEvent objects.
 """LLM-driven agent loop for the AWM web UI."""
 
 from __future__ import annotations
@@ -13,6 +17,9 @@ from .prompts import DEFAULT_SYSTEM_PROMPT
 
 
 def parse_tool_call(content: str) -> dict | None:
+    # [FUNCTION DOC]
+    # Extracts the first <tool_call>...</tool_call> block from model output and parses its JSON. A list uses its first
+    # element. Returns the dict if it has a "name" key, otherwise None (also None for missing tags or invalid JSON).
     m = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", content, re.DOTALL)
     if not m:
         return None
@@ -28,6 +35,9 @@ def parse_tool_call(content: str) -> dict | None:
 
 
 def format_tools(tools: list[dict]) -> str:
+    # [FUNCTION DOC]
+    # Renders a list of tool dicts (name or tool_name, description, input_schema or inputSchema) as numbered
+    # human-readable text with parameter names, types, "(required)" markers and descriptions. Returns the string.
     lines = [f"Available MCP Tools ({len(tools)} tools):", "=" * 60]
     for i, t in enumerate(tools, 1):
         name = t.get("name") or t.get("tool_name", "")
@@ -52,6 +62,8 @@ def format_tools(tools: list[dict]) -> str:
 
 
 def _truncate(s: str, limit: int = 2000) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the string unchanged if within limit (default 2000), else its prefix plus a note with full length.
     if len(s) <= limit:
         return s
     return s[:limit] + f"\n... (truncated, full length {len(s)} chars)"
@@ -59,12 +71,18 @@ def _truncate(s: str, limit: int = 2000) -> str:
 
 @dataclass
 class AgentEvent:
+    # [CLASS DOC]
+    # Dataclass for one streamed event: kind ("info", "llm_response", "tool_call", "tool_result", "verify", "done",
+    # "error"), display text and a payload dict.
     kind: str  # "info" | "llm_response" | "tool_call" | "tool_result" | "verify" | "done" | "error"
     text: str = ""
     payload: dict = field(default_factory=dict)
 
 
 class AwmAgent:
+    # [CLASS DOC]
+    # Agent bound to a web interface manager and an AsyncOpenAI client. Configurable system prompt, iteration cap
+    # (default 10), temperature (1.0) and max completion tokens (2048). Supports cooperative stop requests.
     def __init__(
         self,
         web_manager: Any,
@@ -76,6 +94,8 @@ class AwmAgent:
         temperature: float = 1.0,
         max_tokens: int = 2048,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration and creates the AsyncOpenAI client for the given base URL/key. No network I/O.
         self._web = web_manager
         self._client = AsyncOpenAI(base_url=llm_base_url, api_key=llm_api_key)
         self._model = llm_model
@@ -86,9 +106,14 @@ class AwmAgent:
         self._stop_requested = False
 
     def request_stop(self) -> None:
+        # [FUNCTION DOC]
+        # Sets a flag that makes the run loop stop before its next LLM call.
         self._stop_requested = True
 
     async def _list_tools_dict(self) -> list[dict]:
+        # [FUNCTION DOC]
+        # HELPER: Steps the environment with a list_tools action and returns tools as dicts (non-dict tool objects are
+        # converted to name/description/input_schema dicts).
         result = await self._web.step_environment({"type": "list_tools"})
         obs = result.get("observation", {}) or {}
         tools = obs.get("tools", []) or []
@@ -107,6 +132,8 @@ class AwmAgent:
         return out
 
     async def _call_tool(self, tool_name: str, args: dict) -> dict:
+        # [FUNCTION DOC]
+        # HELPER: Steps the environment with a call_tool action for the given name/arguments; returns the raw step result dict.
         return await self._web.step_environment(
             {"type": "call_tool", "tool_name": tool_name, "arguments": args}
         )
@@ -119,6 +146,18 @@ class AwmAgent:
         auto_verify: bool = True,
         auto_done: bool = True,
     ) -> AsyncIterator[AgentEvent]:
+        # [FUNCTION DOC]
+        # Async generator. Lists tools (error event and stop on failure), then builds messages (system prompt, task, tools
+        # text) and loops up to max_iterations: calls the LLM (error event and stop on failure), yields the response, parses
+        # a tool call (none means final answer and ends the loop), dispatches list_tools or call_tool (inner "arguments" may be
+        # a JSON string; non-dict becomes {}), and feeds the result (or error text, truncated to 6000 chars) back as a user
+        # message, yielding tool_call/tool_result events. Yields an info event when the stop flag is set or the cap is hit.
+        # Afterwards, if auto_verify and verifier_mode are set, calls "verify" with the last assistant message (or the
+        # fallback) as final_answer and yields a verify event; if auto_done, calls "done" with keep_session True and yields
+        # a done event. Errors in these phases yield error events. Never raises.
+        # Side effects: LLM network calls and environment steps (each counts as a step).
+        # KNOWN ISSUE: the list_tools branch steps the environment twice (one discarded result plus the helper call).
+        # KNOWN ISSUE: returning early on stop/LLM failure skips the auto verify/done phase.
         """Run the agent on the already-reset env, yielding events as it goes."""
         try:
             tools = await self._list_tools_dict()

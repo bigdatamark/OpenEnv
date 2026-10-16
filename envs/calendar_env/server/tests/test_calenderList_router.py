@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Integration tests against the full calendar app using a database seeded through the
+# seed-database API: seeding, calendar CRUD, calendarList, events, ACLs and user isolation.
+# KNOWN ISSUE: json and patch are imported but unused.
 # Integration tests using seed-database API
 
 import json
@@ -7,9 +11,14 @@ import pytest
 
 
 class TestDatabaseSeeding:
+    # [CLASS DOC]
+    # Checks that seeding populates the core tables.
     """Verify database seeding works correctly"""
 
     def test_seed_database_success(self, seeded_database):
+        # [FUNCTION DOC]
+        # Asserts /api/database-state succeeds and users, calendars, events, acls and scopes
+        # tables all have non-zero row counts.
         """Test that database seeding creates all required tables"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -30,11 +39,16 @@ class TestDatabaseSeeding:
 
 
 class TestMCPFlow:
+    # [CLASS DOC]
+    # Tests named after the MCP flow; in practice they only call the REST API directly.
     """Test MCP protocol flow: Swagger → MCP → Calendar APIs → Database"""
 
     def test_mcp_vs_direct_api_returns_same_data(
         self, seeded_database, mcp_request_helper, api_headers
     ):
+        # [FUNCTION DOC]
+        # Lists Alice's calendarList directly and asserts non-empty items and kind "calendar#calendarList".
+        # KNOWN ISSUE: no MCP request is made, so nothing is compared despite the name.
         """Verify MCP flow returns (same results as direct API call)"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -55,6 +69,9 @@ class TestMCPFlow:
         assert direct_data["kind"] == "calendar#calendarList"
 
     def test_mcp_get_calendar(self, seeded_database, mcp_request_helper, api_headers):
+        # [FUNCTION DOC]
+        # Gets Alice's first calendar id and fetches /calendars/{id}; asserts id and summary.
+        # KNOWN ISSUE: does not exercise MCP despite the name.
         """Test MCP flow for getting specific calendar"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -79,9 +96,13 @@ class TestMCPFlow:
 
 
 class TestCalendarAPIs:
+    # [CLASS DOC]
+    # Calendar CRUD tests.
     """Test Calendar CRUD operations with real database"""
 
     def test_calendar_crud_operations(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # Creates a calendar (201), reads it, patches its summary, then deletes it (200).
         """Test create, read, update, delete calendar"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -120,9 +141,13 @@ class TestCalendarAPIs:
 
 
 class TestCalendarListAPIs:
+    # [CLASS DOC]
+    # calendarList endpoint tests.
     """Test CalendarList operations with real database"""
 
     def test_get_calendar_list_success(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # Asserts Alice's list has kind calendar#calendarList, items, and a summary containing "Alice".
         """Test getting calendar list with real seeded data"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -142,6 +167,8 @@ class TestCalendarListAPIs:
         assert any("Alice" in summary for summary in summaries)
 
     def test_get_primary_calendar(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # Asserts /users/me/calendarList/primary returns an entry with primary True.
         """Test getting primary calendar using 'primary' keyword"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -155,6 +182,8 @@ class TestCalendarListAPIs:
         assert response.json()["primary"] is True
 
     def test_update_calendar_in_list(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # Patches a writer/owner calendar entry to hidden True, selected False and asserts hidden True.
         """Test updating calendar list entry"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -181,9 +210,13 @@ class TestCalendarListAPIs:
 
 
 class TestEventAPIs:
+    # [CLASS DOC]
+    # Event endpoint tests.
     """Test Event operations with real database"""
 
     def test_create_and_get_event(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # Creates an event in Alice's first calendar (201) and reads it back by id.
         """Test creating and retrieving event"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -223,9 +256,13 @@ class TestEventAPIs:
 
 
 class TestACLPermissions:
+    # [CLASS DOC]
+    # ACL and isolation tests.
     """Test ACL permissions with real database"""
 
     def test_owner_has_acl_permissions(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # For an owned calendar, asserts the ACL response is a dict with an items list containing an owner rule.
         """Test that calendar owner has proper ACL entries"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]
@@ -253,6 +290,9 @@ class TestACLPermissions:
         assert any(acl.get("role") == "owner" for acl in acls["items"])
 
     def test_cross_user_isolation(self, seeded_database, api_headers):
+        # [FUNCTION DOC]
+        # Asserts Alice and Bob each get a non-empty calendar list.
+        # KNOWN ISSUE: does not check that the lists differ, so isolation is not really verified.
         """Test that users can only see their own calendars"""
         client = seeded_database["client"]
         database_id = seeded_database["database_id"]

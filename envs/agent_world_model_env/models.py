@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for AWM actions and observations. The action type is a discriminated union (by the
+# "type" field) of the generic MCP ListToolsAction and CallToolAction, validated via a module-level TypeAdapter.
 """
 AWM-specific Pydantic models for action and observation types.
 """
@@ -21,6 +24,9 @@ _awm_action_adapter = TypeAdapter(_AWMActionUnion)
 
 
 class AWMAction(Action):
+    # [CLASS DOC]
+    # Facade action class: validating or asking for a JSON schema delegates to the ListTools/CallTool union, so
+    # validation yields the concrete MCP action instance rather than an AWMAction.
     """Discriminated union action type for AWM.
 
     model_validate() returns the concrete ListToolsAction or CallToolAction
@@ -29,14 +35,24 @@ class AWMAction(Action):
 
     @classmethod
     def model_validate(cls, obj: Any, **kwargs: Any) -> Action:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Validates a raw object against the action union. Returns: a ListToolsAction or CallToolAction.
+        # Extra kwargs are accepted but ignored. Raises: pydantic ValidationError on invalid input.
         return _awm_action_adapter.validate_python(obj)
 
     @classmethod
     def model_json_schema(cls, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Returns the JSON schema of the action union; kwargs are passed through to the TypeAdapter.
         return _awm_action_adapter.json_schema(**kwargs)
 
 
 class AWMObservation(Observation):
+    # [CLASS DOC]
+    # Observation with AWM fields at the top level (reward_type, scenario, task, task_idx, has_verifier, num_tools,
+    # tool_name, tool_result, error, warning, verify_result, steps_taken, scenarios, total, trajectory_path,
+    # session_dir), all optional. Extra fields are forbidden. Serialization omits None fields by default so the
+    # generic MCP client does not misroute payloads based on key presence.
     """
     Observation with AWM-specific fields promoted to top level.
     model_dump() excludes None-valued fields by default so that keys like
@@ -61,6 +77,9 @@ class AWMObservation(Observation):
     @field_validator("has_verifier", mode="before")
     @classmethod
     def _convert_bool_to_dict(cls, v: Any) -> dict | None:
+        # [FUNCTION DOC]
+        # HELPER: Before-validator for has_verifier. None stays None; True becomes a dict with "sql" and "code" both
+        # True; False becomes None; any other value passes through unchanged.
         """Convert legacy bool format to new dict format."""
         if v is None:
             return None
@@ -94,11 +113,15 @@ class AWMObservation(Observation):
     )
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Same as the base model_dump but defaults exclude_none to True unless the caller sets it.
         kwargs.setdefault("exclude_none", True)
         return super().model_dump(**kwargs)
 
 
 class AWMListToolsObservation(ListToolsObservation):
+    # [CLASS DOC]
+    # ListToolsObservation (tool list) with an extra optional "error" string; unknown fields are forbidden.
     """ListToolsObservation with AWM error field promoted to top level."""
 
     model_config = ConfigDict(extra="forbid")

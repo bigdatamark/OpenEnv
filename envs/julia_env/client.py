@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# WebSocket client for the Julia environment with a longer default message
+# timeout suited to slow Julia execution.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -26,6 +29,9 @@ from .models import JuliaAction, JuliaObservation, JuliaState
 
 
 class JuliaEnv(EnvClient[JuliaAction, JuliaObservation, JuliaState]):
+    # [CLASS DOC]
+    # EnvClient specialization for Julia. DEFAULT_MESSAGE_TIMEOUT is 180 s (server
+    # execution timeout plus worker wait plus buffer).
     """
     WebSocket client for the Julia Environment.
 
@@ -78,6 +84,9 @@ class JuliaEnv(EnvClient[JuliaAction, JuliaObservation, JuliaState]):
         message_timeout_s: float | None = None,
         **kwargs,
     ):
+        # [FUNCTION DOC]
+        # Forwards to EnvClient, substituting DEFAULT_MESSAGE_TIMEOUT when
+        # message_timeout_s is None. Extra kwargs pass through to EnvClient.
         """
         Initialize JuliaEnv client with appropriate timeout.
 
@@ -99,6 +108,9 @@ class JuliaEnv(EnvClient[JuliaAction, JuliaObservation, JuliaState]):
     # --- EnvClient abstract hooks ---
 
     def _step_payload(self, action: JuliaAction) -> dict:
+        # [FUNCTION DOC]
+        # Builds the step payload with "core_code" and "test_code" (test_code may be
+        # None).
         """
         Convert JuliaAction to JSON payload for step request.
 
@@ -114,6 +126,11 @@ class JuliaEnv(EnvClient[JuliaAction, JuliaObservation, JuliaState]):
         }
 
     def _parse_result(self, payload: dict) -> StepResult[JuliaObservation]:
+        # [FUNCTION DOC]
+        # Builds a JuliaObservation from the nested "observation" dict (defaults: empty
+        # stdout/stderr, exit_code 0, 0 passed/failed, code_compiles True) with
+        # top-level done/reward, and returns a StepResult with reward and done.
+        # Metadata is not propagated.
         """
         Parse server response into StepResult[JuliaObservation].
 
@@ -142,6 +159,9 @@ class JuliaEnv(EnvClient[JuliaAction, JuliaObservation, JuliaState]):
         )
 
     def _parse_state(self, payload: dict) -> JuliaState:
+        # [FUNCTION DOC]
+        # Builds a JuliaState from episode_id, step_count, last_exit_code,
+        # last_code_compiles and cumulative test totals, with defaults 0/True.
         """
         Parse server response into JuliaState object.
 

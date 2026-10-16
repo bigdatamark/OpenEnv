@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Static Google Calendar v3 color palettes: CALENDAR_COLORS (ids "1"-"24") and EVENT_COLORS (ids "1"-"11"), each a
+# mapping from color id to background/foreground hex strings, plus lookup and validation helpers.
 """
 Google Calendar API v3 Colors Data
 Static color definitions for calendars and events
@@ -50,6 +53,8 @@ EVENT_COLORS = {
 
 
 def get_colors_response() -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a calendar#colors response dict with a fixed "updated" timestamp and the (live, not copied) palette dicts.
     """
     Get the complete colors response in Google Calendar API v3 format
 
@@ -65,6 +70,9 @@ def get_colors_response() -> Dict[str, Any]:
 
 
 def get_color_by_id(color_type: str, color_id: str) -> Dict[str, str]:
+    # [FUNCTION DOC]
+    # Returns the background/foreground dict for a color id of type "calendar" or "event".
+    # Raises: ValueError for an unknown type or id.
     """
     Get a specific color by type and ID
 
@@ -94,16 +102,22 @@ def get_color_by_id(color_type: str, color_id: str) -> Dict[str, str]:
 
 
 def get_all_calendar_colors() -> Dict[str, Dict[str, str]]:
+    # [FUNCTION DOC]
+    # Returns a shallow copy of the calendar palette.
     """Get all calendar colors"""
     return CALENDAR_COLORS.copy()
 
 
 def get_all_event_colors() -> Dict[str, Dict[str, str]]:
+    # [FUNCTION DOC]
+    # Returns a shallow copy of the event palette.
     """Get all event colors"""
     return EVENT_COLORS.copy()
 
 
 def validate_color_id(color_type: str, color_id: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the color type/id pair exists, else False (never raises).
     """
     Validate if a color ID exists for the given type
 

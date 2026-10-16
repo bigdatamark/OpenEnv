@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for "openenv skills add": installing the bundled openenv-cli skill into
+# .agents/skills, --dest/--force handling, and per-assistant symlinks. Some tests chdir
+# into tmp_path (restored afterwards).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the openenv skills command."""
@@ -12,6 +16,8 @@ runner = CliRunner()
 
 
 def test_skills_add_installs_local_skill(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Default install writes .agents/skills/openenv-cli/SKILL.md in the cwd.
     """openenv skills add installs to project .agents/skills by default."""
     old_cwd = os.getcwd()
     try:
@@ -27,6 +33,8 @@ def test_skills_add_installs_local_skill(tmp_path: Path) -> None:
 
 
 def test_skills_add_rejects_dest_with_agent_flags(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --dest with --claude exits 1 with an explanatory message.
     """--dest cannot be combined with assistant/global flags."""
     result = runner.invoke(
         app,
@@ -38,6 +46,8 @@ def test_skills_add_rejects_dest_with_agent_flags(tmp_path: Path) -> None:
 
 
 def test_skills_add_requires_force_when_target_exists(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Existing destination without --force exits 1 mentioning --force.
     """Existing destination requires --force to overwrite."""
     existing = tmp_path / "skills" / "openenv-cli"
     existing.mkdir(parents=True)
@@ -49,6 +59,8 @@ def test_skills_add_requires_force_when_target_exists(tmp_path: Path) -> None:
 
 
 def test_skills_add_force_overwrites_existing(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --force replaces existing SKILL.md content.
     """--force overwrites existing skill content."""
     existing = tmp_path / "skills" / "openenv-cli"
     existing.mkdir(parents=True)
@@ -65,6 +77,8 @@ def test_skills_add_force_overwrites_existing(tmp_path: Path) -> None:
 
 
 def test_skills_add_creates_agent_symlink(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --claude creates .claude/skills/openenv-cli symlinked to the central copy.
     """Assistant flag creates a symlink to the central skill location."""
     old_cwd = os.getcwd()
     try:
@@ -81,6 +95,8 @@ def test_skills_add_creates_agent_symlink(tmp_path: Path) -> None:
 
 
 def test_skills_add_creates_multiple_agent_symlinks(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --claude --codex create symlinks for both assistants to the same central copy.
     """Multiple assistant flags create symlinks to the same central skill."""
     old_cwd = os.getcwd()
     try:

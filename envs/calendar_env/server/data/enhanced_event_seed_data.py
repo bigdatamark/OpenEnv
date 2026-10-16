@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Seed data for events and related tables (office locations, recurring events, conference
+# data, birthday/extended properties, reminders, attendees, attachments, working
+# locations) and a generator that turns it into SQL INSERT text lines.
 """
 Enhanced Event Seed Data with all new fields and related tables
 """
@@ -8,6 +12,11 @@ from typing import Any, Dict, List
 
 
 def get_enhanced_event_seed_data() -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds and returns a dict of lists keyed office_locations, events, recurring_events,
+    # conference_data, birthday_properties, extended_properties, reminders, attendees,
+    # attachments, working_location_properties, plus a "description" string. Event times
+    # are relative to today 09:00 UTC (datetime.now), so output varies by day. No side effects.
     """
     Generate comprehensive seed data demonstrating all Event model features including:
     - All new Event fields (conference_data, reminders, extended_properties, etc.)
@@ -637,6 +646,14 @@ def get_enhanced_event_seed_data() -> Dict[str, Any]:
 
 
 def generate_enhanced_event_sql(sql_statements) -> str:
+    # [FUNCTION DOC]
+    # Appends SQL lines (comment headers and multi-row INSERT statements, single quotes
+    # doubled, JSON fields serialized, booleans as 0/1, missing optionals as NULL,
+    # created/updated as datetime('now')) for every table in the seed data to the given
+    # list, mutating and returning that same list.
+    # Inputs: sql_statements - list of strings to extend.
+    # Returns: the same list (not a string).
+    # KNOWN ISSUE: annotated to return str but returns the list; recurring_event_id is always wrapped in quotes, so a missing value is inserted as the literal string 'NULL' instead of SQL NULL; several text fields (summary aside) are not quote-escaped.
     """
     Generate SQL INSERT statements for enhanced event seed data
     """

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for the EvalHarness abstract base class: abstractness, the run contract, run_from_config
+# producing an EvalResult, the name property, and basic reproducibility expectations.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for EvalHarness ABC."""
@@ -9,9 +13,14 @@ from openenv.core.evals import EvalConfig, EvalHarness, EvalResult
 
 
 class ConcreteEvalHarness(EvalHarness):
+    # [CLASS DOC]
+    # HELPER: Minimal EvalHarness that records the arguments of its last run call and returns preset
+    # scores (default accuracy 0.85).
     """Concrete implementation of EvalHarness for testing."""
 
     def __init__(self, return_scores: dict[str, Any] | None = None):
+        # [FUNCTION DOC]
+        # HELPER: Stores the scores to return (default {"acc": 0.85}) and resets the recording state.
         self.return_scores = (
             return_scores if return_scores is not None else {"acc": 0.85}
         )
@@ -25,6 +34,8 @@ class ConcreteEvalHarness(EvalHarness):
         dataset: str,
         eval_parameters: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Marks run_called, records all four arguments in last_config, and returns the preset scores.
         """Run the evaluation and return scores."""
         self.run_called = True
         self.last_config = {
@@ -37,14 +48,20 @@ class ConcreteEvalHarness(EvalHarness):
 
 
 class TestEvalHarnessABC:
+    # [CLASS DOC]
+    # Tests the abstract base contract.
     """Tests for EvalHarness ABC."""
 
     def test_cannot_instantiate_abstract_class(self):
+        # [FUNCTION DOC]
+        # Instantiating EvalHarness directly raises TypeError.
         """Test that EvalHarness cannot be instantiated directly."""
         with pytest.raises(TypeError):
             EvalHarness()
 
     def test_concrete_implementation_works(self):
+        # [FUNCTION DOC]
+        # A concrete subclass's run returns its scores and records the call.
         """Test that concrete implementations work."""
         harness = ConcreteEvalHarness(return_scores={"acc": 0.9})
         result = harness.run(
@@ -57,6 +74,8 @@ class TestEvalHarnessABC:
         assert harness.run_called
 
     def test_run_method_signature(self):
+        # [FUNCTION DOC]
+        # run accepts the four keyword arguments and returns a dict; arguments are recorded.
         """Test that run() accepts the correct parameters."""
         harness = ConcreteEvalHarness()
         scores = harness.run(
@@ -71,9 +90,13 @@ class TestEvalHarnessABC:
 
 
 class TestEvalHarnessIntegration:
+    # [CLASS DOC]
+    # Tests run_from_config.
     """Tests for EvalHarness integration with EvalConfig and EvalResult."""
 
     def test_run_from_config_method(self):
+        # [FUNCTION DOC]
+        # run_from_config returns an EvalResult holding the config and the scores.
         """Test run_from_config() method creates EvalResult from EvalConfig."""
         harness = ConcreteEvalHarness(return_scores={"acc": 0.85, "acc_stderr": 0.02})
         config = EvalConfig(
@@ -92,6 +115,8 @@ class TestEvalHarnessIntegration:
         assert result.scores["acc_stderr"] == 0.02
 
     def test_run_from_config_passes_parameters_correctly(self):
+        # [FUNCTION DOC]
+        # run_from_config passes each config field to run.
         """Test that run_from_config extracts and passes config fields to run()."""
         harness = ConcreteEvalHarness()
         config = EvalConfig(
@@ -110,6 +135,8 @@ class TestEvalHarnessIntegration:
         assert harness.last_config["eval_parameters"] == {"num_fewshot": 5}
 
     def test_run_from_config_preserves_config_in_result(self):
+        # [FUNCTION DOC]
+        # The result references the same config object.
         """Test that run_from_config preserves the original config in result."""
         harness = ConcreteEvalHarness(return_scores={"acc": 0.9})
         config = EvalConfig(
@@ -127,9 +154,13 @@ class TestEvalHarnessIntegration:
 
 
 class TestEvalHarnessErrorHandling:
+    # [CLASS DOC]
+    # Tests edge-case inputs to run.
     """Tests for error handling in EvalHarness."""
 
     def test_run_with_empty_library_versions(self):
+        # [FUNCTION DOC]
+        # Empty library_versions is accepted.
         """Test run() works with empty library_versions dict."""
         harness = ConcreteEvalHarness()
         scores = harness.run(
@@ -141,6 +172,8 @@ class TestEvalHarnessErrorHandling:
         assert isinstance(scores, dict)
 
     def test_run_with_empty_eval_parameters(self):
+        # [FUNCTION DOC]
+        # Empty eval_parameters is accepted.
         """Test run() works with empty eval_parameters dict."""
         harness = ConcreteEvalHarness()
         scores = harness.run(
@@ -152,6 +185,8 @@ class TestEvalHarnessErrorHandling:
         assert isinstance(scores, dict)
 
     def test_run_returns_empty_scores(self):
+        # [FUNCTION DOC]
+        # An empty scores dict is returned as-is.
         """Test that run() can return empty scores dict."""
         harness = ConcreteEvalHarness(return_scores={})
         scores = harness.run(
@@ -164,18 +199,28 @@ class TestEvalHarnessErrorHandling:
 
 
 class TestEvalHarnessName:
+    # [CLASS DOC]
+    # Tests the name property.
     """Tests for EvalHarness name property."""
 
     def test_name_property_returns_class_name(self):
+        # [FUNCTION DOC]
+        # name returns the subclass name.
         """Test that name property returns the class name."""
         harness = ConcreteEvalHarness()
         assert harness.name == "ConcreteEvalHarness"
 
     def test_name_property_for_custom_harness(self):
+        # [FUNCTION DOC]
+        # name works for a locally defined subclass.
         """Test that name property works for any subclass."""
 
         class CustomHarness(EvalHarness):
+            # [CLASS DOC]
+            # HELPER: Local EvalHarness subclass returning a fixed score.
             def run(self, harness_version, library_versions, dataset, eval_parameters):
+                # [FUNCTION DOC]
+                # HELPER: Returns {"acc": 1.0}.
                 return {"acc": 1.0}
 
         harness = CustomHarness()
@@ -183,9 +228,14 @@ class TestEvalHarnessName:
 
 
 class TestEvalHarnessReproducibility:
+    # [CLASS DOC]
+    # Tests reproducibility expectations.
     """Tests for reproducibility verification."""
 
     def test_run_with_same_config_should_be_reproducible(self):
+        # [FUNCTION DOC]
+        # Two runs with identical parameters return equal scores.
+        # KNOWN ISSUE: the fake harness always returns preset scores, so this cannot detect nondeterminism.
         """Test that running with identical config params should be deterministic."""
         harness = ConcreteEvalHarness(return_scores={"acc": 0.85})
 
@@ -207,6 +257,8 @@ class TestEvalHarnessReproducibility:
         assert scores1 == scores2
 
     def test_config_captures_all_reproducibility_parameters(self):
+        # [FUNCTION DOC]
+        # EvalConfig retains harness version, library versions and eval parameters.
         """Test that EvalConfig captures all parameters needed for reproducibility."""
         config = EvalConfig(
             harness_name="lm_eval",

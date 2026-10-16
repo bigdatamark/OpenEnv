@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Runs the capture proxy app in-process on a background uvicorn thread (CaptureServer)
+# so a rollout can access the live SessionRegistry directly. Verifies the port is free
+# before binding and that /health reports this app's own instance id after startup.
 # Copyright 2026 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,6 +43,9 @@ from .server import create_app
 
 
 def _require_free_port(port: int) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Tries to bind 0.0.0.0:port (SO_REUSEADDR) and immediately releases it.
+    # Raises: RuntimeError naming the holding process (if found) when binding fails.
     """Raise if anything is already listening on `port`, naming the holder when we can find it."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -53,6 +60,10 @@ def _require_free_port(port: int) -> None:
 
 
 def _port_holder(port: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Best-effort description of the process listening on port by running "ss -ltnp"
+    # (5s timeout); returns "Held by ..." or "" if ss is missing or nothing matches. Never raises.
+    # Side effects: runs a subprocess.
     """Best-effort description of the process holding `port`, for the error message only."""
     import shutil
     import subprocess
@@ -70,6 +81,9 @@ def _port_holder(port: int) -> str:
 
 
 def _health_instance(port: int) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: GETs http://127.0.0.1:port/health (2s timeout); returns the "instance" field
+    # (or "unknown") on HTTP 200, else None. Swallows all errors.
     """Instance id reported by whatever is serving `port`, or `None` if nothing answers yet."""
     import httpx
 
@@ -80,6 +94,10 @@ def _health_instance(port: int) -> str | None:
 
 
 class CaptureServer:
+    # [CLASS DOC]
+    # Capture proxy server running in a daemon thread. Exposes the FastAPI app, the effective
+    # capture_level ("text" when provider is anthropic), admin_key, port, and the app's
+    # registry and upstream inference client.
     """The capture proxy, running in a background thread for the life of a batch.
 
     A thread rather than a subprocess because the rollout path needs the live `SessionRegistry` — it
@@ -101,6 +119,10 @@ class CaptureServer:
         admin_key: str | None = None,
         max_model_calls: int = 0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Builds the app with create_app from the given upstream URL, model, output token cap,
+        # API key/header, capture level, provider, admin key and per-session model-call cap.
+        # Does not start serving.
         self.app = create_app(
             llm_url=llm_url,
             model=model,
@@ -120,14 +142,25 @@ class CaptureServer:
 
     @property
     def registry(self) -> Any:
+        # [FUNCTION DOC]
+        # Returns the app's live SessionRegistry.
         return self.app.state.registry
 
     @property
     def inference(self) -> Any:
+        # [FUNCTION DOC]
+        # Returns the app's upstream inference client.
         """The upstream client, for reading back what it had to work around. See `param_fixes`."""
         return self.app.state.inference
 
     def start(self, timeout_s: float = 30.0) -> None:
+        # [FUNCTION DOC]
+        # Starts the server and confirms identity.
+        # Behavior: checks the port is free, starts uvicorn on 0.0.0.0:port in a daemon thread,
+        # then polls /health every 0.1s until it returns this app's instance id.
+        # Raises: RuntimeError if the port is in use, the thread exits, a different instance
+        # answers, or the timeout (default 30s) elapses.
+        # Side effects: binds a port, starts a thread.
         """Bind the port and confirm that the process answering on it is *this* one.
 
         Raises:
@@ -173,6 +206,8 @@ class CaptureServer:
         )
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Signals uvicorn to exit and joins the thread for up to 10s. Does not reset state.
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:

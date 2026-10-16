@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# SQLAlchemy-based operations on calendars (Calendars API): create (with owner/writer
+# ACLs), get, update, delete, clear, list (owned + shared via user ACL), and primary
+# calendar integrity helpers. Defines ALLOWED_CONFERENCE_SOLUTION_TYPES.
 """
 Calendar Manager - Database operations for calendar management using SQLAlchemy
 """
@@ -25,14 +29,23 @@ ALLOWED_CONFERENCE_SOLUTION_TYPES = {
 
 
 class CalendarManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id. Unlike other managers it opens one long-lived
+    # Session at construction (self.session) used by most methods and never closed explicitly;
+    # some integrity helpers open their own short-lived sessions instead.
     """Manager for calendar database operations using SQLAlchemy"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id and opens self.session. Does not create tables.
         # Initialize database on first use
         self.database_id = database_id
         self.session = self.get_session()
 
     def get_session(self):
+        # [FUNCTION DOC]
+        # HELPER: returns a new Session from a freshly constructed CalendarSessionManager for this
+        # database_id (a new engine per call, since the manager cache is per-instance).
         from database.session_manager import CalendarSessionManager
 
         return CalendarSessionManager().get_session(self.database_id)
@@ -40,6 +53,10 @@ class CalendarManager:
     def _has_acl_role(
         self, user_id: str, calendar: Calendar, allowed_roles: List[str]
     ) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns True if any ACL on the calendar has a "user" scope whose value equals
+        # the user's email and a role in allowed_roles; False (with a warning log) if the user
+        # does not exist, there is no matching ACL, or no role matches.
         user = self.session.query(User).filter(User.user_id == user_id).first()
         if not user:
             logger.warning(f"No user found with ID: {user_id}")
@@ -72,6 +89,13 @@ class CalendarManager:
         return False
 
     def create_calendar(self, user_id: str, calendar_data: dict):
+        # [FUNCTION DOC]
+        # Validates conferenceProperties.allowedConferenceSolutionTypes, inserts a new secondary
+        # calendar (UUID id, summary, description, location, timeZone default "UTC", conference
+        # properties as JSON) owned by user_id, commits, then creates owner and writer ACLs.
+        # Returns the Calendar ORM object.
+        # Raises: ValueError for invalid conference types or unknown user (from ACL creation).
+        # KNOWN ISSUE: an explicit conferenceProperties of None causes AttributeError; the calendar is committed before ACL creation, so a failed ACL step leaves a calendar without ACLs.
         """Create a new calendar"""
         conf_types = calendar_data.get("conferenceProperties", {}).get(
             "allowedConferenceSolutionTypes"
@@ -107,6 +131,10 @@ class CalendarManager:
         return new_calendar
 
     def _create_owner_acl(self, user_id: str, calendar_id: str):
+        # [FUNCTION DOC]
+        # HELPER: finds or creates a "user" Scope for the user's email and adds two ACL rows
+        # (roles owner and writer, random quoted etags) for the calendar, then commits.
+        # Raises: ValueError if the user does not exist.
         """Create ACL entries with owner and writer roles for the calendar creator"""
         from database.models.acl import AclRole, ScopeType
 
@@ -158,6 +186,10 @@ class CalendarManager:
     def get_calendar_by_id(
         self, user_id: str, calendar_id: str, allowed_roles: List[str] = None
     ):
+        # [FUNCTION DOC]
+        # Returns the Calendar with calendar_id owned by user_id.
+        # Raises: HTTPException 404 if the calendar does not exist at all, or not for this user;
+        # PermissionError if allowed_roles is given and the user lacks them.
         """Get a calendar by ID for a specific user"""
         calendar = (
             self.session.query(Calendar)
@@ -186,6 +218,12 @@ class CalendarManager:
         return calendar
 
     def update_calendar(self, user_id: str, calendar_id: str, update_data: dict):
+        # [FUNCTION DOC]
+        # Updates summary, description, location, timeZone (only if not None) and
+        # conferenceProperties (validated; stored as JSON or None when falsy) from update_data,
+        # sets updated_at, commits and returns the refreshed Calendar; None if not found.
+        # Raises: ValueError if update_data contains "is_primary" or conference types are invalid.
+        # KNOWN ISSUE: user_id is ignored; no ownership or ACL check is performed.
         """Update a calendar (cannot modify primary status)"""
         calendar = (
             self.session.query(Calendar)
@@ -229,6 +267,9 @@ class CalendarManager:
         return calendar
 
     def delete_calendar(self, user_id: str, calendar_id: str):
+        # [FUNCTION DOC]
+        # Deletes a calendar (cascading events/ACLs); returns True, or False if not found.
+        # Raises: ValueError for primary calendars; PermissionError if user is not an owner via ACL.
         """Delete a calendar (cannot delete primary calendar)"""
         calendar = (
             self.session.query(Calendar)
@@ -246,6 +287,9 @@ class CalendarManager:
         return True
 
     def clear_calendar(self, user_id: str, calendar_id: str):
+        # [FUNCTION DOC]
+        # Deletes all events of a primary calendar and returns how many were deleted; 0 if the calendar is not found.
+        # Raises: PermissionError if the user lacks owner/writer ACL; ValueError if not primary.
         """Clear all events from a calendar and return the number of events deleted"""
         calendar = (
             self.session.query(Calendar)
@@ -267,6 +311,9 @@ class CalendarManager:
         return count
 
     def list_calendars(self, user_id: str):
+        # [FUNCTION DOC]
+        # Returns the union of calendars owned by user_id and calendars shared via an ACL with a
+        # "user" scope matching the user's email; empty list if the user does not exist.
         """List all calendars for a user"""
         user = self.session.query(User).filter(User.user_id == user_id).first()
         if not user:
@@ -281,6 +328,8 @@ class CalendarManager:
         return owned.union(shared).all()
 
     def get_primary_calendar(self, user_id: str):
+        # [FUNCTION DOC]
+        # Returns the user's primary Calendar or None.
         return (
             self.session.query(Calendar)
             .filter_by(user_id=user_id, is_primary=True)
@@ -288,6 +337,10 @@ class CalendarManager:
         )
 
     def _format_calendar_response(self, calendar: Calendar) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: returns a "calendar#calendar" dict with etag "etag-<id>-<updated_at iso>", id,
+        # summary, timeZone, and description/location/conferenceProperties (JSON-decoded, ignored
+        # if invalid) when present.
         """Format calendar model for API response"""
         formatted = {
             "kind": "calendar#calendar",
@@ -314,6 +367,10 @@ class CalendarManager:
         return formatted
 
     def ensure_primary_calendar_constraint(self, user_id: str) -> bool:
+        # [FUNCTION DOC]
+        # Using a separate session: if the user has no primary calendar, marks the oldest one
+        # primary; if several, keeps the oldest primary and demotes the rest; commits. Returns
+        # True in all non-error cases. Rolls back and re-raises on error.
         """Ensure user has exactly one primary calendar"""
         session = get_session(self.database_id)
         try:
@@ -378,6 +435,10 @@ class CalendarManager:
     def _validate_conference_properties(
         self, conference_properties: Optional[Dict]
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: no-op for falsy input or missing list; raises ValueError if
+        # allowedConferenceSolutionTypes is not a list or has entries outside the allowed set
+        # (None/"" entries are tolerated).
         """Validate conferenceProperties.allowedConferenceSolutionTypes values.
 
         Raises ValueError if any provided value is not allowed per API spec.
@@ -404,6 +465,9 @@ class CalendarManager:
             )
 
     def validate_primary_calendar_integrity(self, user_id: str) -> Dict[str, any]:
+        # [FUNCTION DOC]
+        # Returns {user_id, total_calendars, primary_calendars_count, is_valid (exactly one
+        # primary when the user has calendars), primary_calendar_ids}. Re-raises DB errors.
         """Validate primary calendar integrity for a user"""
         session = get_session(self.database_id)
         try:
@@ -440,6 +504,10 @@ class CalendarManager:
     def _ensure_user_has_primary_calendar(
         self, user_id: str, session: Session = None
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: on the given session (or a new one), makes the oldest calendar primary if none
+        # is, or demotes all but the oldest primary if several are. Does not commit.
+        # KNOWN ISSUE: when it opens its own session it closes it without committing, so changes are lost in that mode.
         """Private method to ensure user has exactly one primary calendar
 
         This enforces the business rule: If user has calendars, exactly one must be primary
@@ -497,6 +565,11 @@ class CalendarManager:
                 session.close()
 
     def enforce_primary_calendar_constraint_for_all_users(self) -> Dict[str, int]:
+        # [FUNCTION DOC]
+        # For every user that owns calendars, validates integrity and fixes invalid ones via
+        # _ensure_user_has_primary_calendar on a shared session, then commits. Returns stats
+        # {users_processed, users_fixed, calendars_made_primary, calendars_made_secondary}.
+        # KNOWN ISSUE: calendars_made_primary/secondary are never incremented (always 0).
         """Enforce primary calendar constraint for all users in the database
 
         Returns:

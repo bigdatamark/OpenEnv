@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for scripts/prepare_hf_deployment.sh run in --dry-run --skip-collection mode with
+# a temp staging dir: repo naming, forcing the web interface on, TextArena aliases,
+# SKIP_HF_DEPLOYMENT opt-out, default version resolution from git tags, tag pinning and
+# README description order. Side effects: bash/git subprocesses and temp files.
 """Test staging behavior for the Hugging Face deployment shell helper.
 
 The suite verifies repository naming, web-interface rewriting, aliases, and
@@ -15,6 +20,8 @@ import pytest
 
 
 def test_prepare_hf_deployment_repo_id_override(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --repo-id openenv/repl targets that space and the staged README links to it, not repl_env.
     """An exact repo override should target the canonical repo and README URLs."""
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "scripts" / "prepare_hf_deployment.sh"
@@ -54,6 +61,8 @@ def test_prepare_hf_deployment_repo_id_override(tmp_path: Path) -> None:
 
 
 def test_prepare_hf_deployment_overrides_disabled_web_interface(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Staged chat_env Dockerfile sets ENABLE_WEB_INTERFACE=true and never false.
     """Staged Hub Dockerfiles should force Gradio web interface on."""
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "scripts" / "prepare_hf_deployment.sh"
@@ -95,6 +104,8 @@ def test_prepare_hf_deployment_overrides_disabled_web_interface(tmp_path: Path) 
 
 
 def test_prepare_hf_deployment_sets_textarena_alias_env_id(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Repo id openenv/sudoku stages a Dockerfile with web interface on and TEXTARENA_ENV_ID=Sudoku-v0.
     """TextArena canonical aliases should inject the correct game id into the Dockerfile."""
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "scripts" / "prepare_hf_deployment.sh"
@@ -137,6 +148,9 @@ def test_prepare_hf_deployment_sets_textarena_alias_env_id(tmp_path: Path) -> No
 def test_prepare_hf_deployment_all_honors_opt_out_but_manual_selection_works(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # In a fake repo with two envs, --all skips the env with a SKIP_HF_DEPLOYMENT marker
+    # (and says so on stderr) while an explicit --env still stages it.
     """Automatic discovery should honor the generic marker without blocking --env."""
     repo_root = tmp_path / "openenv"
     scripts_dir = repo_root / "scripts"
@@ -223,6 +237,9 @@ def test_prepare_hf_deployment_all_honors_opt_out_but_manual_selection_works(
 
 
 def test_prepare_hf_deployment_defaults_to_latest_release_tag(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # In a fake git repo tagged v0.4.2 and v0.4.3rc1 (pyproject 0.4.3.dev0), with no
+    # OPENENV_VERSION, the staged space and README tag use 0.4.2.
     """Without --openenv-version, use the latest stable release tag, not a dev or rc version."""
     repo_root = tmp_path / "openenv"
     scripts_dir = repo_root / "scripts"
@@ -285,6 +302,8 @@ def test_prepare_hf_deployment_defaults_to_latest_release_tag(tmp_path: Path) ->
 def test_prepare_hf_deployment_pins_release_tag_not_matching_branch(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Network test: --openenv-version 0.8.0 pins the dependency to git tag v0.8.0.
     """A bare release version should pin the vX.Y.Z tag, not a testpypi/X.Y.Z branch."""
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "scripts" / "prepare_hf_deployment.sh"
@@ -323,6 +342,9 @@ def test_prepare_hf_deployment_pins_release_tag_not_matching_branch(
 
 
 def test_prepare_hf_deployment_keeps_the_env_description_first(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # The staged chess README still starts its description with the env's own first paragraph
+    # (per gradio_ui._description) and includes the "built from" note.
     """The web interface describes the env with the README's first paragraph."""
     from openenv.core.env_server.gradio_ui import _description
     from openenv.core.env_server.types import EnvironmentMetadata

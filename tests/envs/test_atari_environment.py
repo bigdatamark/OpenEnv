@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Tests the Atari environment's web playground hooks. Skipped without ale_py.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the Atari environment's web playground drawing."""
@@ -15,6 +17,10 @@ from PIL import Image
 
 
 def test_atari_web_playground():
+    # [FUNCTION DOC]
+    # Pong: web_actions lists the six named actions; render_web returns an <img>
+    # with a base64 PNG of size 160x210; render_web returns None for an empty
+    # observation and for RAM-type observations.
     env = AtariEnvironment(game_name="pong")
     env.reset()
     obs = env.step(AtariAction(action_id=1)).model_dump()

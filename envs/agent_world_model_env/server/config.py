@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Constants configuring the AWM server: concurrency cap, subprocess readiness timeouts/polling/port retries,
+# idle-cleanup thresholds and interval, and the default reward map (complete 1.0, incomplete 0.1,
+# format_error -1.0). Most values can be overridden through OPENENV_AWM_* environment variables read at import.
+# KNOWN ISSUE: MAX_CONCURRENT_ENVS and READY_POLL_INTERVAL are hard-coded and not overridable, despite the module
+# docstring; the "others=0.0" mentioned in the comment is not present in DEFAULT_REWARD_CONFIG.
 """
 Default configuration for AWM environment server.
 

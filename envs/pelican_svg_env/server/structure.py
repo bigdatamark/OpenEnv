@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Structural (shape-level, deterministic) checks for "animal riding a vehicle" drawings: detects
+# wheels as a level row of similar round shapes, checks wheel count, size similarity, levelness,
+# spacing and a frame spanning them, finds a rider mass above the axle line and checks its
+# proportion. Thresholds are module constants. Produces a StructureReport whose score is the
+# fraction of checks passed.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Structural checks: is there a vehicle, and is something riding it?
@@ -66,6 +72,8 @@ ROW_HEIGHT_PRECISION = 2
 
 @dataclass(frozen=True)
 class Check:
+    # [CLASS DOC]
+    # Immutable result of one structural check: name, passed flag and a detail string with the measurement.
     """One structural question and its answer.
 
     Attributes:
@@ -85,6 +93,9 @@ class Check:
 
 @dataclass(frozen=True)
 class StructureReport:
+    # [CLASS DOC]
+    # Immutable analysis result: list of checks, detected wheels (left to right), rider shape or None,
+    # count of round candidates and number of significant shapes considered.
     """Outcome of the structural analysis.
 
     Attributes:
@@ -106,6 +117,8 @@ class StructureReport:
 
     @property
     def score(self) -> float:
+        # [FUNCTION DOC]
+        # Property: fraction of checks passed; 0.0 when there are no checks.
         """`float`: Fraction of structural checks passed."""
         if not self.checks:
             return 0.0
@@ -113,10 +126,15 @@ class StructureReport:
 
     @property
     def passed_names(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: names of passed checks.
         """`list[str]`: Names of the checks that passed."""
         return [c.name for c in self.checks if c.passed]
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a JSON-safe mapping: rounded score, wheel_count, has_rider, check verdicts and details by
+        # name, per-wheel and rider geometry summaries, round_candidates and shapes_considered.
         """Return a JSON-serialisable summary.
 
         The detected geometry is reported, not just the verdicts. "Found 1 wheel"
@@ -127,6 +145,9 @@ class StructureReport:
         """
 
         def geometry(shape: Shape | None) -> dict[str, Any] | None:
+            # [FUNCTION DOC]
+            # HELPER: Returns a rounded geometry mapping (tag, cx, cy, radius, area, circularity, radius_cv,
+            # aspect) for a shape, or None.
             if shape is None:
                 return None
             return {
@@ -154,6 +175,8 @@ class StructureReport:
 
 
 def is_wheel(shape: Shape) -> bool:
+    # [FUNCTION DOC]
+    # True if the shape has circularity at least 0.90, radius_cv at most 0.12 and aspect in [0.70, 1.43].
     """Whether a shape looks like a wheel seen from the side."""
     return (
         shape.circularity >= WHEEL_MIN_CIRCULARITY
@@ -163,6 +186,9 @@ def is_wheel(shape: Shape) -> bool:
 
 
 def _merge_concentric(row: Sequence[Shape]) -> list[Shape]:
+    # [FUNCTION DOC]
+    # HELPER: Keeps shapes largest-radius first, dropping any whose centroid is closer than 0.6 times
+    # the larger radius to an already kept shape. Returns the kept list.
     """Collapse a wheel drawn as several concentric circles into its outermost."""
     wheels: list[Shape] = []
     for candidate in sorted(row, key=lambda s: s.radius, reverse=True):
@@ -176,6 +202,12 @@ def _merge_concentric(row: Sequence[Shape]) -> list[Shape]:
 
 
 def find_wheels(shapes: Sequence[Shape], expected: int = 2) -> list[Shape]:
+    # [FUNCTION DOC]
+    # Finds wheels. Considers wheel-like shapes; for each as a seed, builds a row of round shapes within
+    # a factor of 2 in radius and within 1.2 radii vertically, merges concentric ones, and ranks rows by
+    # (mean bottom edge rounded to 2 decimals, whether count equals expected, mean radius), keeping the
+    # highest (lowest on the canvas). Deduplicates the winner again and returns it sorted by x. Returns
+    # an empty list when there are no round shapes.
     """Collect wheel-like shapes, merging concentric duplicates.
 
     Wheels are found as a *row* rather than by picking the largest round shape.
@@ -253,6 +285,9 @@ def find_wheels(shapes: Sequence[Shape], expected: int = 2) -> list[Shape]:
 
 
 def _is_background(shape: Shape, wheels: Sequence[Shape] = ()) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the shape's area is at least 0.30 and either there are no wheels or its bbox
+    # contains every wheel centroid.
     """Whether a shape is a backdrop rather than a subject."""
     if shape.area < BACKGROUND_MIN_AREA:
         return False
@@ -265,6 +300,11 @@ def _is_background(shape: Shape, wheels: Sequence[Shape] = ()) -> bool:
 def _frame_spans_wheels(
     shapes: Sequence[Shape], wheels: Sequence[Shape]
 ) -> tuple[bool, str]:
+    # [FUNCTION DOC]
+    # HELPER: Checks frame coverage between the leftmost and rightmost wheel hubs: splits the span into
+    # 10 bins and marks bins containing points of non-wheel, non-background shapes within a vertical
+    # band from 2.5 radii above to 0.5 below the hub line. Returns (at least 8 bins covered, detail).
+    # Returns (False, reason) if the wheels are not horizontally separated. Requires at least one wheel.
     """Whether geometry bridges the gap between the outermost hubs.
 
     The span runs between the outermost pair, matching `wheels_apart`, since
@@ -306,6 +346,10 @@ def _frame_spans_wheels(
 def _find_rider(
     shapes: Sequence[Shape], wheels: Sequence[Shape]
 ) -> tuple[Shape | None, str]:
+    # [FUNCTION DOC]
+    # HELPER: Picks the largest closed, non-wheel, non-background shape with area in [0.008, 0.35]
+    # whose centroid is at least 0.8 mean radii above the mean hub height and horizontally within one
+    # radius of the wheel span. Returns (shape or None, detail string).
     """Largest closed mass sitting above the axle line and between the wheels."""
     if not wheels:
         return None, "no wheels, so no axle line to sit above"
@@ -341,6 +385,11 @@ def _find_rider(
 def analyse_structure(
     shapes: Sequence[Shape], expected_wheels: int = 2
 ) -> StructureReport:
+    # [FUNCTION DOC]
+    # Runs all checks on significant shapes: wheel_count; for expected_wheels >= 2, the four pair checks
+    # (similar size ratio >= 0.65, level within 0.5 radii, hub separation 1.8 to 8 radii, frame spans
+    # wheels), failed outright if fewer than two wheels; rider_present; rider_proportionate (rider extent
+    # over wheelbase, or two radii for one wheel, within 0.25 to 1.6). Returns the StructureReport.
     """Run every structural check against the extracted shapes.
 
     Args:

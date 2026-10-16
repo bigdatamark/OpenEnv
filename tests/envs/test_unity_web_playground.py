@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for the Unity env's web playground hooks (render_web image HTML and
+# web_actions buttons) and the UNITY_INCLUDE_VISUAL env default; no Unity binary needed.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the Unity environment's web playground drawing (no Unity binary needed)."""
@@ -7,6 +10,10 @@ from unity_env.server.unity_environment import UnityMLAgentsEnvironment
 
 
 def test_unity_web_playground(tmp_path):
+    # [FUNCTION DOC]
+    # Checks render_web emits an img tag for observations with a visual frame and None
+    # otherwise; web_actions yields named discrete actions for PushBlock, generic
+    # "action N" labels for unknown behaviors, and nothing for continuous action specs.
     env = UnityMLAgentsEnvironment(cache_dir=str(tmp_path))
     obs = UnityObservation(
         visual_observations=["iVBORw0KGgo="],
@@ -40,6 +47,8 @@ def test_unity_web_playground(tmp_path):
 
 
 def test_unity_include_visual_default(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # Checks _include_visual is True when UNITY_INCLUDE_VISUAL=1 and False when unset.
     monkeypatch.setenv("UNITY_INCLUDE_VISUAL", "1")
     assert UnityMLAgentsEnvironment(cache_dir=str(tmp_path))._include_visual
     monkeypatch.delenv("UNITY_INCLUDE_VISUAL")

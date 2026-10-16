@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Minimal example running the tbench2 environment in a single Daytona sandbox: reset to a task, run "ls -la", print outputs.
+# Requires DAYTONA_API_KEY. Side effects: creates/destroys a remote sandbox, network I/O, stdout.
 """Minimal example for the TB2 OpenEnv runner (Daytona mode).
 
 Usage:
@@ -16,6 +19,10 @@ from tbench2_env import Tbench2Action, Tbench2Env
 
 
 async def main() -> int:
+    # [FUNCTION DOC]
+    # Reads TB2_TASK_ID (default headless-terminal), builds the image from the tbench2 Dockerfile, starts the sandbox and
+    # waits up to 180 s, resets, executes "ls -la", prints the instruction head and output, always stops the container. Returns 0.
+    # KNOWN ISSUE: TB2_TASKS_DIR is read only to print a notice; it is never passed to the environment.
     tasks_dir = os.environ.get("TB2_TASKS_DIR")
     if not tasks_dir:
         print("TB2_TASKS_DIR not set. TB2 repo will be downloaded.")

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Unit tests for scripts/manage_hf_collection.py with all Hub calls mocked: API setup,
+# collection fetch, openenv space discovery, add/remove reconciliation, slug resolution
+# and main() orchestration. Adds scripts/ to sys.path at import time.
 """
 Unit tests for the Hugging Face collection manager script.
 
@@ -19,11 +23,15 @@ import manage_hf_collection
 
 
 class TestSetupApi:
+    # [CLASS DOC]
+    # Tests setup_api authentication behaviour.
     """Tests for API setup and authentication."""
 
     @patch.dict(os.environ, {}, clear=True)
     @patch("manage_hf_collection.HfApi")
     def test_setup_api_no_token(self, mock_hf_api):
+        # [FUNCTION DOC]
+        # Without HF_TOKEN, HfApi is built with no args and whoami is called.
         """Test successful API setup path without HF_TOKEN (local auth flow)."""
         mock_api = Mock()
         mock_api.whoami.return_value = {"name": "local_user"}
@@ -38,6 +46,8 @@ class TestSetupApi:
     @patch.dict(os.environ, {"HF_TOKEN": "test_token"})
     @patch("manage_hf_collection.HfApi")
     def test_setup_api_success(self, mock_hf_api):
+        # [FUNCTION DOC]
+        # With HF_TOKEN, HfApi is built with that token and whoami is called.
         """Test successful API setup."""
         mock_api = Mock()
         mock_api.whoami.return_value = {"name": "test_user"}
@@ -52,6 +62,8 @@ class TestSetupApi:
     @patch.dict(os.environ, {"HF_TOKEN": "invalid_token"})
     @patch("manage_hf_collection.HfApi")
     def test_setup_api_auth_failure(self, mock_hf_api):
+        # [FUNCTION DOC]
+        # whoami failure makes setup_api exit with code 1.
         """Test that setup_api exits when authentication fails."""
         mock_api = Mock()
         mock_api.whoami.side_effect = Exception("Auth failed")
@@ -63,9 +75,13 @@ class TestSetupApi:
 
 
 class TestGetCollectionSpaces:
+    # [CLASS DOC]
+    # Tests get_collection_spaces.
     """Tests for fetching spaces from the collection."""
 
     def test_get_collection_spaces_success(self):
+        # [FUNCTION DOC]
+        # Only items of type "space" are returned.
         """Test successfully fetching spaces from collection."""
         mock_api = Mock()
         mock_collection = Mock()
@@ -96,6 +112,8 @@ class TestGetCollectionSpaces:
         assert "owner3/model1" not in result
 
     def test_get_collection_spaces_not_found(self):
+        # [FUNCTION DOC]
+        # A 404 HfHubHTTPError exits with code 1.
         """Test handling of collection not found error."""
         mock_api = Mock()
         mock_response = Mock()
@@ -110,6 +128,8 @@ class TestGetCollectionSpaces:
         assert exc_info.value.code == 1
 
     def test_get_collection_spaces_other_error(self):
+        # [FUNCTION DOC]
+        # A 500 HfHubHTTPError exits with code 1.
         """Test handling of other HTTP errors."""
         mock_api = Mock()
         mock_response = Mock()
@@ -125,10 +145,14 @@ class TestGetCollectionSpaces:
 
 
 class TestDiscoverOpenenvSpaces:
+    # [CLASS DOC]
+    # Tests discover_openenv_spaces (list_spaces patched; space_info mocked per id).
     """Tests for discovering spaces with openenv tag."""
 
     @patch("manage_hf_collection.list_spaces")
     def test_discover_openenv_spaces_success(self, mock_list_spaces):
+        # [FUNCTION DOC]
+        # Docker spaces tagged openenv are returned; list_spaces called with search/sort args.
         """Test successfully discovering openenv spaces."""
         mock_api = Mock()
 
@@ -143,6 +167,8 @@ class TestDiscoverOpenenvSpaces:
 
         # Mock space_info to return proper SpaceInfo objects
         def mock_space_info(space_id):
+            # [FUNCTION DOC]
+            # HELPER: Returns a docker space info tagged openenv.
             space_info = Mock()
             space_info.sdk = "docker"
             space_info.tags = ["openenv", "environment"]
@@ -163,6 +189,8 @@ class TestDiscoverOpenenvSpaces:
 
     @patch("manage_hf_collection.list_spaces")
     def test_discover_openenv_spaces_filters_non_docker(self, mock_list_spaces):
+        # [FUNCTION DOC]
+        # Gradio spaces are excluded.
         """Test that non-Docker spaces are filtered out."""
         mock_api = Mock()
 
@@ -177,6 +205,8 @@ class TestDiscoverOpenenvSpaces:
 
         # First space is Docker with openenv tag, second is Gradio
         def mock_space_info(space_id):
+            # [FUNCTION DOC]
+            # HELPER: Docker info for owner1's space, gradio for any other.
             space_info = Mock()
             if space_id == "owner1/openenv-space1":
                 space_info.sdk = "docker"
@@ -197,6 +227,8 @@ class TestDiscoverOpenenvSpaces:
 
     @patch("manage_hf_collection.list_spaces")
     def test_discover_openenv_spaces_filters_missing_tag(self, mock_list_spaces):
+        # [FUNCTION DOC]
+        # Docker spaces without the openenv tag are excluded.
         """Test that spaces without openenv tag are filtered out."""
         mock_api = Mock()
 
@@ -207,6 +239,8 @@ class TestDiscoverOpenenvSpaces:
 
         # Space is Docker but doesn't have openenv tag
         def mock_space_info(space_id):
+            # [FUNCTION DOC]
+            # HELPER: Returns docker info with an unrelated tag.
             space_info = Mock()
             space_info.sdk = "docker"
             space_info.tags = ["other-tag"]
@@ -220,6 +254,8 @@ class TestDiscoverOpenenvSpaces:
 
     @patch("manage_hf_collection.list_spaces")
     def test_discover_openenv_spaces_empty(self, mock_list_spaces):
+        # [FUNCTION DOC]
+        # No listed spaces gives an empty list.
         """Test discovering spaces when none exist."""
         mock_api = Mock()
         mock_list_spaces.return_value = []
@@ -231,6 +267,8 @@ class TestDiscoverOpenenvSpaces:
 
     @patch("manage_hf_collection.list_spaces")
     def test_discover_openenv_spaces_handles_space_info_error(self, mock_list_spaces):
+        # [FUNCTION DOC]
+        # A space_info failure for one space skips it and keeps the others.
         """Test handling of errors when fetching individual space info."""
         mock_api = Mock()
 
@@ -243,6 +281,8 @@ class TestDiscoverOpenenvSpaces:
 
         # First space fails, second succeeds
         def mock_space_info(space_id):
+            # [FUNCTION DOC]
+            # HELPER: Raises for owner1/space1, else returns docker info tagged openenv.
             if space_id == "owner1/space1":
                 raise Exception("Space not found")
             space_info = Mock()
@@ -260,6 +300,8 @@ class TestDiscoverOpenenvSpaces:
 
     @patch("manage_hf_collection.list_spaces")
     def test_discover_openenv_spaces_error(self, mock_list_spaces):
+        # [FUNCTION DOC]
+        # A list_spaces failure exits with code 1.
         """Test handling of errors during space discovery."""
         mock_api = Mock()
         mock_list_spaces.side_effect = Exception("API error")
@@ -270,9 +312,13 @@ class TestDiscoverOpenenvSpaces:
 
 
 class TestAddSpacesToCollection:
+    # [CLASS DOC]
+    # Tests add_spaces_to_collection return counts and API calls.
     """Tests for adding spaces to the collection."""
 
     def test_add_spaces_empty_list(self):
+        # [FUNCTION DOC]
+        # Empty input returns 0 with no API calls.
         """Test adding empty list of spaces."""
         mock_api = Mock()
 
@@ -288,6 +334,8 @@ class TestAddSpacesToCollection:
         mock_api.add_collection_item.assert_not_called()
 
     def test_add_spaces_dry_run(self):
+        # [FUNCTION DOC]
+        # Dry run returns the would-add count without API calls.
         """Test adding spaces in dry-run mode."""
         mock_api = Mock()
         space_ids = ["owner1/space1", "owner2/space2"]
@@ -304,6 +352,8 @@ class TestAddSpacesToCollection:
         mock_api.add_collection_item.assert_not_called()
 
     def test_add_spaces_success(self):
+        # [FUNCTION DOC]
+        # Adds each space with slug, item type "space" and note "OpenEnv release 2.1.0".
         """Test successfully adding spaces."""
         mock_api = Mock()
         space_ids = ["owner1/space1", "owner2/space2"]
@@ -327,6 +377,8 @@ class TestAddSpacesToCollection:
         assert calls[0][1]["note"] == "OpenEnv release 2.1.0"
 
     def test_add_spaces_duplicate_conflict(self):
+        # [FUNCTION DOC]
+        # A 409 conflict is tolerated and not counted.
         """Test handling of duplicate space (409 conflict)."""
         mock_api = Mock()
         mock_response = Mock()
@@ -348,6 +400,8 @@ class TestAddSpacesToCollection:
         assert result == 0
 
     def test_add_spaces_partial_failure(self):
+        # [FUNCTION DOC]
+        # A 500 on the second item yields a count of 1.
         """Test adding spaces with some failures."""
         mock_api = Mock()
         mock_response = Mock()
@@ -371,9 +425,13 @@ class TestAddSpacesToCollection:
 
 
 class TestRemoveSpacesFromCollection:
+    # [CLASS DOC]
+    # Tests remove_spaces_from_collection reconciliation.
     """Tests for collection reconciliation removals."""
 
     def test_remove_spaces_dry_run(self):
+        # [FUNCTION DOC]
+        # Dry run counts 1 stale item and deletes nothing.
         """Dry-run reconcile should report removals without mutating the API."""
         mock_api = Mock()
         current_items = []
@@ -400,6 +458,8 @@ class TestRemoveSpacesFromCollection:
         mock_api.delete_collection_item.assert_not_called()
 
     def test_remove_spaces_success(self):
+        # [FUNCTION DOC]
+        # Deletes only the stale item by object id with missing_ok True; returns 1.
         """Reconcile should delete collection entries that are not in the target set."""
         mock_api = Mock()
 
@@ -428,9 +488,13 @@ class TestRemoveSpacesFromCollection:
 
 
 class TestResolveCollectionSlug:
+    # [CLASS DOC]
+    # Tests resolve_collection_slug.
     """Tests for resolving explicit collection slugs."""
 
     def test_resolve_collection_slug_canonicalizes_explicit_alias(self):
+        # [FUNCTION DOC]
+        # An explicit slug is looked up and replaced by the Hub's canonical slug; metadata updated.
         """Explicit user-facing slugs should resolve to the canonical Hub slug."""
         mock_api = Mock()
         mock_collection = Mock()
@@ -463,6 +527,8 @@ class TestResolveCollectionSlug:
     def test_resolve_collection_slug_falls_back_to_explicit_alias_on_lookup_failure(
         self,
     ):
+        # [FUNCTION DOC]
+        # If lookup fails, the explicit slug is returned and its metadata updated.
         """Lookup failures should fall back to the user-provided explicit slug."""
         mock_api = Mock()
         mock_api.get_collection.side_effect = Exception("lookup failed")
@@ -486,6 +552,8 @@ class TestResolveCollectionSlug:
         )
 
     def test_resolve_collection_slug_updates_existing_collection_metadata(self):
+        # [FUNCTION DOC]
+        # Without explicit slug, an existing collection with the same title is reused and refreshed.
         """Existing collections should have description/title refreshed on reuse."""
         mock_api = Mock()
         mock_collection = Mock()
@@ -513,6 +581,8 @@ class TestResolveCollectionSlug:
 
 
 class TestMain:
+    # [CLASS DOC]
+    # Tests main() with all helpers patched and sys.argv set per test.
     """Tests for the main function."""
 
     @patch("manage_hf_collection.setup_api")
@@ -529,6 +599,8 @@ class TestMain:
         mock_resolve_slug,
         mock_setup_api,
     ):
+        # [FUNCTION DOC]
+        # --dry-run passes dry_run=True to add_spaces_to_collection.
         """Test main function in dry-run mode."""
         mock_api = Mock()
         mock_setup_api.return_value = mock_api
@@ -562,6 +634,8 @@ class TestMain:
         mock_resolve_slug,
         mock_setup_api,
     ):
+        # [FUNCTION DOC]
+        # --reconcile calls remove_spaces_from_collection with the slug, discovered targets and current items.
         """Reconcile mode should remove spaces outside the resolved target set."""
         mock_api = Mock()
         mock_setup_api.return_value = mock_api
@@ -602,6 +676,8 @@ class TestMain:
         mock_resolve_slug,
         mock_setup_api,
     ):
+        # [FUNCTION DOC]
+        # Only discovered spaces not already in the collection are passed to add.
         """Test main function correctly identifies new spaces."""
         mock_api = Mock()
         mock_setup_api.return_value = mock_api
@@ -636,6 +712,8 @@ class TestMain:
         mock_resolve_slug,
         mock_setup_api,
     ):
+        # [FUNCTION DOC]
+        # --verbose runs without error.
         """Test main function with verbose logging."""
         mock_api = Mock()
         mock_setup_api.return_value = mock_api
@@ -665,6 +743,8 @@ class TestMain:
         mock_resolve_slug,
         mock_setup_api,
     ):
+        # [FUNCTION DOC]
+        # --global-scope tagged uses tag discovery instead of canonical discovery.
         """Tagged scope should keep the old broad-discovery behavior when requested."""
         mock_api = Mock()
         mock_setup_api.return_value = mock_api
@@ -681,6 +761,8 @@ class TestMain:
 
 
 class TestIdempotency:
+    # [CLASS DOC]
+    # Tests that reruns with no new spaces add nothing.
     """Tests to verify idempotent behavior."""
 
     @patch("manage_hf_collection.setup_api")
@@ -697,6 +779,8 @@ class TestIdempotency:
         mock_resolve_slug,
         mock_setup_api,
     ):
+        # [FUNCTION DOC]
+        # add_spaces_to_collection is called with an empty list.
         """Test that running with no new spaces makes no changes."""
         mock_api = Mock()
         mock_setup_api.return_value = mock_api

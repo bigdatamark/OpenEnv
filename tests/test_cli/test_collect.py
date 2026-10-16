@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for the "openenv collect" CLI command via typer's CliRunner, with the OpenSpiel
+# env, session factory, CollectRunner, serializer and harness adapter patched out:
+# provider selection, LLM endpoint URL normalisation/validation, hub push, loss filtering
+# and legal-action extraction.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the ``openenv collect`` CLI command."""
@@ -20,6 +25,9 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 @pytest.fixture
 def mock_pipeline():
+    # [FUNCTION DOC]
+    # Fixture: patches the collect pipeline classes; the runner returns a canned result
+    # (3 collected, 0.6 reward). Yields: a mapping of the patched mocks by role.
     """Patch the collect pipeline internals so tests don't hit network or disk."""
     with (
         patch("openenv.cli.commands.collect.OpenSpielEnv") as env_cls,
@@ -52,6 +60,8 @@ def mock_pipeline():
 
 
 def test_scripted_provider_requires_no_llm_client(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # --provider scripted succeeds without creating an LLM client and runs once.
     with patch("openenv.cli.commands.collect.create_llm_client") as create_client:
         result = runner.invoke(
             app,
@@ -75,6 +85,8 @@ def test_scripted_provider_requires_no_llm_client(tmp_path: Path, mock_pipeline)
 
 
 def test_openai_provider_builds_llm_client(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # --provider openai builds an LLM client with the model and OPENAI_API_KEY.
     llm_client = MagicMock()
     with (
         patch(
@@ -111,6 +123,9 @@ def test_openai_provider_builds_llm_client(tmp_path: Path, mock_pipeline):
 def test_llm_endpoint_uses_llm_teacher_with_default_provider(
     tmp_path: Path, mock_pipeline
 ):
+    # [FUNCTION DOC]
+    # --llm-endpoint selects the LLM model step (not scripted) and records provider
+    # "openai-compatible" and the endpoint in metadata.
     llm_step = MagicMock(name="llm_step")
     scripted_step = MagicMock(name="scripted_step")
 
@@ -154,6 +169,8 @@ def test_llm_endpoint_uses_llm_teacher_with_default_provider(
 
 
 def test_push_to_hub_triggers_upload(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # --push-to-hub user/ttt --private calls push_to_hf_hub with that repo and private True.
     with (
         patch("openenv.cli.commands.collect.push_to_hf_hub") as push_mock,
     ):
@@ -185,6 +202,8 @@ def test_push_to_hub_triggers_upload(tmp_path: Path, mock_pipeline):
 
 
 def test_unknown_env_id_exits_nonzero(tmp_path: Path):
+    # [FUNCTION DOC]
+    # An unsupported env id fails with an unknown/not-supported message.
     result = runner.invoke(
         app,
         [
@@ -206,6 +225,8 @@ def test_unknown_env_id_exits_nonzero(tmp_path: Path):
 
 
 def test_openai_provider_errors_without_model(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # --provider openai without --model fails mentioning "model".
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
         result = runner.invoke(
             app,
@@ -226,6 +247,8 @@ def test_openai_provider_errors_without_model(tmp_path: Path, mock_pipeline):
 
 
 def test_extract_legal_actions_from_json_observation():
+    # [FUNCTION DOC]
+    # Legal actions are read from a JSON message content.
     actions = _extract_legal_actions(
         [
             {"content": "ignored"},
@@ -237,6 +260,8 @@ def test_extract_legal_actions_from_json_observation():
 
 
 def test_extract_legal_actions_from_text_observation():
+    # [FUNCTION DOC]
+    # Legal actions are parsed from "Legal actions: [...]" text.
     actions = _extract_legal_actions(
         [
             {"content": "Legal actions: [1, 3, 5]"},
@@ -247,6 +272,8 @@ def test_extract_legal_actions_from_text_observation():
 
 
 def test_keep_losses_disables_filter(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # --keep-losses passes no should_keep filter to the runner.
     result = runner.invoke(
         app,
         [
@@ -269,6 +296,8 @@ def test_keep_losses_disables_filter(tmp_path: Path, mock_pipeline):
 
 
 def test_default_filters_losing_rollouts(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # By default should_keep keeps reward 1.0 and drops reward -1.0.
     result = runner.invoke(
         app,
         [
@@ -311,6 +340,8 @@ def test_default_filters_losing_rollouts(tmp_path: Path, mock_pipeline):
 def test_llm_endpoint_url_forms_reach_openai_client(
     tmp_path: Path, mock_pipeline, llm_args, expected_base_url
 ):
+    # [FUNCTION DOC]
+    # Parametrized: endpoint/port forms normalise to the expected /v1 base_url passed to AsyncOpenAI.
     with patch("openenv.core.llm_client.AsyncOpenAI") as openai_cls:
         result = runner.invoke(
             app,
@@ -361,6 +392,10 @@ def test_llm_endpoint_url_forms_reach_openai_client(
 def test_bad_llm_endpoint_is_usage_error_before_output_is_written(
     tmp_path: Path, mock_pipeline, llm_args, expected_message
 ):
+    # [FUNCTION DOC]
+    # Parametrized: invalid endpoints (double port, port conflict, non-http, out-of-range port,
+    # query string, credentials) exit 2 naming --llm-endpoint, never echo the password, and
+    # nothing is run or written. Strips ANSI codes and box chars before matching.
     result = runner.invoke(
         app,
         [
@@ -389,6 +424,8 @@ def test_bad_llm_endpoint_is_usage_error_before_output_is_written(
 
 
 def test_resolved_llm_endpoint_is_printed(tmp_path: Path, mock_pipeline):
+    # [FUNCTION DOC]
+    # The resolved LLM endpoint line is printed to the console.
     with (
         patch("openenv.core.llm_client.AsyncOpenAI"),
         patch("openenv.cli.commands.collect.console") as console,

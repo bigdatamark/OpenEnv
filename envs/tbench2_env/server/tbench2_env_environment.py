@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Terminal-Bench 2 server environments. Tbench2Environment runs agent commands locally through CAMEL's
+# TerminalToolkit in the same filesystem as the server; Tbench2DockerEnvironment runs each task in its own
+# container built from the task's official image. Both score with the task's canonical tests/test.sh
+# staged at the fixed paths /tests and /logs/verifier only for the verify window (pytest fallback when a
+# task has no test.sh), parsing marker lines echoed into the command output.
+# Task directories come from TB2_TASKS_DIR or from a downloaded and cached TB2 repo archive.
+# Module globals: fixed verify paths, reward and exit-code marker strings, cached camel import error.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -50,6 +58,9 @@ _VERIFIER_LOG_DIR = "/logs/verifier"
 
 
 def _hard_remove(path: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: removes a file or symlink (unlinking the link itself) or recursively deletes a directory,
+    # ignoring missing paths and rmtree errors.
     """Remove whatever is at *path* — file, symlink, or directory tree.
 
     shutil.rmtree refuses to remove a symlink and, with ignore_errors=True,
@@ -66,6 +77,9 @@ def _hard_remove(path: str) -> None:
 
 
 def _extractall(tar: tarfile.TarFile, dest: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: extracts a tar archive to dest using the "data" safety filter, falling back to unfiltered
+    # extraction on Pythons that do not accept the filter argument.
     """extractall with the 3.12 data filter when available. The tarball is one
     this server wrote from a trusted tests/ dir, so the filter is defence in
     depth; on <3.12 (the ``filter`` kwarg predates it) fall back cleanly rather
@@ -77,6 +91,9 @@ def _extractall(tar: tarfile.TarFile, dest: str) -> None:
 
 
 def _require_terminal_toolkit() -> Any:
+    # [FUNCTION DOC]
+    # HELPER: imports and returns CAMEL's TerminalToolkit class. Raises RuntimeError (chained to the import
+    # error) if camel-ai is unavailable; caches the failure in a module global so later calls fail fast.
     global _CAMEL_IMPORT_ERROR
     if _CAMEL_IMPORT_ERROR is not None:
         raise RuntimeError(
@@ -95,6 +112,10 @@ def _require_terminal_toolkit() -> Any:
 
 
 def _download_tb2_repo(cache_dir: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: ensures the TB2 repository zip (TB2_REPO_URL or the GitHub main-branch archive) is downloaded into
+    # cache_dir and extracted. Downloads only if the zip is absent, extracts only if the top-level directory is
+    # absent. Returns the extracted repo root path. Side effects: network download and filesystem writes.
     repo_url = os.getenv(
         "TB2_REPO_URL",
         "https://github.com/laude-institute/terminal-bench-2/archive/refs/heads/main.zip",
@@ -115,6 +136,8 @@ def _download_tb2_repo(cache_dir: Path) -> Path:
 
 
 def _read_instruction(task_dir: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the task's instruction.md text, or "" if missing.
     instruction_path = task_dir / "instruction.md"
     if instruction_path.exists():
         return instruction_path.read_text(encoding="utf-8")
@@ -122,6 +145,9 @@ def _read_instruction(task_dir: Path) -> str:
 
 
 def _task_image_workdir(task_dir: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the last WORKDIR value in the task's environment/Dockerfile (case-insensitive match),
+    # or "" if no Dockerfile or no WORKDIR.
     """WORKDIR pinned by the task's own image (environment/Dockerfile).
 
     Empty string when the task ships no Dockerfile or no WORKDIR; multi-stage
@@ -138,6 +164,9 @@ def _task_image_workdir(task_dir: Path) -> str:
 
 
 def _workdir_is_server_tree(workdir: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if this module's file lives under workdir (meaning workdir is the server's install tree,
+    # not the task's); also True if path resolution raises OSError.
     """True when *workdir* contains this server's own code.
 
     A Dockerfile-parsed WORKDIR is only meaningful when the server runs
@@ -154,6 +183,9 @@ def _workdir_is_server_tree(workdir: str) -> bool:
 
 
 def _read_timeout(task_dir: Path, fallback: float) -> float:
+    # [FUNCTION DOC]
+    # HELPER: returns the verifier timeout_sec from task.toml's [verifier] table as float, or fallback when the
+    # file is missing or unparsable or has no such key.
     task_toml = task_dir / "task.toml"
     if not task_toml.exists():
         return fallback
@@ -173,6 +205,10 @@ _EXIT_CODE_MARKER = "__TB2_EXIT_CODE__:"
 
 
 def _canonical_eval_cmd(workdir: str, timeout_s: float | None = None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: builds the shell command that cds into workdir, runs bash /tests/test.sh (wrapped with coreutils
+    # timeout when timeout_s is given and available) with output to /logs/verifier/testsh.log, prints the last
+    # 20000 bytes of that log, then echoes the reward marker followed by the contents of reward.txt.
     """The official-harness scoring command, run from the agent's workdir.
 
     /tests/test.sh (staged by the caller) pins its own pytest toolchain (uvx:
@@ -202,6 +238,9 @@ def _canonical_eval_cmd(workdir: str, timeout_s: float | None = None) -> str:
 
 
 def _parse_canonical_reward(output: str) -> float | None:
+    # [FUNCTION DOC]
+    # HELPER: scans output lines from the end for the reward marker; returns the float after it, or None if
+    # there is no marker, the value is empty, or it is not numeric.
     """The verdict test.sh's verifier wrote to reward.txt, echoed on the
     marker line. None when no verdict can be recovered — no marker line, an
     empty value (reward.txt absent: test.sh crashed or was killed before its
@@ -224,6 +263,8 @@ def _parse_canonical_reward(output: str) -> float | None:
 
 
 def _require_canonical_verdict(reward: float | None, output: str) -> float:
+    # [FUNCTION DOC]
+    # HELPER: returns reward unchanged; raises RuntimeError (including the last 800 chars of output) if None.
     """Raise when the canonical harness produced no verdict (see above)."""
     if reward is None:
         raise RuntimeError(
@@ -234,6 +275,9 @@ def _require_canonical_verdict(reward: float | None, output: str) -> float:
 
 
 def _fallback_eval_cmd(workdir: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: builds a shell command that cds into workdir, runs pytest quietly on /tests (via uvx with pinned
+    # pytest when available, else python -m pytest) and echoes the exit-code marker with pytest's exit status.
     """pytest against the staged tests copy, for task dirs without the
     canonical harness (none of the 89 official TB2 tasks — they all ship
     test.sh — but custom task dirs may only have bare pytest tests). Prefer
@@ -250,6 +294,8 @@ def _fallback_eval_cmd(workdir: str) -> str:
 
 
 def _parse_exit_code_marker(output: str) -> int:
+    # [FUNCTION DOC]
+    # HELPER: returns the integer after the last exit-code marker line in output; 1 if absent or unparsable.
     for line in output.splitlines()[::-1]:
         if _EXIT_CODE_MARKER in line:
             try:
@@ -260,6 +306,11 @@ def _parse_exit_code_marker(output: str) -> int:
 
 
 class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2State]):
+    # [CLASS DOC]
+    # Local-execution TB2 environment. Holds configuration, the current task dir, instruction, resolved workdir,
+    # the TerminalToolkit instance and Tbench2State. Class-level shared data: an in-memory cache of withheld
+    # tests/ tarballs per task dir (with a lock) and a lock serialising canonical evaluation across sessions.
+    # Supports concurrent sessions.
     """OpenEnv wrapper around Terminal-Bench 2 tasks (local execution)."""
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
@@ -273,6 +324,11 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
         default_task_id: str | None = None,
         withhold_tests: bool | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Inputs (falling back to env vars): tasks_dir (TB2_TASKS_DIR), output_dir (TB2_OUTPUT_DIR, default
+        # /tmp/tbench2_env_runs), command_timeout_s (TB2_COMMAND_TIMEOUT_S, default 20.0), safe_mode, default task
+        # id (TB2_DEFAULT_TASK_ID, default "headless-terminal"), withhold_tests (TB2_WITHHOLD_TESTS == "1").
+        # Only stores settings; no I/O.
         super().__init__()
         self.tasks_dir = tasks_dir or os.getenv("TB2_TASKS_DIR", "")
         # RL hygiene: the env server and the agent share one container
@@ -308,6 +364,14 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
         episode_id: str | None = None,
         **kwargs: Any,
     ) -> Tbench2Observation:
+        # [FUNCTION DOC]
+        # Seed ignored. Requires the terminal toolkit (RuntimeError otherwise). Task id comes from kwargs task_id
+        # or task_name or the default; task path from task_path or path. Resolves the task dir (may download the
+        # TB2 repo; FileNotFoundError/ValueError on failure), reads the instruction, optionally withholds verifier
+        # assets, creates a per-trial session log dir under output_dir. Workdir: TB2_TASK_WORKDIR, else the task
+        # Dockerfile's WORKDIR unless it is the server's own tree, else (or if not an existing dir) the task dir.
+        # Creates a TerminalToolkit (local backend) in that workdir and a fresh state (given or random episode id).
+        # Returns: observation with the instruction, action_type "reset", reward 0.0, done False.
         del seed
 
         TerminalToolkit = _require_terminal_toolkit()
@@ -385,6 +449,15 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
         timeout_s: float | None = None,
         **kwargs: Any,
     ) -> Tbench2Observation:
+        # [FUNCTION DOC]
+        # Raises TypeError for a non-Tbench2Action and RuntimeError if not reset. Increments step_count and records
+        # last action type/command. Dispatches on action_type: exec (shell_exec in session id, default
+        # "tb2-session", with the configured timeout), write / view / wait / kill (need session_id, else error),
+        # write_file (writes content to file_path), evaluate (scores; done True), close (closes; done True); other
+        # types are errors. Any exception is caught and reported as success False with the message in error.
+        # Records last output and session id in state.
+        # Returns: observation with output, success, error, task info, session id, action type, info, reward
+        # (only set by evaluate) and done.
         del timeout_s, kwargs
 
         if not isinstance(action, Tbench2Action):
@@ -474,14 +547,22 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
 
     @property
     def state(self) -> Tbench2State:
+        # [FUNCTION DOC]
+        # Property returning the current Tbench2State.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Drops the toolkit, task dir and instruction (state is kept). Further steps raise RuntimeError.
         self._terminal_toolkit = None
         self._task_dir = None
         self._instruction = ""
 
     def _resolve_task_path(self, task_id: str | None, task_path: str | None) -> Path:
+        # [FUNCTION DOC]
+        # HELPER: returns an existing task directory: the expanded/resolved task_path if given, else task_id under
+        # tasks_dir or under the downloaded repo (cache dir TB2_CACHE_DIR or output_dir/repo_cache).
+        # Raises FileNotFoundError if the path does not exist, ValueError if neither id nor path is given.
         if task_path:
             resolved = Path(task_path).expanduser().resolve()
             if not resolved.exists():
@@ -505,6 +586,8 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
         return resolved
 
     def _ensure_session_id(self, session_id: str | None, action_type: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: raises ValueError naming the action type if session_id is empty.
         if not session_id:
             raise ValueError(f"session_id is required for action_type='{action_type}'")
 
@@ -521,6 +604,10 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
     _WITHHOLD_LOCK = threading.Lock()
 
     def _withhold_verifier_assets(self, task_dir: Path) -> None:
+        # [FUNCTION DOC]
+        # Under the class lock: caches tests/ (following a symlinked tests dir) as an in-memory tar keyed by the
+        # task dir if not already cached, then deletes tests/ and solution/ from disk. Side effects: destructive
+        # filesystem changes in the task dir; mutation of the class-level cache.
         """Move verifier assets out of the agent's reach before it can act.
 
         The task directory is agent-readable (same filesystem, root agent):
@@ -550,6 +637,10 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
             _hard_remove(str(task_dir / "solution"))
 
     def _stage_tests_for_verify(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: wipes and recreates /logs/verifier, wipes /tests, then fills /tests from the cached tarball if
+        # present, else by copying the task's tests/ dir (symlinks preserved). Returns True if tests were staged,
+        # False if the task has no tests. Caller must hold the evaluation lock.
         """Stage a pristine tests/ copy at the official fixed path for exactly
         the verify window. Caller must hold _CANONICAL_EVAL_LOCK.
 
@@ -578,6 +669,11 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
         return True
 
     def _evaluate_task(self) -> tuple[str, float, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Raises RuntimeError if not reset. Reads the verifier timeout (default 900 s). Under the class evaluation
+        # lock: stages tests; if none, returns a 0.0 result with a "missing tests" error in info; uses the canonical
+        # harness when test.sh exists, else the pytest fallback. Always removes /tests and /logs/verifier afterwards.
+        # Returns: (output text, reward, info mapping).
         if self._task_dir is None:
             raise RuntimeError("TB2 environment not initialized. Call reset() first.")
         if self._terminal_toolkit is None:
@@ -624,6 +720,10 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
     def _evaluate_canonical(
         self, timeout_s: float
     ) -> tuple[str, float, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Runs the canonical command from the agent workdir in toolkit session "tb2-tests" with the verifier
+        # timeout. Returns (output, reward, info with tests_passed = reward == 1.0 and harness name).
+        # Raises RuntimeError if no verdict could be parsed.
         """Score via the task's OFFICIAL harness, exactly as the TB2 verifier does.
 
         /tests/test.sh (staged by _stage_tests_for_verify) pins its own pytest
@@ -650,6 +750,9 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
         return output, reward, info
 
     def _evaluate_fallback(self, timeout_s: float) -> tuple[str, float, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Runs the pytest fallback command from the agent workdir with the verifier timeout. Reward is 1.0 when the
+        # parsed exit code is 0, else 0.0. Returns (output, reward, info with tests_passed and exit_code).
         """Scoring for task dirs without the canonical harness (see
         _fallback_eval_cmd)."""
         fallback_cwd = self._workdir or str(self._task_dir)
@@ -669,6 +772,11 @@ class Tbench2Environment(Environment[Tbench2Action, Tbench2Observation, Tbench2S
 class Tbench2DockerEnvironment(
     Environment[Tbench2Action, Tbench2Observation, Tbench2State]
 ):
+    # [CLASS DOC]
+    # Docker-isolated TB2 environment: one container per episode from the task's official image (no host
+    # fallback), with the task source copied to /task excluding tests/ and solution/, commands run in the
+    # image's WORKDIR, and canonical scoring inside the container. Supports concurrent sessions (each session
+    # has its own container).
     """OpenEnv wrapper around Terminal-Bench 2 tasks with Docker isolation.
 
     This environment runs each task in its own Docker container built from
@@ -695,6 +803,10 @@ class Tbench2DockerEnvironment(
         safe_mode: bool = True,
         default_task_id: str | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores settings: tasks_dir (TB2_TASKS_DIR), output_dir (TB2_OUTPUT_DIR), command_timeout_s (default 300),
+        # safe_mode (default True), default task id (TB2_DEFAULT_TASK_ID or "headless-terminal"). No I/O.
+        # KNOWN ISSUE: command_timeout_s and safe_mode are stored but never used; container execs have no timeout.
         super().__init__()
         self.tasks_dir = tasks_dir or os.getenv("TB2_TASKS_DIR", "")
         self.output_dir = Path(
@@ -716,6 +828,9 @@ class Tbench2DockerEnvironment(
         self._workdir = ""
 
     def _get_docker_client(self) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: lazily creates and caches a docker client from the environment. Raises RuntimeError if Docker
+        # is unavailable.
         """Lazy initialization of Docker client."""
         if self._docker_client is None:
             try:
@@ -734,6 +849,14 @@ class Tbench2DockerEnvironment(
         episode_id: str | None = None,
         **kwargs: Any,
     ) -> Tbench2Observation:
+        # [FUNCTION DOC]
+        # Seed ignored. Resolves the task dir like local mode, reads task.toml for [environment] docker_image and
+        # the instruction. If no image is declared, closes any previous container and raises RuntimeError. Creates
+        # the trial dir, closes the previous episode, stores the new task metadata and starts a container (closing
+        # and re-raising on failure). Returns observation with instruction, action_type "reset", reward 0.0, done
+        # False and info containing docker_image.
+        # KNOWN ISSUE: episode_id is only used for the trial dir name; the state gets a fresh random id and its
+        # task_id is the directory name rather than the requested task id.
         del seed
 
         task_id = (
@@ -805,6 +928,10 @@ class Tbench2DockerEnvironment(
         )
 
     def _start_container(self, task_dir: Path, trial_dir: Path) -> None:
+        # [FUNCTION DOC]
+        # HELPER: gets or pulls the image, resolves the workdir, runs a detached "sleep infinity" container with host
+        # networking, copies the task dir to /task excluding tests/ and solution/, and resets the state.
+        # Raises RuntimeError wrapping any failure. Side effects: Docker image pull and container creation.
         """Start a Docker container for the task.
 
         Uses file copying instead of bind mounts to support Docker-in-Docker
@@ -862,6 +989,9 @@ class Tbench2DockerEnvironment(
     def _copy_dir_to_container(
         self, src_dir: Path, dest_path: str, exclude_top: tuple[str, ...] = ()
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: builds an in-memory tar of every descendant of src_dir (non-recursive per entry, skipping top-level
+        # names in exclude_top) and puts it into the container at dest_path. Raises RuntimeError if no container.
         """Copy a directory into the container using tar archive.
 
         This method streams files via the Docker API, avoiding bind mount
@@ -888,6 +1018,8 @@ class Tbench2DockerEnvironment(
         self._container.put_archive(dest_path, tar_stream.getvalue())
 
     def _resolve_workdir(self, image: Any, task_dir: Path) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns the image config's WorkingDir, else the Dockerfile WORKDIR, else "/task".
         """The dir agent commands and scoring run in: the task image's own
         WORKDIR — the real TB2 task state, not the /task source copy.
 
@@ -906,6 +1038,10 @@ class Tbench2DockerEnvironment(
     def _exec_in_container(
         self, command: str, workdir: str | None = None
     ) -> tuple[int, str]:
+        # [FUNCTION DOC]
+        # HELPER: runs "cd <quoted cwd> && <command>" via bash -c in the container (cwd = given workdir, else the
+        # resolved workdir, else /task), capturing stdout and stderr. Returns (exit code, decoded output).
+        # Raises RuntimeError if no container.
         """Execute a command inside the container, from the task workdir.
 
         The command rides as an argv element (bash -c <command>), not spliced
@@ -929,6 +1065,13 @@ class Tbench2DockerEnvironment(
         timeout_s: float | None = None,
         **kwargs: Any,
     ) -> Tbench2Observation:
+        # [FUNCTION DOC]
+        # Raises TypeError for a wrong action type and RuntimeError if not reset. Updates step count and last
+        # action fields. Supports exec (success = exit code 0), write_file (heredoc into file_path), evaluate
+        # (done True), close (done True); other types are errors. Exceptions are caught into success False / error.
+        # Returns an observation shaped like local mode.
+        # KNOWN ISSUE: write_file interpolates file_path unquoted into the shell and uses a fixed 'EOF' heredoc
+        # delimiter, so paths with spaces or content containing a line "EOF" break the write.
         del timeout_s, kwargs
 
         if not isinstance(action, Tbench2Action):
@@ -997,6 +1140,12 @@ class Tbench2DockerEnvironment(
         )
 
     def _evaluate_docker(self) -> tuple[str, float, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Raises RuntimeError if no container (asserts task dir). Returns a 0.0 "missing tests" result if the task
+        # has no tests/. Otherwise wipes and recreates /tests and /logs/verifier in the container (RuntimeError on
+        # failure), copies tests in, and runs the canonical command with the verifier timeout (or the pytest
+        # fallback). Always tries to remove the staged dirs afterwards, logging warnings on failure.
+        # Returns: (output, reward, info) like local mode; RuntimeError if the canonical harness gives no verdict.
         """Score with the canonical harness inside the task container.
 
         Same scoring contract as the local mode's _evaluate_task: stage a
@@ -1086,9 +1235,14 @@ class Tbench2DockerEnvironment(
 
     @property
     def state(self) -> Tbench2State:
+        # [FUNCTION DOC]
+        # Property returning the current Tbench2State.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Stops (10 s timeout) and force-removes the container, ignoring errors, and clears task dir, instruction
+        # and workdir.
         if self._container:
             try:
                 self._container.stop(timeout=10)
@@ -1101,6 +1255,9 @@ class Tbench2DockerEnvironment(
         self._workdir = ""
 
     def _resolve_task_path(self, task_id: str | None, task_path: str | None) -> Path:
+        # [FUNCTION DOC]
+        # HELPER: same task-directory resolution as the local environment (explicit path, tasks_dir, or downloaded
+        # repo); raises FileNotFoundError or ValueError.
         if task_path:
             resolved = Path(task_path).expanduser().resolve()
             if not resolved.exists():

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines the agent policy abstraction (transcript -> next assistant message) used by the rollout loop, plus an
+# OpenAI-compatible chat implementation.
 """Agent policies for the AWM expert-in-the-loop rollout.
 
 A *policy* turns a chat transcript into the next assistant message. Keeping this
@@ -20,6 +23,8 @@ from llm import chat_complete
 
 @runtime_checkable
 class AgentPolicy(Protocol):
+    # [CLASS DOC]
+    # Runtime-checkable protocol: any object with an async complete(messages) method returning the assistant text.
     """Maps a chat transcript to the next assistant message.
 
     Args:
@@ -34,6 +39,10 @@ class AgentPolicy(Protocol):
 
 
 class OpenAIChatPolicy:
+    # [CLASS DOC]
+    # Policy that delegates each turn to chat_complete with a fixed client, model, optional temperature and max tokens.
+        # [FUNCTION DOC]
+        # Protocol method signature only; no implementation.
     """Agent policy backed by an OpenAI-compatible chat client.
 
     Works with `AsyncOpenAI` and `AsyncAzureOpenAI` clients. The same class is used
@@ -60,12 +69,16 @@ class OpenAIChatPolicy:
         temperature: float | None = None,
         max_tokens: int = 2048,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores client, model, temperature and max tokens.
         self._client = client
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
 
     async def complete(self, messages: list[dict[str, Any]]) -> str:
+        # [FUNCTION DOC]
+        # Returns the assistant text for the given messages via chat_complete. Propagates its exceptions (e.g. RuntimeError on truncated empty output).
         return await chat_complete(
             self._client,
             self._model,

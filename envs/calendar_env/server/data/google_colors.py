@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Static data: GOOGLE_CALENDAR_COLORS, a list of dicts (color_id string, color_type
+# "calendar" or "event", background and foreground hex) reproducing Google Calendar's
+# 24 calendar colors and 11 event colors. Used to seed the colors table. No logic.
 """
 Google Calendar API v3 Color Data
 Exact color definitions from Google Calendar API

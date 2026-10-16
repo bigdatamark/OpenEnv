@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Sample watch-channel (push notification) seed data and its SQL generator.
 """
 Watch Channel Seed Data for Calendar Application
 """
@@ -8,6 +10,11 @@ from typing import Any, Dict, List
 
 
 def get_watch_channel_sample_data() -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns {"watch_channels": list of channel dicts (ids, resource info, user, webhook
+    # address/token/type, JSON params, created/expires/last_notification datetimes relative
+    # to utcnow, is_active string, notification_count), "description": str}.
+    # KNOWN ISSUE: some channel dict literals repeat webhook_address/webhook_token/webhook_type keys, so earlier values are silently overwritten.
     """
     Generate sample watch channel data for multi-user scenarios
     """
@@ -186,6 +193,11 @@ def get_watch_channel_sample_data() -> Dict[str, Any]:
 
 
 def get_watch_channel_sql(sql_statements) -> str:
+    # [FUNCTION DOC]
+    # Appends header comments, a multi-row INSERT INTO watch_channels (NULL for missing
+    # token/params/timestamps, quotes in addresses doubled) and summary comments to the given
+    # list; mutates and returns that list.
+    # KNOWN ISSUE: annotated to return str but returns the list; the summary comments are hard-coded and may not match the data.
     """
     Generate SQL statements for watch channel sample data
     """

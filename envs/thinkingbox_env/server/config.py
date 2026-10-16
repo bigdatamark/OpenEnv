@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Private server runtime settings for ThinkingBox. Module constants read from env vars at import:
+# OPENENV_TB_PROXY_URL (default http://127.0.0.1:7111), OPENENV_TB_AGENT (default "think"),
+# OPENENV_TB_CONFIG (default ""), OPENENV_TB_PROXY_TIMEOUT (default 120 s), OPENENV_TB_MAX_CONCURRENT_ENVS
+# (default 8).
 """Resolve private server runtime settings for ThinkingBox episodes."""
 
 import os
@@ -20,6 +25,10 @@ MAX_CONCURRENT_ENVS = int(os.environ.get("OPENENV_TB_MAX_CONCURRENT_ENVS", "8"))
 
 @dataclass(frozen=True)
 class RuntimeSettings:
+    # [CLASS DOC]
+    # Frozen dataclass of per-episode native settings: Session Proxy config, optional judge model, judge type
+    # (default "legacy"), optional user model, whether the simulated user may end the conversation, and the
+    # config file's SHA-256.
     """Hold private native runtime settings for one episode."""
 
     proxy: SessionProxyConfig
@@ -34,6 +43,10 @@ def load_runtime_settings(
     config_path: str | None,
     default_proxy: SessionProxyConfig,
 ) -> RuntimeSettings:
+    # [FUNCTION DOC]
+    # Returns settings with only default_proxy when config_path is empty; otherwise loads the native ThinkingBox
+    # config (with its SHA-256) and returns settings with its proxy, judge model/type, user model and
+    # user-can-end flag. Errors from loading/parsing propagate.
     """Load native ThinkingBox configuration without exposing it on the wire."""
     if not config_path:
         return RuntimeSettings(proxy=default_proxy)
@@ -49,6 +62,10 @@ def load_runtime_settings(
 
 
 def make_proxy_client(settings: RuntimeSettings) -> MCPProxyClient:
+    # [FUNCTION DOC]
+    # Creates a native MCPProxyClient from the settings' proxy config (endpoint, timeout, DNS cache, credential
+    # built via the credential factory when configured, TLS options, headers, retry settings, JSON output and
+    # effects flags). Returns the client.
     """Construct the native Session Proxy client for private server use."""
     proxy = settings.proxy
     credential = (

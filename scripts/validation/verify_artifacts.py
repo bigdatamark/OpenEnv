@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Verification script for a validation-runtime evidence directory: checks SHA256SUMS
+# coverage and checksums, a successful run manifest, that the acceptance inventory matches the
+# committed tests/validation_runtime/acceptance.json, and that junit.xml contains passing tests
+# covering every required acceptance case. Run as a script with the directory path; prints the
+# verified test count.
 """Verify complete evidence checksums and successful test execution."""
 
 import argparse
@@ -13,6 +19,18 @@ ACCEPTANCE = (
 
 
 def verify(root):
+    # [FUNCTION DOC]
+    # Verifies the artifact directory root (resolved):
+    # - every SHA256SUMS line ("<sha>  <relative path>") names a unique regular file inside root
+    #   with a matching SHA-256, and the recorded set equals all files under root except SHA256SUMS;
+    # - run-manifest.json has success true;
+    # - acceptance.json is byte-identical to the committed inventory and its SHA-256 equals the
+    #   manifest's acceptance_inventory_sha256;
+    # - the manifest's suite is "fast" or a suite in the inventory;
+    # - junit.xml's testsuites have no failures, errors or skips and a nonzero total test count;
+    # - every required case "<classname>::<name>" for the selected suite was observed.
+    # Returns: total test count. Raises: ValueError on any violation; file, JSON, XML or key
+    # errors for missing or malformed inputs.
     root = root.resolve()
     recorded = {}
     for line in (root / "SHA256SUMS").read_text().splitlines():

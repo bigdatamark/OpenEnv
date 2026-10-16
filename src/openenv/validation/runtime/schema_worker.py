@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Standalone script run in a separate process to evaluate observations against JSON Schemas
+# (Draft 2020-12) in isolation. Reads a JSON payload from stdin and writes a JSON list of problem
+# strings to stdout. Input is capped at 32 MiB.
+
 """Disposable JSON Schema evaluator; invoked as a script to avoid package imports."""
 
 import json
@@ -13,6 +18,17 @@ MAX_INPUT_BYTES = 32 * 1024 * 1024
 
 
 def main():
+    # [FUNCTION DOC]
+    # Entry point. Best-effort sets CPU rlimit (3s soft/4s hard) and, on Linux, a 512 MiB address-space
+    # limit. Reads stdin bytes; if over the cap, writes a single-problem list and returns.
+    # Payload keys: schema_json (step schema string), optional reset_schema_json, observations (rows with
+    # index, operation, response_json). Builds validators (checking schemas, using an empty registry to
+    # block remote refs; reset falls back to step schema). For each row, merges reward and done into the
+    # observation dict and records up to 20 problems as "exchange N: schema mismatch at <schema path>
+    # (<validator>)" plus up to 5 missing required property names. Any exception adds a generic
+    # "invalid or unevaluable observation schema" problem. Writes the problem list as JSON to stdout.
+    # KNOWN ISSUE: invalid JSON on stdin raises before the try block, so the process exits with a
+    # traceback instead of printing a problem list.
     """Evaluate bounded inputs, printing only error locations, never subject values."""
     try:
         import resource

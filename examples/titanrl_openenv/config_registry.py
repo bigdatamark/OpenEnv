@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# TorchTitan-RL recipe registry for the OpenEnv example: functions returning complete
+# Controller configs (model, async loop, rollouter, renderer, metrics, trainer,
+# generator) for GRPO/DAPO training against OpenEnv's chess environment. Discovered by
+# torchtitan's ConfigManager by function name. Imports torchtitan at import time.
+# _SEQ_LEN (12288) is the shared rollout token budget and trainer context length.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -75,6 +81,13 @@ _SEQ_LEN = 12288
 
 
 def _openenv_chess_rollouter_config() -> Rollouter.Config:
+    # [FUNCTION DOC]
+    # HELPER: builds the shared Rollouter config: seeded OpenEnvDataset for train (seed 42)
+    # and validation (seed 99, unshuffled); a rubric summing the env reward (weight 1.0)
+    # plus the chess position-score shaping reward (last value, weight 0.5) with no
+    # truncation reward override; an OpenEnvMessageEnv for task "chess" at
+    # 127.0.0.1:8000; a TokenEnv capped at _SEQ_LEN tokens and 4 turns; std-normalized
+    # advantages. Returns: Rollouter.Config.
     """Datasets, environment, rubric, and token budget shared by every recipe.
 
     The defaults target OpenEnv's built-in chess environment; switch
@@ -134,6 +147,13 @@ def _openenv_chess_rollouter_config() -> Rollouter.Config:
 
 
 def rl_grpo_muse_glimmer_30b_openenv_chess() -> Controller.Config:
+    # [FUNCTION DOC]
+    # Full recipe for Muse Glimmer 30B on 8 GPUs: varlen attention, 500 steps of 8 prompts
+    # x 8 samples, W&B + TensorBoard metrics, trainer with bf16 Adam moments, lr 1e-6
+    # linear schedule, full activation checkpointing, FSDP 3 x TP 2, HF initial load and
+    # checkpoints every 50 steps, chunked DAPO loss with global vocab size; vLLM generator
+    # with TP 2, no CUDA graphs, temperature 1, max 2560 tokens per turn.
+    # Returns: Controller.Config.
     """GRPO/DAPO on OpenEnv's chess environment for Muse Glimmer 30B.
 
     8 GPUs: 6 trainer (FSDP=3 x TP=2) + 2 generator (TP=2). Requires a running
@@ -273,6 +293,10 @@ def rl_grpo_muse_glimmer_30b_openenv_chess() -> Controller.Config:
 
 
 def rl_grpo_muse_glimmer_30b_openenv_chess_smoke() -> Controller.Config:
+    # [FUNCTION DOC]
+    # Smoke variant of the Muse Glimmer recipe: same config but 5 steps, 4 prompts x 4
+    # samples, 8 validation samples and checkpoint interval 1000 (no mid-run save).
+    # Returns: Controller.Config. Raises: AssertionError if the base config has no checkpointer.
     """Tiny smoke variant of the Muse Glimmer recipe.
 
     A handful of steps, a small batch, and no mid-run checkpoint save -- enough to
@@ -300,6 +324,10 @@ def rl_grpo_muse_glimmer_30b_openenv_chess_smoke() -> Controller.Config:
 
 
 def rl_grpo_qwen3_1_7b_openenv_chess() -> Controller.Config:
+    # [FUNCTION DOC]
+    # Small-scale recipe for Qwen3-1.7B (1 trainer GPU, 4 generator GPUs at TP 4): same
+    # rollouter, aot_eager compile, Qwen3 renderer without thinking, fp32 Adam, full CUDA
+    # graphs in vLLM, max 1536 tokens per turn. Returns: Controller.Config.
     """The same OpenEnv chess recipe at small scale, for Qwen3-1.7B.
 
     Useful for smoke-testing the integration on a single node before committing

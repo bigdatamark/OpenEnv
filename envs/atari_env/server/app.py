@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# ASGI app for the Atari environment. Reads game configuration once at import from ATARI_* environment variables
+# (game, obs type, full action space, sticky probability, frameskip, optional mode/difficulty as ints) and builds the
+# app with a factory so each WebSocket session gets its own AtariEnvironment (MAX_CONCURRENT_ENVS, default 8).
+# Supports both package-relative and standalone imports. Raises ValueError at import for non-numeric numeric vars.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -65,6 +70,8 @@ difficulty = int(difficulty) if difficulty is not None else None
 
 # Factory function to create AtariEnvironment instances
 def create_atari_environment():
+    # [FUNCTION DOC]
+    # Factory returning a new AtariEnvironment configured from the module-level settings.
     """Factory function that creates AtariEnvironment with config."""
     return AtariEnvironment(
         game_name=game_name,
@@ -89,6 +96,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn serving the app on 0.0.0.0:8000. Blocks.
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

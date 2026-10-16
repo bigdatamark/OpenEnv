@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# HELPER module: SQLite helpers for AWM sessions - build a database from a generated schema and sample INSERTs,
+# copy snapshots for verifier comparison, and delete session directories.
 """
 SQLite database management for AWM environments.
 
@@ -15,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def create_database(db_path: str, db_schema: dict, sample_data: Any) -> str:
+    # [FUNCTION DOC]
+    # Creates (or recreates) a SQLite file at db_path: makes parent dirs, deletes any existing file, executes schema
+    # DDL/indexes then sample-data statements, commits and closes.
+    # Inputs: db_path; db_schema dict with "tables" (each with "ddl" and "indexes"); sample_data (see insert helper).
+    # Returns: db_path. Raises: re-raises unexpected exceptions after rollback (individual SQL errors are only logged).
+    # Side effects: filesystem writes, logging.
     """Create a SQLite database from schema and populate with sample data.
 
     Args:
@@ -46,6 +55,8 @@ def create_database(db_path: str, db_schema: dict, sample_data: Any) -> str:
 
 
 def _create_schema(conn: sqlite3.Connection, db_schema: dict) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Executes each table's DDL and each index statement; sqlite errors are logged as warnings and skipped.
     cursor = conn.cursor()
     tables = db_schema.get("tables", [])
     for table in tables:
@@ -69,6 +80,10 @@ def _create_schema(conn: sqlite3.Connection, db_schema: dict) -> None:
 def _insert_sample_data(
     conn: sqlite3.Connection, db_path: str, sample_data: Any
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Executes sample insert statements. Accepts a dict with "tables" (unwrapped to its list) or a list whose
+    # items are dicts (with "insert_statements" list and "table_name") or raw SQL strings. Empty/blank statements are
+    # skipped; sqlite errors are logged and skipped. No-op for falsy input. db_path is unused.
     """Insert sample data. Handles the AWM sample_data format which is a list
     of dicts with 'table_name' and 'insert_statements' keys."""
     if not sample_data:
@@ -104,6 +119,9 @@ def _insert_sample_data(
 
 
 def save_snapshot(db_path: str, snapshot_path: str) -> str:
+    # [FUNCTION DOC]
+    # Copies the DB file (with metadata) to snapshot_path, creating parent dirs. Returns snapshot_path.
+    # Raises: OSError/FileNotFoundError on copy failure.
     """Copy the database file as a snapshot for later verifier comparison."""
     os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
     shutil.copy2(db_path, snapshot_path)
@@ -111,6 +129,8 @@ def save_snapshot(db_path: str, snapshot_path: str) -> str:
 
 
 def cleanup_session_dir(session_dir: str) -> None:
+    # [FUNCTION DOC]
+    # Recursively deletes session_dir if it is a non-empty path to an existing directory; errors are ignored.
     """Remove the session temp directory and all contents."""
     if session_dir and os.path.isdir(session_dir):
         shutil.rmtree(session_dir, ignore_errors=True)

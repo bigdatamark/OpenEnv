@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Separate SQLite store that keeps raw seed SQL per database_id, isolated from the
+# calendar databases. At import time it reads SEED_DATABASE_PATH (env var, default
+# ./mcp_databases/seed_store.db), creates a SQLAlchemy engine and a session factory
+# (SeedSessionLocal) with its own declarative base (SeedBase). Exports SeedData,
+# get_seed_session and init_seed_database.
 """
 Separate database for seed data storage
 This keeps seed SQL content isolated from the main Calendar database
@@ -30,6 +36,9 @@ SeedSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=seed_eng
 
 
 class SeedData(SeedBase):
+    # [CLASS DOC]
+    # ORM row (table "seed_data"): integer id, unique database_id, optional name and
+    # description, required sql_content text, created/updated naive UTC timestamps.
     """Model to store seed SQL content for databases"""
 
     __tablename__ = "seed_data"
@@ -45,10 +54,15 @@ class SeedData(SeedBase):
     )
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with database_id and name.
         return f"<SeedData(database_id={self.database_id}, name={self.name})>"
 
 
 def init_seed_database():
+    # [FUNCTION DOC]
+    # Creates the parent directory of SEED_DATABASE_PATH if missing and creates the seed
+    # tables. Side effects: filesystem directory creation, DB DDL, logging. Returns None.
     """Initialize the seed database and create tables"""
     # Ensure the mcp_databases directory exists
     db_dir = os.path.dirname(SEED_DATABASE_PATH)
@@ -62,6 +76,8 @@ def init_seed_database():
 
 
 def get_seed_session():
+    # [FUNCTION DOC]
+    # HELPER: returns a new Session bound to the seed database; caller must close it.
     """Get a session for the seed database"""
     return SeedSessionLocal()
 

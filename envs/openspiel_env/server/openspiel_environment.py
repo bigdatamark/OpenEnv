@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Server-side OpenSpiel environment: wraps open_spiel's rl_environment.Environment behind the
+# OpenEnv Environment interface as a single-agent game, auto-playing opponents with a named policy.
+# Also contains web playground helpers: per-game action button labels and HTML renderers for
+# catch, 2048, tic-tac-toe, connect four, blackjack, kuhn poker and cliff walking, built from the
+# agent's info_state vector. Raises ImportError at import time if OpenSpiel is not installed.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,6 +47,10 @@ except ImportError as e:
 
 
 class OpenSpielEnvironment(Environment):
+    # [CLASS DOC]
+    # Single-agent OpenSpiel wrapper supporting concurrent sessions. Holds the rl_environment, player
+    # count, turn-based flag, agent player id, opponent policy (only for multi-player games), an
+    # OpenSpielState, and the last opponent action.
     """
     OpenSpiel Environment wrapper for OpenEnv.
 
@@ -75,6 +85,10 @@ class OpenSpielEnvironment(Environment):
         opponent_policy: str = "random",
         game_params: Dict[str, Any] | None = None,
     ):
+        # [FUNCTION DOC]
+        # Creates the OpenSpiel game with game_params as keyword arguments and sets up opponent policy and
+        # state. Raises ValueError if the game cannot be created, if agent_player is not below the number
+        # of players, or (via the lookup) if the opponent policy name is unknown for multi-player games.
         """Initialize OpenSpiel environment."""
         super().__init__()
 
@@ -119,6 +133,9 @@ class OpenSpielEnvironment(Environment):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns (label, payload) pairs for each legal action, using the per-game
+        # label table when the action index has a label, else the number; payload holds action_id.
         """The legal moves as buttons, named for the games this env draws."""
         labels = _BUTTON_LABELS.get(self.game_name, [])
         return [
@@ -127,11 +144,17 @@ class OpenSpielEnvironment(Environment):
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns HTML for the observation using the game's drawing function, or None
+        # when the game has no renderer.
         """Draw the board or hand of Catch, 2048, Tic-Tac-Toe, Connect Four, Blackjack, Kuhn Poker or Cliff Walking."""
         draw = _DRAWINGS.get(self.game_name)
         return draw(observation) if draw else None
 
     def reset(self) -> OpenSpielObservation:
+        # [FUNCTION DOC]
+        # Resets the OpenSpiel game, assigns a new UUID episode id, zeroes step_count and last opponent
+        # action, auto-plays opponents until it is the agent's turn, and returns the agent observation.
         """
         Reset the environment and return initial observation.
 
@@ -156,6 +179,14 @@ class OpenSpielEnvironment(Environment):
         return self._make_observation(time_step)
 
     def step(self, action: OpenSpielAction) -> OpenSpielObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Applies the agent's action. Turn-based games: steps with the single action_id, then auto-plays
+        # opponents. Simultaneous games (agent must be player 0): builds a joint action using the opponent
+        # policy for other players. Increments step_count. Returns the agent observation.
+        # Raises ValueError if action is not an OpenSpielAction; NotImplementedError for simultaneous games
+        # with agent_player other than 0.
+        # KNOWN ISSUE: in the simultaneous branch time_step is read before it is assigned, so that path
+        # raises UnboundLocalError. Also the legal action id is not validated before stepping.
         """
         Execute agent's action and return resulting observation.
 
@@ -211,10 +242,17 @@ class OpenSpielEnvironment(Environment):
 
     @property
     def state(self) -> OpenSpielState:
+        # [FUNCTION DOC]
+        # Property: returns the current OpenSpielState object.
         """Get current environment state."""
         return self._state
 
     def _auto_play_opponents(self, time_step) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: For multi-player games, repeatedly selects an opponent action with the policy and steps
+        # the game until the game ends or the current player is the agent; records the last opponent
+        # action and increments step_count per opponent move (so step_count counts all moves). Returns the
+        # final time step. Single-player games return the input unchanged.
         """
         Autoplay opponent turns until it's the agent's turn or game is terminal.
 
@@ -249,6 +287,10 @@ class OpenSpielEnvironment(Environment):
         return time_step
 
     def _make_observation(self, time_step) -> OpenSpielObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds an OpenSpielObservation for the agent: info_state (as list), legal actions,
+        # current player id, phase ("terminal" if last, "initial" if first, else "playing"), the agent's
+        # reward as float (None if rewards are absent), last opponent action and done.
         """
         Convert OpenSpiel TimeStep to OpenEnv Observation.
 
@@ -316,6 +358,9 @@ _BUTTON_LABELS = {
 def _grid(
     label: str, columns: int, cells: List[str], size: int = 26, gap: int = 3
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Wraps cell HTML strings in a bordered CSS grid with the given column count, cell size
+    # and gap, labelled with an aria label. Returns the HTML string.
     """Lay out square cells in a bordered grid labelled for screen readers."""
     return (
         f'<div role="img" aria-label="{label}" style="display:inline-grid;'
@@ -327,6 +372,9 @@ def _grid(
 
 
 def _cell(background: str, radius: str = "4px", text: str = "", style: str = "") -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns one grid cell span with the given background, border radius, optional centred
+    # text and extra CSS.
     """One grid cell with a theme colour background and optional centred text."""
     return (
         f'<span style="background:{background};border-radius:{radius};display:flex;'
@@ -335,6 +383,9 @@ def _cell(background: str, radius: str = "4px", text: str = "", style: str = "")
 
 
 def _draw_catch(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws Catch (50-value info state, 10 rows x 5 cols): bottom-row set cells are the paddle,
+    # other set cells the ball. Returns None for other lengths.
     """Catch: 10 rows x 5 columns, the ball falls towards the paddle on the bottom row."""
     state = observation.get("info_state") or []
     if len(state) != 50:
@@ -351,6 +402,9 @@ def _draw_catch(observation: Dict[str, Any]) -> Optional[str]:
 
 
 def _draw_2048(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws 2048 (16 tile values) as a 4x4 grid with accent shade growing with log2 of the
+    # value. Returns None for other lengths.
     """2048: 4x4 tiles, the shade grows with the tile value."""
     state = observation.get("info_state") or []
     if len(state) != 16:
@@ -379,6 +433,9 @@ def _draw_2048(observation: Dict[str, Any]) -> Optional[str]:
 
 
 def _draw_tic_tac_toe(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws tic-tac-toe from 27 values (planes empty, o, x): non-empty cells show "x" if the
+    # x plane is set else "o". Returns None for other lengths.
     """Tic-Tac-Toe: 3x3 board, x in the accent colour and o in the text colour."""
     state = observation.get("info_state") or []
     if len(state) != 27:  # one-hot planes: empty, o, x
@@ -402,6 +459,9 @@ def _draw_tic_tac_toe(observation: Dict[str, Any]) -> Optional[str]:
 
 
 def _draw_connect_four(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws Connect Four from 126 values (planes x, o, empty; row 0 bottom) as a 6x7 board
+    # top row first, followed by a row of column numbers. Returns None for other lengths.
     """Connect Four: 6x7 board, x in the accent colour and o in the text colour, columns numbered below."""
     state = observation.get("info_state") or []
     if len(state) != 126:  # one-hot planes: x, o, empty; row 0 is the bottom
@@ -423,6 +483,8 @@ def _draw_connect_four(observation: Dict[str, Any]) -> Optional[str]:
 
 
 def _card(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns HTML for one playing card showing text; red accent colour for hearts/diamonds.
     """A playing card face with its rank and suit, or ?? when hidden."""
     colour = "var(--color-accent)" if text[-1] in "♥♦" else "var(--body-text-color)"
     return (
@@ -433,6 +495,8 @@ def _card(text: str) -> str:
 
 
 def _hand(label: str, title: str, rows: List[Tuple[str, List[str]]]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns a labelled box with a title and rows of (name, list of card texts).
     """Rows of labelled cards in a bordered box labelled for screen readers."""
     body = "".join(
         f'<div style="display:flex;align-items:center;gap:6px;margin:4px 0">'
@@ -447,6 +511,10 @@ def _hand(label: str, title: str, rows: List[Tuple[str, List[str]]]) -> str:
 
 
 def _draw_blackjack(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws Blackjack from 189 values: player cards from offset 85, dealer cards from 137
+    # (52-card one-hots, suits clubs, diamonds, hearts, spades); computes the player total with one
+    # soft ace; adds a hidden dealer card unless the phase is terminal. Returns None for other lengths.
     """Blackjack: your cards with their total, and the dealer's visible cards."""
     state = observation.get("info_state") or []
     if (
@@ -473,6 +541,10 @@ def _draw_blackjack(observation: Dict[str, Any]) -> Optional[str]:
 
 
 def _draw_kuhn_poker(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws Kuhn Poker from 11 values: the agent's card (J/Q/K from offsets 2-4), a hidden
+    # opponent card and the pass/bet history. Returns None for other lengths. Raises ValueError if no
+    # card bit is set.
     """Kuhn Poker: your card, the opponent's hidden card and the bets so far."""
     state = observation.get("info_state") or []
     if (
@@ -493,6 +565,10 @@ def _draw_kuhn_poker(observation: Dict[str, Any]) -> Optional[str]:
 
 
 def _draw_cliff_walking(observation: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Draws Cliff Walking from a 400-value one-hot action history (right, up, left, down per
+    # step) by replaying moves from the bottom-left start, clamped to the 4x8 grid; marks start, goal,
+    # cliff cells and the walker. Returns None for other lengths.
     """Cliff Walking: 4x8 grid, the walker starts bottom left, the cliff runs to the goal bottom right."""
     # The info state is a one-hot action history over 100 steps: right, up, left, down.
     state = observation.get("info_state") or []

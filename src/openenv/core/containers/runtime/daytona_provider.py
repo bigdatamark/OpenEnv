@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# ContainerProvider implementation running OpenEnv servers in Daytona cloud
+# sandboxes (requires the daytona SDK, imported lazily). Sandboxes are created
+# from a registry image, a pre-built snapshot ("snapshot:<name>") or a local
+# Dockerfile registered via image_from_dockerfile ("dockerfile:<abs path>").
+# Because Daytona does not run the image CMD, the provider starts the server
+# itself in the background and exposes port 8000 through a signed preview URL
+# (valid 24 h).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -18,6 +26,12 @@ from .providers import ContainerProvider
 
 
 class DaytonaProvider(ContainerProvider):
+    # [CLASS DOC]
+    # Provider holding a Daytona SDK client, default image/env vars/cmd, creation
+    # options (public, resources, auto-stop minutes, snapshot log callback, create
+    # timeout), the active sandbox and its preview URL. A class-level registry maps
+    # absolute Dockerfile paths to processed content, build context dir and parsed
+    # CMD (shared across all instances).
     """
     Container provider that runs environments in Daytona cloud sandboxes.
 
@@ -45,6 +59,10 @@ class DaytonaProvider(ContainerProvider):
         cmd: Optional[str] = None,
         create_timeout: float = 300,
     ):
+        # [FUNCTION DOC]
+        # Imports daytona and builds a Daytona client from api_key (or the
+        # DAYTONA_API_KEY env var) and target, then stores all options. No sandbox is
+        # created. Raises ImportError if the SDK is missing.
         """
         Args:
             image: Docker image, snapshot reference, or ``"dockerfile:<path>"``
@@ -84,6 +102,12 @@ class DaytonaProvider(ContainerProvider):
         self._preview_url: Optional[str] = None
 
     def _discover_server_cmd(self, sandbox: Any, port: int = 8000) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Locates openenv.yaml in the sandbox, reads it with cat, takes its
+        # "app" field, and returns "cd <yaml dir> && python -m uvicorn <app> --host
+        # 0.0.0.0 --port <port>" (shell-quoted parts).
+        # Raises: ValueError if the file is not found or has no app field.
+        # Side effects: sandbox exec calls.
         """Discover the server command from ``openenv.yaml`` inside *sandbox*.
 
         Finds the file, reads the ``app`` field, and constructs a command
@@ -116,6 +140,13 @@ class DaytonaProvider(ContainerProvider):
         )
 
     def _find_openenv_yaml(self, sandbox: Any) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns "/app/env/openenv.yaml" if it exists in the sandbox, else the
+        # first openenv.yaml found under /app (max depth 4) if the output is an absolute
+        # path, else None.
+        # KNOWN ISSUE: in the fallback, operator precedence applies the "or empty
+        # string" default only to the str(resp) branch, so a response whose result is
+        # None would fail on strip.
         """Locate ``openenv.yaml`` inside the sandbox.
 
         Tries the modern layout path ``/app/env/openenv.yaml`` first,
@@ -143,6 +174,8 @@ class DaytonaProvider(ContainerProvider):
 
     @staticmethod
     def _parse_app_field(yaml_content: str) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Delegates to parse_openenv_app_field (app value or None).
         """Extract the ``app`` value from raw openenv.yaml content.
 
         Uses PyYAML to handle comments, quotes, and nested keys correctly.
@@ -151,6 +184,8 @@ class DaytonaProvider(ContainerProvider):
 
     @staticmethod
     def _parse_dockerfile_cmd(dockerfile_content: str) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Delegates to parse_dockerfile_cmd (last CMD as a string, or None).
         """Extract the server command from the last ``CMD`` in a Dockerfile.
 
         Handles exec form (``CMD ["prog", "arg"]``) and shell form
@@ -166,6 +201,11 @@ class DaytonaProvider(ContainerProvider):
 
     @staticmethod
     def strip_buildkit_syntax(dockerfile_content: str) -> str:
+        # [FUNCTION DOC]
+        # Returns Dockerfile text with leading "--mount=..." flags removed from RUN
+        # instructions, including flags spread over backslash-continued lines; stops
+        # stripping once the actual command text starts. Preserves a trailing
+        # backslash on lines whose original ended with one. Other content is unchanged.
         """Remove BuildKit ``--mount=...`` flags from ``RUN`` instructions.
 
         Handles single-line flags, multi-line continuations, and multiple
@@ -180,6 +220,9 @@ class DaytonaProvider(ContainerProvider):
         import re
 
         def strip_leading_mounts(text: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Repeatedly removes leading "--mount=<non-space>" tokens (with
+            # surrounding whitespace) from text and returns the remainder.
             remaining = text
             while True:
                 match = re.match(r"\s*--mount=\S+\s*", remaining)
@@ -236,6 +279,17 @@ class DaytonaProvider(ContainerProvider):
         dockerfile_path: str,
         context_dir: str | None = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Class method. Resolves dockerfile_path, reads it, strips BuildKit mounts, and
+        # checks that every relative COPY source (excluding "COPY --from=") exists or
+        # glob-matches under the context directory (default: the Dockerfile's
+        # grandparent). Parses the CMD from the original text. Stores stripped
+        # content, context dir and CMD in the class registry keyed by the absolute path.
+        # Returns: "dockerfile:<absolute path>".
+        # Raises: FileNotFoundError if the Dockerfile is missing; ValueError if
+        # context_dir does not exist or a COPY source is not found.
+        # KNOWN ISSUE: COPY lines using other flags (e.g. --chown) capture the flag as
+        # the source and fail validation.
         """Validate a Dockerfile and return a ``dockerfile:`` URI for
         :meth:`start_container`.
 
@@ -320,6 +374,26 @@ class DaytonaProvider(ContainerProvider):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Creates a sandbox and starts the server; returns the signed preview URL.
+        # port must be None or 8000 (ValueError); image falls back to the
+        # constructor image (ValueError if none); env_vars falls back to constructor
+        # env vars. Creation params include env vars, public flag, and non-default
+        # auto-stop interval; for "snapshot:" uses snapshot params, for "dockerfile:"
+        # looks up registry metadata (ValueError if unregistered), writes the stripped
+        # Dockerfile to a temporary file in the context dir to build a Daytona Image
+        # (file always removed), and for other strings uses the image name; resources
+        # are added only for image-based creation. Remaining kwargs (and the snapshot
+        # log callback) go to Daytona.create with create_timeout.
+        # Server command: kwargs "cmd" or constructor cmd; otherwise discovered from
+        # openenv.yaml, falling back to the Dockerfile CMD. It is launched with nohup
+        # bash in the background logging to /tmp/openenv-server.log and writing its PID
+        # to /tmp/openenv-server.pid. Any failure after creation deletes the sandbox and
+        # re-raises.
+        # Side effects: cloud resources, temp file in context dir, network I/O.
+        # KNOWN ISSUE: the docstring lists the constructor cmd before the kwargs cmd,
+        # but the code prefers the kwargs cmd. Calling start again while a sandbox is
+        # active overwrites the handle and orphans the previous sandbox.
         """
         Create a Daytona sandbox from a Docker image or snapshot.
 
@@ -469,6 +543,9 @@ class DaytonaProvider(ContainerProvider):
         return self._preview_url
 
     def refresh_preview_url(self) -> str:
+        # [FUNCTION DOC]
+        # Requests a new 24 h signed preview URL for port 8000, stores and returns it.
+        # Raises RuntimeError if no sandbox is active.
         """Get a fresh signed preview URL (valid for 24h).
 
         Daytona signed URLs expire after at most 24 hours.  Call this to
@@ -482,6 +559,9 @@ class DaytonaProvider(ContainerProvider):
         return self._preview_url
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # Deletes the active sandbox (no-op if none) and always clears the sandbox and
+        # preview URL; deletion errors propagate.
         """Delete the Daytona sandbox."""
         if self._sandbox is None:
             return
@@ -493,6 +573,11 @@ class DaytonaProvider(ContainerProvider):
             self._preview_url = None
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 120.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health (5 s timeout) about every second until 200 or
+        # timeout_s. Each iteration with an active sandbox checks the server PID; if
+        # dead, reads the server log and raises RuntimeError including the full log.
+        # Raises: TimeoutError on deadline.
         """
         Poll the /health endpoint until the sandbox is ready.
 

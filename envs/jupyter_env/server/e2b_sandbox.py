@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Thin wrapper over the E2B Code Interpreter SDK: one remote sandbox with a
+# persistent Python kernel, normalized execution results, shell commands run
+# through the kernel, file upload and teardown. The SDK import is optional;
+# construction fails if it is missing.
 """E2B Code Interpreter sandbox wrapper.
 
 Wraps the E2B Code Interpreter SDK to provide a normalized execution interface
@@ -18,6 +23,11 @@ except ImportError as _e2b_import_error:  # pragma: no cover
 
 @dataclass
 class CellResult:
+    # [CLASS DOC]
+    # Dataclass of a normalized execution: stdout, stderr, formatted error
+    # (name, value and traceback) or None, error class name or None, text/plain
+    # display results, base64 PNG images, execution count and success flag
+    # (true when no error).
     """Normalized result from a code or shell execution."""
 
     stdout: str
@@ -31,6 +41,10 @@ class CellResult:
 
 
 class E2BSandbox:
+    # [CLASS DOC]
+    # One E2B sandbox session holding the SDK sandbox object and its id. A setup
+    # snippet run at creation patches matplotlib's show() so figures are always
+    # emitted as PNG display outputs and then closed.
     """
     Manages a single E2B Code Interpreter sandbox session.
 
@@ -71,6 +85,11 @@ del _patched_show
 """
 
     def __init__(self, api_key: str):
+        # [FUNCTION DOC]
+        # Creates a sandbox with the API key, records its id, and runs the matplotlib
+        # setup snippet.
+        # Raises: ImportError if e2b-code-interpreter is not installed; SDK errors.
+        # Side effects: creates a remote sandbox (network).
         if Sandbox is None:
             raise ImportError(
                 "e2b-code-interpreter is not installed. Install the "
@@ -84,11 +103,20 @@ del _patched_show
         self._sbx.run_code(self._SETUP_CODE)
 
     def run_code(self, code: str) -> CellResult:
+        # [FUNCTION DOC]
+        # Runs Python code in the sandbox's persistent kernel and returns the
+        # normalized CellResult.
         """Execute Python code in the persistent kernel, return normalized result."""
         execution = self._sbx.run_code(code)
         return self._normalize(execution)
 
     def run_shell(self, command: str, timeout_s: float = 120) -> CellResult:
+        # [FUNCTION DOC]
+        # Runs a shell command by executing Python in the kernel that calls
+        # subprocess.run with shell=True, capture of output and the given timeout,
+        # echoes stdout/stderr, and raises SystemExit with the return code on failure
+        # (so non-zero exit becomes an error result). A timeout surfaces as a
+        # TimeoutExpired error result. Returns the CellResult.
         """
         Execute a shell command inside the sandbox.
 
@@ -106,10 +134,14 @@ del _patched_show
         return self.run_code(shell_code)
 
     def write_file(self, filename: str, content: bytes) -> None:
+        # [FUNCTION DOC]
+        # Writes the given bytes to the named path in the sandbox filesystem.
         """Upload a file into the sandbox filesystem."""
         self._sbx.files.write(filename, content)
 
     def kill(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the sandbox; on failure tries close(); swallows all errors.
         """Terminate the sandbox. Safe to call multiple times."""
         try:
             self._sbx.kill()
@@ -124,6 +156,11 @@ del _patched_show
     # ──────────────────────────────────────────────────────────────────────────
 
     def _normalize(self, execution: Any) -> CellResult:
+        # [FUNCTION DOC]
+        # HELPER: Converts an SDK execution object to a CellResult: joins stdout and
+        # stderr log chunks with newlines, formats the error as "name: value" followed
+        # by the traceback, collects text and PNG fields of each result, and defaults
+        # execution_count to 0.
         stdout = "\n".join(execution.logs.stdout) if execution.logs.stdout else ""
         stderr = "\n".join(execution.logs.stderr) if execution.logs.stderr else ""
 

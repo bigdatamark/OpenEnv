@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# [MODULE DOC]
+# HELPER: Vendored CARLA geometry and vehicle helpers used by the navigation agents (speed,
+# distances, angles, traffic light trigger locations, debug drawing).
 
 # Copyright (c) 2018 Intel Labs.
 # authors: German Ros (german.ros@intel.com)
@@ -15,6 +18,9 @@ import numpy as np
 
 
 def draw_waypoints(world, waypoints, z=0.5):
+    # [FUNCTION DOC]
+    # Draws a 1 m debug arrow along each waypoint's yaw, z meters above it, for 1 s.
+    # Side effects: CARLA debug drawing.
     """
     Draw a list of waypoints at a certain height given in z.
 
@@ -31,6 +37,8 @@ def draw_waypoints(world, waypoints, z=0.5):
 
 
 def get_speed(vehicle):
+    # [FUNCTION DOC]
+    # Returns the vehicle's speed magnitude in km/h (3D velocity * 3.6).
     """
     Compute speed of a vehicle in Km/h.
 
@@ -43,11 +51,18 @@ def get_speed(vehicle):
 
 
 def get_trafficlight_trigger_location(traffic_light):
+    # [FUNCTION DOC]
+    # Returns the world location of the traffic light's trigger volume (volume center plus a rotated
+    # offset derived from its z-extent; effectively the center since x/y offsets are zero).
     """
     Calculates the yaw of the waypoint that represents the trigger volume of the traffic light
     """
 
     def rotate_point(point, radians):
+        # [FUNCTION DOC]
+        # HELPER: Rotates a 2D point by an angle in radians, keeping z.
+        # KNOWN ISSUE: the y term subtracts cos*y instead of adding it (not a proper rotation); harmless
+        # here because it is only called with x = y = 0.
         """
         rotate a given point by a given angle
         """
@@ -70,6 +85,10 @@ def get_trafficlight_trigger_location(traffic_light):
 def is_within_distance(
     target_transform, reference_transform, max_distance, angle_interval=None
 ):
+    # [FUNCTION DOC]
+    # Returns True if the target is within max_distance (2D) of the reference and, when angle_interval
+    # [min, max] is given, the angle from the reference forward vector is strictly between them. Targets
+    # closer than 1 mm always count as within.
     """
     Check if a location is both within a certain distance from a reference object.
     By using 'angle_interval', the angle between the location and reference transform
@@ -116,6 +135,9 @@ def is_within_distance(
 
 
 def compute_magnitude_angle(target_location, current_location, orientation):
+    # [FUNCTION DOC]
+    # Returns (2D distance, angle in degrees between the orientation yaw direction and the target).
+    # Division by zero yields NaN handling via clip when locations coincide.
     """
     Compute relative angle and distance between a target_location and a current_location
 
@@ -142,6 +164,8 @@ def compute_magnitude_angle(target_location, current_location, orientation):
 
 
 def distance_vehicle(waypoint, vehicle_transform):
+    # [FUNCTION DOC]
+    # Returns the 2D distance between a waypoint and a vehicle transform.
     """
     Returns the 2D distance from a waypoint to a vehicle
 
@@ -156,6 +180,8 @@ def distance_vehicle(waypoint, vehicle_transform):
 
 
 def vector(location_1, location_2):
+    # [FUNCTION DOC]
+    # Returns the 3D unit vector (list) from location_1 to location_2 (epsilon-stabilized).
     """
     Returns the unit vector from location_1 to location_2
 
@@ -170,6 +196,8 @@ def vector(location_1, location_2):
 
 
 def compute_distance(location_1, location_2):
+    # [FUNCTION DOC]
+    # Returns the 3D Euclidean distance between two locations plus machine epsilon.
     """
     Euclidean distance between 3D points
 
@@ -183,6 +211,8 @@ def compute_distance(location_1, location_2):
 
 
 def positive(num):
+    # [FUNCTION DOC]
+    # Returns num if > 0, else 0.0.
     """
     Return the given number if positive, else 0
 

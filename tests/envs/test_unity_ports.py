@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Regression test: each UnityMLAgentsEnvironment instance must pick a distinct Unity
+# port (base_port + worker_id). Fakes mlagents_envs modules in sys.modules.
 """Each Unity env instance must talk to its Unity process on its own port."""
 
 import sys
@@ -8,13 +11,23 @@ from envs.unity_env.server.unity_environment import UnityMLAgentsEnvironment
 
 
 def test_instances_use_different_ports(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Installs fake mlagents_envs modules whose registry entry records the port passed to
+    # make() and then raises; loads "PushBlock" in two env instances and asserts the
+    # recorded ports differ. Side effects: monkeypatches sys.modules.
     ports = []
 
     class FakeRegistryEntry:
+        # [CLASS DOC]
+        # HELPER: Stand-in for RemoteRegistryEntry that records ports instead of launching Unity.
         def __init__(self, **kwargs):
+            # [FUNCTION DOC]
+            # Ignores all keyword arguments.
             pass
 
         def make(self, base_port=5005, worker_id=0, **kwargs):
+            # [FUNCTION DOC]
+            # Appends base_port + worker_id to the enclosing ports list, then raises RuntimeError.
             ports.append(base_port + worker_id)
             raise RuntimeError("stop before starting Unity")
 

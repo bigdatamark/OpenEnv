@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic action/observation types for the generic MCP-backed OpenEnv environment
+# (RFC 003 tool-calling style). MCPAction is the public wrapper; ListToolsAction and
+# ToolCallAction are internal concrete actions; MCPObservation carries results.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -22,6 +26,10 @@ from pydantic import Field
 
 
 class MCPAction(Action):
+    # [CLASS DOC]
+    # Public action: action_type ("ListToolsAction" or "ToolCallAction", required),
+    # optional tool_name, and arguments dict (defaults to empty). No validation that
+    # tool_name is present for ToolCallAction.
     """
     Generic wrapper action for MCP environment that supports multiple action types.
 
@@ -59,6 +67,8 @@ class MCPAction(Action):
 
 # Internal action types (not exposed to HTTP API)
 class ListToolsAction(Action):
+    # [CLASS DOC]
+    # Internal action with no fields requesting the MCP tools/list operation.
     """
     Internal: Request list of available tools from MCP server.
 
@@ -70,6 +80,8 @@ class ListToolsAction(Action):
 
 
 class ToolCallAction(Action):
+    # [CLASS DOC]
+    # Internal action for MCP tools/call: required tool_name and an arguments dict (default empty).
     """
     Internal: Call a specific MCP tool with arguments.
 
@@ -84,6 +96,10 @@ class ToolCallAction(Action):
 
 
 class MCPObservation(Observation):
+    # [CLASS DOC]
+    # Observation with success flag (default True), optional error_message, optional
+    # tools_list (list of tool schema dicts), optional tool_result dict, metadata dict,
+    # done (default False) and optional reward. Redeclares fields of the base Observation.
     """
     Generic observation from the MCP Environment.
 

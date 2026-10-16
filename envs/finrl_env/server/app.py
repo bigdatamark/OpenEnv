@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# FastAPI entry point for the FinRL environment. At import time it loads the
+# FinRL configuration (from FINRL_CONFIG_PATH or a synthetic sample), builds the
+# OpenEnv app via create_app with a per-session environment factory, and adds a
+# GET /config endpoint. Side effects at import: reads files/CSV, prints to stdout,
+# imports finrl, generates random sample data.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -49,6 +55,15 @@ except ImportError as e:
 
 
 def load_finrl_config():
+    # [FUNCTION DOC]
+    # Loads the FinRL env class and config. If FINRL_CONFIG_PATH names an existing
+    # file, reads it as JSON; if it has "data_path", reads that CSV with pandas into
+    # config["df"] and removes "data_path". Otherwise builds a 100-day synthetic
+    # single-ticker DataFrame (sine-wave prices, random indicator columns) and a
+    # default single-stock config (100000 initial cash, 0.1% costs, 4 indicators).
+    # Returns: tuple (StockTradingEnv class, config dict).
+    # Raises: ImportError if finrl is not installed; JSON/CSV read errors.
+    # Side effects: prints progress to stdout.
     """
     Load FinRL environment configuration.
 
@@ -129,6 +144,9 @@ finrl_env_class, finrl_config = load_finrl_config()
 
 # Factory function to create FinRLEnvironment instances
 def create_finrl_environment():
+    # [FUNCTION DOC]
+    # Factory used by create_app: returns a new FinRLEnvironment built from the
+    # module-level class and config (shared config dict across instances).
     """Factory function that creates FinRLEnvironment with config."""
     return FinRLEnvironment(
         finrl_env_class=finrl_env_class, finrl_env_config=finrl_config
@@ -144,6 +162,10 @@ app = create_app(
 
 @app.get("/config")
 def get_config():
+    # [FUNCTION DOC]
+    # GET /config handler. Returns a summary dict of the loaded config: stock_dim,
+    # initial_amount, action_space, state_space and tech_indicators (DataFrame
+    # omitted). Missing keys yield None.
     """
     Get the current environment configuration (excluding DataFrame).
 
@@ -163,6 +185,9 @@ def get_config():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Prints a config banner and runs uvicorn serving the app on 0.0.0.0:8000
+    # (blocking).
     import uvicorn
 
     print("=" * 60)

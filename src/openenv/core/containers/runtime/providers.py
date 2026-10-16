@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Defines the provider abstractions used by clients to launch environment
+# servers: ContainerProvider (start/stop a container from an image and wait for
+# its /health endpoint, plus context-manager close support) and RuntimeProvider
+# (non-container runtimes), with concrete LocalDockerProvider (docker run on the
+# local daemon) and DockerSwarmProvider (replicated swarm service), and a
+# KubernetesProvider placeholder. All servers are expected to listen on port
+# 8000 inside the container. Docker interaction is via subprocess calls to the
+# docker CLI.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -16,6 +25,11 @@ _ContainerProviderT = TypeVar("_ContainerProviderT", bound="ContainerProvider")
 
 
 class ContainerProvider(ABC):
+    # [CLASS DOC]
+    # Abstract base for providers that manage a single container lifecycle and
+    # return a base URL for it. Subclasses implement start_container,
+    # stop_container and wait_for_ready; close is an optional hook invoked on
+    # context-manager exit.
     """
     Abstract base class for container providers.
 
@@ -47,6 +61,9 @@ class ContainerProvider(ABC):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Abstract: start a container from image (provider-specific source), optionally
+        # on port with env_vars and provider-specific kwargs; return its base URL.
         """
         Start a container from the specified image.
 
@@ -73,6 +90,8 @@ class ContainerProvider(ABC):
 
     @abstractmethod
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # Abstract: stop and remove the container started by start_container.
         """
         Stop and remove the running container.
 
@@ -82,6 +101,9 @@ class ContainerProvider(ABC):
 
     @abstractmethod
     def wait_for_ready(self, base_url: str, timeout_s: float = 30.0) -> None:
+        # [FUNCTION DOC]
+        # Abstract: block until the server at base_url is ready or raise TimeoutError
+        # after timeout_s.
         """
         Wait for the container to be ready to accept requests.
 
@@ -99,6 +121,8 @@ class ContainerProvider(ABC):
         pass
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Default no-op hook to release provider-held resources.
         """
         Release provider-held resources (e.g. SDK clients, connections).
 
@@ -110,14 +134,21 @@ class ContainerProvider(ABC):
         pass
 
     def __enter__(self: _ContainerProviderT) -> _ContainerProviderT:
+        # [FUNCTION DOC]
+        # Returns self (does not start anything).
         return self
 
     def __exit__(self, exc_type, exc, tb) -> Optional[bool]:
+        # [FUNCTION DOC]
+        # Calls close and returns None (exceptions propagate).
         self.close()
         return None
 
 
 class LocalDockerProvider(ContainerProvider):
+    # [CLASS DOC]
+    # Runs one container on the local Docker daemon, mapping a host port to
+    # container port 8000; tracks the container id and generated name.
     """
     Container provider for local Docker daemon.
 
@@ -135,6 +166,10 @@ class LocalDockerProvider(ContainerProvider):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes empty state and checks Docker availability by running
+        # "docker version" (5 s timeout).
+        # Raises: RuntimeError if Docker is missing, fails, or times out.
         """Initialize the local Docker provider."""
         self._container_id: Optional[str] = None
         self._container_name: Optional[str] = None
@@ -165,6 +200,15 @@ class LocalDockerProvider(ContainerProvider):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Picks a free host port if none given, generates a container name, runs
+        # "docker run -d --name <name> -p <port>:8000 [-e K=V ...] <image>", stores the
+        # container id from stdout, sleeps 1 s, and returns "http://localhost:<port>".
+        # Raises: RuntimeError with command, exit code, stdout and stderr if docker run
+        # fails.
+        # KNOWN ISSUE: extra kwargs are accepted but ignored, although the docstring
+        # says they are additional Docker run options. The command (including env var
+        # values) is included in the error message.
         """
         Start a Docker container locally.
 
@@ -225,6 +269,11 @@ class LocalDockerProvider(ContainerProvider):
         return base_url
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # If a container is tracked, runs "docker stop" then "docker rm" (10 s timeout
+        # each), ignoring non-zero exits, and always clears the tracked id/name.
+        # KNOWN ISSUE: a subprocess timeout (TimeoutExpired) is not caught and
+        # propagates.
         """
         Stop and remove the Docker container.
         """
@@ -257,6 +306,9 @@ class LocalDockerProvider(ContainerProvider):
             self._container_name = None
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 30.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health every 0.5 s (2 s request timeout, proxies
+        # bypassed) until 200. Raises TimeoutError after timeout_s (default 30).
         """
         Wait for container to be ready by polling /health endpoint.
 
@@ -294,6 +346,9 @@ class LocalDockerProvider(ContainerProvider):
         )
 
     def _find_available_port(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Binds a socket to port 0 on all interfaces and returns the assigned
+        # port after closing it (race-prone: the port may be taken before use).
         """
         Find an available port on localhost.
 
@@ -309,6 +364,8 @@ class LocalDockerProvider(ContainerProvider):
         return port
 
     def _generate_container_name(self, image: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "<image basename without tag>-<epoch milliseconds>".
         """
         Generate a unique container name based on image name and timestamp.
 
@@ -327,6 +384,11 @@ class LocalDockerProvider(ContainerProvider):
 
 
 class DockerSwarmProvider(ContainerProvider):
+    # [CLASS DOC]
+    # Runs an image as a replicated Docker Swarm service on the local engine,
+    # publishing a host port to container port 8000 (Swarm load-balances across
+    # replicas). Tracks service name, id and published port; optional overlay
+    # network and auto swarm init.
     """
     Container provider that uses Docker Swarm services for local concurrency.
 
@@ -342,6 +404,11 @@ class DockerSwarmProvider(ContainerProvider):
         auto_init_swarm: bool = True,
         overlay_network: Optional[str] = None,
     ):
+        # [FUNCTION DOC]
+        # Stores options, verifies Docker is available, ensures Swarm is active
+        # (initializing it if allowed) and, if overlay_network is given, ensures that
+        # network exists. Raises RuntimeError on any failure.
+        # Side effects: may run "docker swarm init" and create a network.
         """
         Args:
             auto_init_swarm (`bool`, *optional*, defaults to `True`):
@@ -370,6 +437,15 @@ class DockerSwarmProvider(ContainerProvider):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Validates kwargs (only replicas, cpu_limit, memory_limit, constraints,
+        # labels, command; ValueError otherwise). Picks a free port if none, generates a
+        # service name, and runs "docker service create --detach" with replicas
+        # (default 2, minimum 1), publish mapping, optional network, env vars, cpu and
+        # memory limits, constraints, labels, image, and an optional command override
+        # (string split shell-style or a sequence). Stores the service id, sleeps 1 s
+        # and returns "http://localhost:<port>".
+        # Raises: RuntimeError on docker failure (includes command and output).
         """
         Start (or scale) a Swarm service for the given image.
 
@@ -491,6 +567,9 @@ class DockerSwarmProvider(ContainerProvider):
         return f"http://localhost:{port}"
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # Runs "docker service rm <name>" (10 s timeout), ignoring non-zero exits, and
+        # always clears tracked state. No-op if no service. Timeouts propagate.
         """
         Remove the Swarm service (and keep the Swarm manager running).
         """
@@ -515,6 +594,9 @@ class DockerSwarmProvider(ContainerProvider):
             self._published_port = None
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 30.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health every 0.5 s (2 s timeout, proxies bypassed) until
+        # any replica returns 200. Raises TimeoutError after timeout_s.
         """
         Wait for at least one replica to become healthy by polling /health.
 
@@ -547,6 +629,9 @@ class DockerSwarmProvider(ContainerProvider):
         )
 
     def _ensure_docker_available(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Runs "docker version" (5 s timeout); raises RuntimeError if Docker is
+        # unavailable.
         import subprocess
 
         try:
@@ -566,6 +651,10 @@ class DockerSwarmProvider(ContainerProvider):
             ) from exc
 
     def _ensure_swarm_initialized(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Reads the local Swarm node state via "docker info"; returns if
+        # "active". Otherwise raises RuntimeError when auto init is disabled, or runs
+        # "docker swarm init" (RuntimeError on failure).
         import subprocess
 
         try:
@@ -598,6 +687,10 @@ class DockerSwarmProvider(ContainerProvider):
             raise RuntimeError("Failed to initialize Docker Swarm") from e
 
     def _ensure_overlay_network(self, network: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Returns if "docker network inspect <network>" succeeds; otherwise
+        # creates an attachable overlay network with that name (RuntimeError on
+        # failure).
         import subprocess
 
         inspect = subprocess.run(
@@ -628,6 +721,8 @@ class DockerSwarmProvider(ContainerProvider):
             raise RuntimeError(f"Failed to create overlay network '{network}'") from e
 
     def _find_available_port(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns an OS-assigned free TCP port (released before use).
         import socket
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -637,6 +732,8 @@ class DockerSwarmProvider(ContainerProvider):
         return port
 
     def _generate_service_name(self, image: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "<image basename without tag>-swarm-<epoch milliseconds>".
         import time
 
         clean_image = image.split("/")[-1].split(":")[0]
@@ -645,6 +742,9 @@ class DockerSwarmProvider(ContainerProvider):
 
 
 class KubernetesProvider(ContainerProvider):
+    # [CLASS DOC]
+    # Placeholder for a future Kubernetes provider. Implements no abstract methods,
+    # so instantiating it raises TypeError.
     """
     Planned container provider for Kubernetes clusters.
 
@@ -658,6 +758,10 @@ class KubernetesProvider(ContainerProvider):
 
 
 class RuntimeProvider(ABC):
+    # [CLASS DOC]
+    # Abstract base for non-container runtimes (e.g. uv). Subclasses implement
+    # start (returning a base URL), stop and wait_for_ready. Using it as a context
+    # manager starts on enter and stops on exit.
     """
     Abstract base class for runtime providers that are not container providers.
     Providers implement this interface to support different runtime platforms:
@@ -683,6 +787,9 @@ class RuntimeProvider(ABC):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Abstract: start the runtime on an optional port with env vars and options;
+        # return its base URL.
         """
         Start the runtime.
 
@@ -700,6 +807,8 @@ class RuntimeProvider(ABC):
 
     @abstractmethod
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Abstract: stop the runtime.
         """
         Stop the runtime.
         """
@@ -707,12 +816,16 @@ class RuntimeProvider(ABC):
 
     @abstractmethod
     def wait_for_ready(self, timeout_s: float = 30.0) -> None:
+        # [FUNCTION DOC]
+        # Abstract: block until the runtime is ready or time out.
         """
         Wait for the runtime to be ready to accept requests.
         """
         pass
 
     def __enter__(self) -> "RuntimeProvider":
+        # [FUNCTION DOC]
+        # Calls start with defaults and returns self.
         """
         Enter the runtime provider.
         """
@@ -720,6 +833,8 @@ class RuntimeProvider(ABC):
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        # [FUNCTION DOC]
+        # Calls stop and returns False (exceptions propagate).
         """
         Exit the runtime provider.
         """

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# LLM-driven maze navigation example for the CARLA environment reproducing the blog maze runs: an LLM repeatedly picks
+# get_goal_info or control_vehicle from a stateless per-step prompt (optionally with a camera image) to drive ~153 m to
+# a goal in Town10. Side effects: sys.path changes, LLM API calls, CARLA server calls, optional image files, stdout.
 """
 LLM Inference: Maze Navigation
 
@@ -33,6 +37,9 @@ from llm_clients import create_client, build_vision_message
 
 @dataclass
 class MazeResult:
+    # [CLASS DOC]
+    # Dataclass with one maze episode's results: model display name, scenario description, distance traveled (m), final
+    # goal distance (m), success flag, step count, and the list of tool names chosen.
     """Result of maze navigation episode."""
     model: str
     scenario: str
@@ -55,6 +62,10 @@ def run_maze_episode(
     vision_interval: int = 1,
     scenario_config_overrides: Optional[Dict] = None,
 ) -> MazeResult:
+    # [FUNCTION DOC]
+    # Resolves model and maze scenario configs (KeyError if unknown), disables vision with a warning for non-vision models,
+    # creates the LLM client and runs the async episode via asyncio.run. Exceptions are printed (verbose) and re-raised.
+    # Returns: MazeResult.
     """Run maze navigation episode with LLM decision-making.
 
     Args:
@@ -101,6 +112,14 @@ def run_maze_episode(
     llm = create_client(model_config.provider, model_config.model_id)
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async episode. Resets with merged overrides, optionally saves a start image, then per step builds a prompt
+        # (speed, goal distance/direction, last 10 action summaries) optionally as a vision message, asks the LLM (256 tokens),
+        # stops if there is no tool call; get_goal_info maps to observe; control_vehicle sends throttle (default 0.5) and steer
+        # (default 0.0) and adds 2D distance moved; unknown tools are only logged. Saves periodic images, prints progress every
+        # 10 steps, stops when done, saves a final image, computes success (goal distance below 10 m; falls back to the initial
+        # distance or 153 m) and returns the MazeResult.
+        # KNOWN ISSUE: for an unknown first tool name, "result" is still the reset result; with max_steps of 0 the loop variable is unbound (NameError).
         env = CarlaEnv(base_url=base_url)
         async with env:
             # Reset to maze scenario
@@ -330,6 +349,9 @@ Make your tool call now (no explanations)."""
         raise
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry: parses model, run-all-blog-examples, base url, steps, image, vision and camera override options. Runs every
+    # blog maze example (failures recorded) with a summary, or a single model on "maze-1" with a result printout, or prints help.
     parser = argparse.ArgumentParser(
         description="Run LLM inference on maze navigation scenarios",
         formatter_class=argparse.RawDescriptionHelpFormatter,

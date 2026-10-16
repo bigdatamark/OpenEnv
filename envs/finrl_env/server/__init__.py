@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server package for the FinRL environment; re-exports FinRLEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

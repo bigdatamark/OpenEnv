@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for the OpenApp environment. Contains only a docstring; exports nothing.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

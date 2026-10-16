@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# LLM-free demo comparing the CARLA environment's raw reward and rubric_reward while CARLA's built-in navigation agent
+# drives a maze or free-roam scenario; prints a per-step table and a summary.
+# Side effects: sys.path changes, network calls to the CARLA server, stdout.
 """
 Rubric Reward Demo (no LLM required).
 
@@ -41,6 +45,9 @@ def run_rubric_demo(
     route_steps: int = 5,
     max_steps: int = 100,
 ):
+    # [FUNCTION DOC]
+    # Looks up the scenario (KeyError if unknown), prints a header and runs the async demo via asyncio.run; exceptions are
+    # printed and re-raised. Returns None.
     """Run autopilot navigation while tracking rubric vs raw rewards."""
     scenario_config = ALL_SCENARIOS[scenario_key]
 
@@ -51,6 +58,11 @@ def run_rubric_demo(
     print("=" * 70)
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Resets with the scenario's own overrides, initialises the navigation agent, sets the destination from
+        # goal_location when present, then for up to max_steps follow_route steps accumulates and prints raw and rubric rewards,
+        # speed and goal distance, stopping when done; finally prints totals, whether done_reason is goal_reached, and final distance.
+        # KNOWN ISSUE: raw and rubric rewards are summed directly, so a None reward value raises TypeError.
         env = CarlaEnv(base_url=base_url)
         async with env:
             # 1. Reset
@@ -126,6 +138,8 @@ def run_rubric_demo(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry: parses scenario, behavior, route steps, base url and max steps, then calls run_rubric_demo.
     parser = argparse.ArgumentParser(
         description="Rubric reward demo — compare raw vs rubric rewards during autopilot navigation",
         formatter_class=argparse.RawDescriptionHelpFormatter,

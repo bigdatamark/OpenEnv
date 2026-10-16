@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# WebSocket client for the FinRL environment: translates FinRLAction into step
+# payloads and server JSON responses into typed observations and state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -21,6 +24,9 @@ from .models import FinRLAction, FinRLObservation
 
 
 class FinRLEnv(EnvClient[FinRLAction, FinRLObservation, State]):
+    # [CLASS DOC]
+    # EnvClient specialization for FinRL. Only implements the three serialization
+    # hooks; connection handling, reset/step/close come from EnvClient.
     """
     Client for the FinRL Environment.
 
@@ -79,6 +85,9 @@ class FinRLEnv(EnvClient[FinRLAction, FinRLObservation, State]):
     """
 
     def _step_payload(self, action: FinRLAction) -> Dict:
+        # [FUNCTION DOC]
+        # Builds the step payload: a dict with the single key "actions" holding the
+        # action's list of floats.
         """
         Convert FinRLAction to JSON payload for step request.
 
@@ -93,6 +102,13 @@ class FinRLEnv(EnvClient[FinRLAction, FinRLObservation, State]):
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[FinRLObservation]:
+        # [FUNCTION DOC]
+        # Converts a server step/reset response into a StepResult. Reads the nested
+        # "observation" dict for state (default empty list), portfolio_value (default
+        # 0.0) and date (default ""); done and reward come from the top level; metadata
+        # from top level, falling back to observation metadata, then empty dict.
+        # Returns a StepResult carrying the observation, reward, done and top-level
+        # metadata (may be None).
         """
         Parse server response into StepResult[FinRLObservation].
 
@@ -120,6 +136,9 @@ class FinRLEnv(EnvClient[FinRLAction, FinRLObservation, State]):
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # Builds a State from the payload's episode_id (may be None) and step_count
+        # (default 0).
         """
         Parse server response into State object.
 

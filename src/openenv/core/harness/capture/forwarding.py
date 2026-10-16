@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Port-forwarding strategies that publish the local capture (intercept) server at a URL
+# reachable from a remote sandbox: DirectExposure (no forwarding), GradioForwarder
+# (frpc via gradio's setup_tunnel) and CloudflareForwarder (cloudflared quick or named
+# tunnel subprocess), plus a name-based factory. Starts threads and subprocesses and
+# logs tunnel output.
 """Publish the intercept server at a URL the sandbox can reach.
 
 The agent runs inside a sandbox on the public internet; the intercept runs next to the engine on a
@@ -47,6 +53,8 @@ logger = logging.getLogger(__name__)
 
 
 class ForwardingError(RuntimeError):
+    # [CLASS DOC]
+    # Raised when a forward cannot be established or a forwarder name is unknown.
     """Raised when a forwarder cannot be established. Never returns a half-open forward.
 
     Failing here is strictly better than returning a URL that does not resolve: a stale URL that
@@ -56,14 +64,23 @@ class ForwardingError(RuntimeError):
 
 
 class PortForwarder(ABC):
+    # [CLASS DOC]
+    # Abstract forwarding strategy. Tracks the published URL and local port; provides
+    # preflight (no-op by default), abstract start/stop, url and name (class name)
+    # properties, and context-manager support that calls stop() on exit.
     """Publish `local_host:local_port` and hand back a URL reachable from the sandbox."""
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Initializes url and local port to None.
         self._url: str | None = None
         self._local_port: int | None = None
 
     @classmethod
     def preflight(cls) -> None:
+        # [FUNCTION DOC]
+        # Default preflight check; does nothing. Subclasses raise ForwardingError when the
+        # strategy cannot work in this environment.
         """Raise ForwardingError if this strategy cannot possibly work here.
 
         Called BEFORE a run starts, so a missing binary or an uninstalled dependency is a startup
@@ -72,28 +89,42 @@ class PortForwarder(ABC):
 
     @abstractmethod
     def start(self, local_port: int, *, local_host: str = "127.0.0.1") -> str:
+        # [FUNCTION DOC]
+        # Abstract. Must begin forwarding local_host:local_port and return the public URL.
         """Begin forwarding and return the public URL."""
 
     @abstractmethod
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Abstract. Must tear down the forward; must be idempotent.
         """Tear down. Must be idempotent: teardown runs on both success and failure paths."""
 
     @property
     def url(self) -> str | None:
+        # [FUNCTION DOC]
+        # Returns the published URL, or None if not started.
         return self._url
 
     @property
     def name(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the concrete class name.
         return type(self).__name__
 
     def __enter__(self) -> "PortForwarder":
+        # [FUNCTION DOC]
+        # Returns self for use as a context manager.
         return self
 
     def __exit__(self, *exc) -> None:
+        # [FUNCTION DOC]
+        # Calls stop() on context exit; does not suppress exceptions.
         self.stop()
 
 
 class DirectExposure(PortForwarder):
+    # [CLASS DOC]
+    # Forwarder that performs no forwarding: returns "<scheme>://<advertise_host>:<port>".
     """No forward: hand back the address as-is.
 
     For local docker sandboxes, or any deployment where the sandbox can already route to the host.
@@ -102,20 +133,31 @@ class DirectExposure(PortForwarder):
     """
 
     def __init__(self, advertise_host: str = "127.0.0.1", scheme: str = "http") -> None:
+        # [FUNCTION DOC]
+        # Stores the advertised host (default 127.0.0.1) and URL scheme (default http).
         super().__init__()
         self._host = advertise_host
         self._scheme = scheme
 
     def start(self, local_port: int, *, local_host: str = "127.0.0.1") -> str:
+        # [FUNCTION DOC]
+        # Records the port and returns the URL built from scheme, advertised host and port
+        # (local_host is ignored).
         self._local_port = local_port
         self._url = f"{self._scheme}://{self._host}:{local_port}"
         return self._url
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Clears the URL.
         self._url = None
 
 
 class GradioForwarder(PortForwarder):
+    # [CLASS DOC]
+    # Forwarder using gradio's frpc tunnel (setup_tunnel), optionally against a custom
+    # share server and TLS certificate. Drains the frpc child's stdout/stderr in daemon
+    # threads for the tunnel's lifetime.
     """frpc, via `gradio.networking.setup_tunnel`.
 
     Preferred over shelling out to a binary for a reason that matters operationally: it RETURNS the
@@ -132,6 +174,8 @@ class GradioForwarder(PortForwarder):
         share_server_address: str | None = None,
         share_server_tls_certificate: str | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the optional share server address and TLS certificate; no tunnel yet.
         super().__init__()
         self._share_server = share_server_address
         self._tls_cert = share_server_tls_certificate
@@ -140,6 +184,8 @@ class GradioForwarder(PortForwarder):
 
     @classmethod
     def preflight(cls) -> None:
+        # [FUNCTION DOC]
+        # Raises ForwardingError if gradio.networking.setup_tunnel cannot be imported.
         try:
             from gradio.networking import setup_tunnel  # noqa: F401
         except Exception as exc:  # noqa: BLE001
@@ -148,6 +194,13 @@ class GradioForwarder(PortForwarder):
             ) from exc
 
     def start(self, local_port: int, *, local_host: str = "127.0.0.1") -> str:
+        # [FUNCTION DOC]
+        # Opens a gradio tunnel to local_host:local_port and returns its public URL.
+        # Behavior: stops any existing tunnel, generates a random share token, calls
+        # setup_tunnel, finds the matching tunnel in gradio's CURRENT_TUNNELS, and starts a
+        # daemon reader thread per non-None stdout/stderr pipe.
+        # Raises: ForwardingError if setup_tunnel fails or no managed tunnel process is found.
+        # Side effects: spawns frpc (via gradio) and threads; sets url and local port.
         from gradio.networking import setup_tunnel
         from gradio.tunneling import CURRENT_TUNNELS
 
@@ -184,6 +237,10 @@ class GradioForwarder(PortForwarder):
 
     @staticmethod
     def _drain(pipe) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Reads a byte pipe line by line until EOF, logging lines containing
+        # "error"/"failed"/"warn" (case-insensitive) as warnings and others as debug
+        # (truncated to 1000 chars). Swallows OSError/ValueError from a closed pipe.
         try:
             for line in iter(pipe.readline, b""):
                 text = line.decode(errors="replace").rstrip()
@@ -197,6 +254,10 @@ class GradioForwarder(PortForwarder):
             pass  # The owner may close the pipe during shutdown.
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the tunnel (if any), waits up to 5s for the process (killing and waiting again
+        # on timeout), joins reader threads (1s each), closes the pipes, and clears state.
+        # Idempotent.
         if self._tunnel is not None:
             process = self._tunnel.proc
             self._tunnel.kill()
@@ -217,6 +278,9 @@ class GradioForwarder(PortForwarder):
 
 
 class CloudflareForwarder(PortForwarder):
+    # [CLASS DOC]
+    # Forwarder that runs cloudflared as a subprocess: a quick tunnel (URL parsed from its
+    # output) or a named tunnel (URL from the configured hostname).
     """`cloudflared`, either a quick forwards or a named one.
 
     Quick tunnels (no `tunnel_name`) need no account and print a `*.trycloudflare.com` URL on
@@ -236,6 +300,9 @@ class CloudflareForwarder(PortForwarder):
         binary: str = "cloudflared",
         startup_timeout_s: float = 60.0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores tunnel name, hostname, binary path (default "cloudflared") and startup
+        # timeout (default 60s); no process yet.
         super().__init__()
         self._tunnel_name = tunnel_name
         self._hostname = hostname
@@ -245,6 +312,8 @@ class CloudflareForwarder(PortForwarder):
 
     @classmethod
     def preflight(cls, binary: str = "cloudflared") -> None:
+        # [FUNCTION DOC]
+        # Raises ForwardingError if the binary is not found on PATH.
         if shutil.which(binary) is None:
             raise ForwardingError(
                 f"`{binary}` not found on PATH. Install it, or use GradioForwarder, which needs no "
@@ -252,6 +321,19 @@ class CloudflareForwarder(PortForwarder):
             )
 
     def start(self, local_port: int, *, local_host: str = "127.0.0.1") -> str:
+        # [FUNCTION DOC]
+        # Starts cloudflared forwarding to http://local_host:local_port and returns the URL.
+        # Behavior: runs preflight; launches "tunnel run --url <target> <name>" for named
+        # tunnels or "tunnel --no-autoupdate --url <target>" for quick tunnels, with stdout and
+        # stderr merged into a line-buffered text pipe. Named tunnel with hostname returns
+        # "https://<hostname>" immediately; otherwise waits for a trycloudflare URL.
+        # Raises: ForwardingError if the binary is missing or no URL appears in time (the
+        # process is stopped first).
+        # Side effects: spawns a subprocess.
+        # KNOWN ISSUE: a named tunnel without a hostname waits for a trycloudflare.com URL that
+        # named tunnels do not print, so it always times out.
+        # KNOWN ISSUE: after startup the merged output pipe is never drained, so a chatty
+        # cloudflared can fill the pipe and block.
         self.preflight(self._binary)
         target = f"http://{local_host}:{local_port}"
 
@@ -289,6 +371,11 @@ class CloudflareForwarder(PortForwarder):
         return url
 
     def _await_url(self) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Polls the process output (select with up to 0.2s waits, then readline) until a
+        # trycloudflare.com URL is seen. Returns the URL, or None on deadline, process exit, or EOF.
+        # KNOWN ISSUE: select checks the OS pipe, not the text wrapper's buffer, so lines already
+        # buffered by an earlier readline may be delayed until more output arrives or the deadline.
         """Read stderr until the URL appears, the process dies, or we run out of patience.
 
         `select` before `readline`, because `readline` BLOCKS until a newline arrives. A cloudflared
@@ -318,6 +405,9 @@ class CloudflareForwarder(PortForwarder):
                 return match.group(0)
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Clears process and URL; if the process is still running, terminates it and waits up
+        # to 10s, killing it on timeout. Idempotent.
         proc, self._proc, self._url = self._proc, None, None
         if proc is None or proc.poll() is not None:
             return
@@ -336,6 +426,10 @@ _FORWARDERS: dict[str, type[PortForwarder]] = {
 
 
 def make_forwarder(kind: str = "gradio", **kwargs) -> PortForwarder:
+    # [FUNCTION DOC]
+    # Builds a forwarder by name ("direct", "gradio" or "cloudflare", default gradio),
+    # passing kwargs to its constructor.
+    # Raises: ForwardingError for an unknown name.
     """Build a forwarder by name, for CLI wiring (`--expose gradio|cloudflare|direct`)."""
     try:
         cls = _FORWARDERS[kind]

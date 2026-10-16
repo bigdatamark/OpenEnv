@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Orders graders by their dependencies and executes them, turning unmet dependencies or missing
+# provider capabilities into SKIP results and grader crashes into ERROR results.
+
 """Deterministic dependency ordering and capability-aware grader execution."""
 
 import time
@@ -9,6 +13,11 @@ from ..types import CheckStatus
 
 
 def order_graders(graders: list) -> list:
+    # [FUNCTION DOC]
+    # Returns the graders in a deterministic topological order (dependencies first) based on each
+    # grader's check_id and depends_on (dependencies not among the given graders are ignored; ids and
+    # deps are sorted for determinism).
+    # Raises PolicyError on duplicate check ids or on a dependency cycle (names a node in the cycle).
     """Topologically order selected graders; reject duplicates and dependency cycles."""
     by_id = {grader.check_id: grader for grader in graders}
     if len(by_id) != len(graders):
@@ -24,6 +33,16 @@ def order_graders(graders: list) -> list:
 
 
 def execute_graders(graders, subject, *, provider_capabilities=frozenset(), prior=()):
+    # [FUNCTION DOC]
+    # Runs graders in dependency order against subject.
+    # Inputs: graders (objects with check_id, depends_on, requires_provider set and run(subject)),
+    # subject, provider_capabilities (set of ProviderCapability), prior (earlier CheckResults counted
+    # as outcomes for dependency checks).
+    # For each grader: if any dependency has no PASS outcome or required capabilities are missing,
+    # records a SKIP CheckResult listing reasons with duration 0; otherwise calls run, requiring a
+    # CheckResult with matching check_id, and on any exception records an ERROR result naming the
+    # exception type with measured duration.
+    # Returns the list of new CheckResults in execution order. Raises PolicyError via ordering.
     """Run independent checks despite failures, and name unmet dependencies in SKIPs."""
     results = []
     outcomes = {result.check_id: result for result in prior}

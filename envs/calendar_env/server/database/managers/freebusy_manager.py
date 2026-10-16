@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FreeBusy query implementation over the per-database_id calendar DB: validates the
+# request, collects confirmed non-transparent events per calendar, clips them to the
+# query window and merges overlaps into busy periods.
 """
 FreeBusy database manager with Google Calendar API v3 compatible operations
 Handles FreeBusy query operations with database-per-user architecture
@@ -28,14 +32,21 @@ logger = logging.getLogger(__name__)
 
 
 class FreeBusyManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id for free/busy queries.
     """FreeBusy manager for database operations"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id and calls init_database (engine creation only).
         self.database_id = database_id
         # Initialize database on first use
         init_database(database_id)
 
     def _parse_datetime_string(self, datetime_str: str) -> datetime:
+        # [FUNCTION DOC]
+        # HELPER: parses an ISO-8601 string ("Z" replaced by "+00:00") into a datetime.
+        # Raises: ValueError "Invalid datetime format" on failure (logged).
         """Parse ISO datetime string to datetime object"""
         try:
             return parser.isoparse(datetime_str.replace("Z", "+00:00"))
@@ -46,6 +57,11 @@ class FreeBusyManager:
     def _validate_query_request(
         self, request: FreeBusyQueryRequest, user_id: str
     ) -> FreeBusyQueryValidation:
+        # [FUNCTION DOC]
+        # HELPER: parses timeMin/timeMax, builds a FreeBusyQueryValidation and checks the time
+        # range (max 366 days) and calendar count (max 50), then checks each calendar exists for
+        # user_id. Returns the validation object.
+        # Raises: ValueError on any failed check.
         """Validate FreeBusy query request"""
         time_min = self._parse_datetime_string(request.timeMin)
         time_max = self._parse_datetime_string(request.timeMax)
@@ -72,6 +88,8 @@ class FreeBusyManager:
     def _validate_calendar_ids_exist(
         self, calendar_ids: List[str], user_id: str
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: raises ValueError for the first calendar id not owned by user_id. Opens and closes its own session.
         """Validate that all calendar IDs exist in the database for the user"""
         session = get_session(self.database_id)
         try:
@@ -100,6 +118,12 @@ class FreeBusyManager:
         time_min: datetime,
         time_max: datetime,
     ) -> List[TimePeriod]:
+        # [FUNCTION DOC]
+        # HELPER: using the given session, verifies the calendar belongs to user_id (ValueError
+        # otherwise), queries confirmed events of that calendar/user overlapping
+        # [time_min, time_max), skips transparent ones, clips each to the window and returns the
+        # merged list of TimePeriod (ISO strings).
+        # KNOWN ISSUE: event datetimes from SQLite may be naive while time_min/max are tz-aware, so comparisons with max/min may raise TypeError; the hasattr/getattr checks on transparency are always true for the ORM model.
         """Get busy periods for a specific calendar"""
         try:
             # Verify calendar belongs to user
@@ -174,6 +198,10 @@ class FreeBusyManager:
             raise
 
     def _merge_overlapping_periods(self, periods: List[TimePeriod]) -> List[TimePeriod]:
+        # [FUNCTION DOC]
+        # HELPER: sorts TimePeriods by start string and merges overlapping/touching ones (start
+        # <= previous end), returning a new list.
+        # KNOWN ISSUE: sorting is lexicographic on ISO strings, which is wrong if periods have different UTC offsets.
         """Merge overlapping time periods"""
         if not periods:
             return []
@@ -205,6 +233,11 @@ class FreeBusyManager:
     def query_freebusy(
         self, user_id: str, request: FreeBusyQueryRequest
     ) -> FreeBusyQueryResponse:
+        # [FUNCTION DOC]
+        # Validates the request and, for each requested calendar, computes busy periods;
+        # per-calendar failures produce an entry with errors [{domain "calendar", reason
+        # "backendError"}]. Returns FreeBusyQueryResponse(timeMin, timeMax, calendars dict).
+        # Raises: ValueError wrapping any validation/DB error (session rolled back). Session always closed.
         """
         Query free/busy information for calendars
 

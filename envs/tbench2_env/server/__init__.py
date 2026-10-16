@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# TB2 server subpackage. Re-exports the local (Tbench2Environment) and Docker (Tbench2DockerEnvironment)
+# environment implementations.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

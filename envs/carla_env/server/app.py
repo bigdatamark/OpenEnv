@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI entry point for the CARLA environment. Reads CARLA_SCENARIO (default trolley_saves),
+# CARLA_MODE (mock or real, default mock), CARLA_HOST and CARLA_PORT (default 2000) at import,
+# and builds the OpenEnv app with create_app.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -26,6 +30,9 @@ PORT = int(os.getenv("CARLA_PORT", "2000"))
 
 # Environment factory function
 def create_environment():
+    # [FUNCTION DOC]
+    # Factory used by create_app: returns a new CarlaEnvironment with the configured scenario,
+    # host, port and mode.
     """Factory function to create CarlaEnvironment instances."""
     return CarlaEnvironment(
         scenario_name=SCENARIO_NAME,
@@ -46,6 +53,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     """
     Entry point for direct execution via uv run or python -m.
 

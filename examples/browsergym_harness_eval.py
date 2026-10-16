@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# White-box BrowserGym evaluation script: an OpenAI-compatible chat model proposes actions that are executed through
+# the OpenEnv harness/session layer (helpers in browsergym_harness_eval_common). Runs N episodes and prints
+# per-episode and aggregate results. Side effects: sys.path changes, possibly starts Docker, network calls.
 """White-box BrowserGym evaluation example driven through the harness runtime.
 
 This is a plain inference/evaluation script. It runs BrowserGym locally by
@@ -38,6 +42,9 @@ from browsergym_harness_eval_common import (
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Defines and parses CLI options (base url, image, benchmark, task, model, API base url, episodes, max steps,
+    # temperature, max tokens). Returns the argparse namespace.
     parser = argparse.ArgumentParser(
         description="Evaluate a BrowserGym task through the harness runtime.",
     )
@@ -99,6 +106,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: creates the OpenAI client, starts or attaches to the BrowserGym runtime, builds the session factory and
+    # model-step function, runs the requested white-box episodes, and prints per-episode and aggregate summaries.
     args = parse_args()
     client = create_openai_client(api_base_url=args.api_base_url)
 

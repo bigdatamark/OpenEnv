@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Per-rollout inputs for the TitanRL to OpenEnv example: a frozen sample record and an
+# endless seeded dataset of such samples built from an inline prompt list. Imports
+# torchtitan (Configurable).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,6 +34,10 @@ from torchtitan.config import Configurable
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class OpenEnvSample:
+    # [CLASS DOC]
+    # Immutable record for one rollout: prompt (opening user message, may be empty),
+    # reset_kwargs (forwarded to the OpenEnv server reset, e.g. seed) and an optional
+    # target for the rubric.
     """One rollout's input to the OpenEnv-backed environment."""
 
     prompt: str = ""
@@ -43,6 +51,10 @@ class OpenEnvSample:
 
 
 class OpenEnvDataset(Configurable):
+    # [CLASS DOC]
+    # Infinite iterator of OpenEnvSample. Cycles through prompts in an order shuffled by a
+    # seeded RNG (reshuffled on every wrap when shuffle is on); optionally adds a per-
+    # episode reset seed equal to base seed plus a running episode counter.
     """Endless, seeded stream of :class:`OpenEnvSample` from an inline prompt list.
 
     Row order is shuffled with ``seed`` and reshuffled on each wrap, so a run sees
@@ -53,6 +65,9 @@ class OpenEnvDataset(Configurable):
 
     @dataclass(kw_only=True, slots=True)
     class Config(Configurable.Config):
+        # [CLASS DOC]
+        # Configuration: prompts (empty means one empty prompt so the task profile's
+        # instruction is used), seed, shuffle flag and pass_episode_seed flag.
         prompts: list[str] = field(default_factory=list)
         """Pool of opening instructions to draw from.
 
@@ -72,6 +87,10 @@ class OpenEnvDataset(Configurable):
         """When True, put a derived ``seed`` into each sample's ``reset_kwargs``."""
 
     def __init__(self, config: Config) -> None:
+        # [FUNCTION DOC]
+        # Copies config into private state (prompts defaulting to a single empty string), creates
+        # the seeded RNG, builds the index order (shuffled if enabled) and zeroes position and
+        # episode counters.
         # An empty pool means "no per-sample prompt" -> the task profile's
         # instruction is used instead.
         self._prompts = list(config.prompts) or [""]
@@ -86,9 +105,15 @@ class OpenEnvDataset(Configurable):
         self._episode = 0
 
     def __iter__(self) -> Iterator[OpenEnvSample]:
+        # [FUNCTION DOC]
+        # Returns self (the dataset is its own iterator).
         return self
 
     def __next__(self) -> OpenEnvSample:
+        # [FUNCTION DOC]
+        # Returns the next sample; on reaching the end of the order it reshuffles (if enabled)
+        # and wraps. Adds the reset seed when enabled and increments the episode counter.
+        # Never raises StopIteration.
         if self._pos >= len(self._order):
             if self._shuffle:
                 self._rng.shuffle(self._order)
@@ -105,6 +130,8 @@ class OpenEnvDataset(Configurable):
         )
 
     def state_dict(self) -> dict:
+        # [FUNCTION DOC]
+        # Returns a dict snapshot of RNG state, order, position and episode counter.
         """Snapshot RNG + position.
 
         TitanRL does not call this on checkpoint/resume yet, so a resumed run
@@ -118,6 +145,9 @@ class OpenEnvDataset(Configurable):
         }
 
     def load_state_dict(self, state_dict: dict) -> None:
+        # [FUNCTION DOC]
+        # Restores RNG state, order, position and episode counter from a state_dict snapshot.
+        # Raises: KeyError if keys are missing.
         self._rng.setstate(state_dict["rng_state"])
         self._order = list(state_dict["order"])
         self._pos = state_dict["pos"]

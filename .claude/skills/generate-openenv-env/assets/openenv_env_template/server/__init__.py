@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Template server subpackage; re-exports the environment class.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

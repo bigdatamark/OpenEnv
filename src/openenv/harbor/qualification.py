@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Evidence gates and table renderers for harness qualification: checks whether an eval
+# rollout was captured correctly, and validates/renders a recorded qualification report
+# (cells per harness x provider) into summary, maturity-tier and detail rows for the UI.
 """Evidence gates for provider evaluation, exact capture, and optimizer qualification.
 
 An installed adapter or reachable endpoint is not an end-to-end qualification.
@@ -26,6 +30,11 @@ STATUSES = frozenset(
 
 
 def evaluate_eval_capture(result: HarborRolloutResult) -> dict[str, bool]:
+    # [FUNCTION DOC]
+    # Returns boolean gates for an eval rollout: completed ok, verifier reward present,
+    # at least one captured turn, rollout_type is "eval", training export refused (converting
+    # to trace entries raises ValueError, no entries and no trainable tokens), and no
+    # "[FATAL]" finding.
     rejected = False
     try:
         entries = to_trace_entries(result)
@@ -47,6 +56,13 @@ def evaluate_eval_capture(result: HarborRolloutResult) -> dict[str, bool]:
 def qualification_rows(
     harnesses: list[str], report: dict[str, Any] | None = None
 ) -> list[list[str]]:
+    # [FUNCTION DOC]
+    # Validates report["cells"]: each (harness, provider) must be unique, provider in
+    # PROVIDERS, status in STATUSES (default not_run), any *pass status needs evidence, and
+    # optimizer_pass needs optimizer_validated true plus optimizer_evidence matching current
+    # captures with result, inputs, scope, model, revision and a positive int rows. Raises
+    # ValueError otherwise. Returns one row per harness (sorted): name followed by the status
+    # for each provider in PROVIDERS order (not_run when missing).
     """Render recorded evidence without promoting legacy adapter status to provider passes."""
     records = {}
     for cell in (report or {}).get("cells", []):
@@ -86,6 +102,10 @@ def qualification_rows(
 def harness_maturity_rows(
     harnesses: list[str], report: dict[str, Any] | None = None
 ) -> list[list[str]]:
+    # [FUNCTION DOC]
+    # Classifies each harness from qualification_rows: "stable" only if statuses are exactly
+    # eval_pass for openai/anthropic/hf and optimizer_pass for vllm; "unstable" if all are
+    # failed/blocked; else "experimental". Returns [name, tier, reason] rows.
     """Classify recorded profiles, not universal or production-scale reliability.
 
     Partial support remains experimental. Four terminal failures make an adapter
@@ -107,6 +127,13 @@ def harness_maturity_rows(
 
 
 def qualification_details(report: dict[str, Any] | None = None) -> list[list[str]]:
+    # [FUNCTION DOC]
+    # Validates the report (same rules as qualification_rows), then for each cell that is not
+    # not_run returns a row: harness, provider, status, model (configuration or, when current,
+    # optimizer evidence), pinned/observed harness versions, tasks completed, ACP/NeMo profile,
+    # optimizer scope prefixed by whether it matches current captures (or "not validated"),
+    # revision, evidence paths and reason. Sorted by harness then provider.
+    # Raises KeyError if a cell lacks "provider" (validation would have raised ValueError first).
     """Expose the scope and provenance behind the summary statuses.
 
     File references identify externally verified artifacts; this renderer does not

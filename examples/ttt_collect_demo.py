@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Demo of the harness collect pipeline (session factory, MCP harness, CollectRunner,
+# RolloutSerializer) on OpenSpiel Tic-Tac-Toe. Uses a built-in scripted client by
+# default or a real OpenSpiel server via --base-url, with a deterministic scripted
+# teacher, and writes results.jsonl plus metadata.json. Adds src/ and envs/ to sys.path.
 """Smoke-test demo for the harness collect pipeline on Tic-Tac-Toe.
 
 Two run modes:
@@ -50,14 +55,22 @@ from openspiel_env.models import OpenSpielAction, OpenSpielObservation, OpenSpie
 
 
 class ScriptedTTTClient:
+    # [CLASS DOC]
+    # HELPER: fake synchronous OpenSpiel client for tic_tac_toe that ends the game after a
+    # fixed number of plays, rewarding 1.0 on the final play if winning is set.
     """A tic_tac_toe client that ends after `turns_to_win` plays."""
 
     def __init__(self, turns_to_win: int = 1, winning: bool = True):
+        # [FUNCTION DOC]
+        # Stores the number of plays to finish, the winning flag and a zeroed play counter.
         self._turns_to_win = turns_to_win
         self._winning = winning
         self._played = 0
 
     def reset(self, **kwargs: Any) -> StepResult[OpenSpielObservation]:
+        # [FUNCTION DOC]
+        # Resets the play counter and returns a StepResult with an opening observation (27-entry
+        # info_state, all 9 actions legal, playing phase), reward 0.0, not done.
         self._played = 0
         return StepResult(
             observation=OpenSpielObservation(
@@ -71,6 +84,10 @@ class ScriptedTTTClient:
         )
 
     def step(self, action: OpenSpielAction) -> StepResult[OpenSpielObservation]:
+        # [FUNCTION DOC]
+        # Increments the play counter; done once it reaches turns_to_win; reward 1.0 if done and
+        # winning else 0.0. Returns a fixed info_state, legal actions 1..8 (empty when done) and
+        # terminal/playing phase.
         self._played += 1
         done = self._played >= self._turns_to_win
         reward = 1.0 if (done and self._winning) else 0.0
@@ -90,13 +107,22 @@ class ScriptedTTTClient:
         )
 
     def state(self) -> OpenSpielState:
+        # [FUNCTION DOC]
+        # Returns an OpenSpielState with the play count and game name tic_tac_toe.
         return OpenSpielState(step_count=self._played, game_name="tic_tac_toe")
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # No-op close.
         return None
 
 
 def _extract_legal_actions(messages: list[dict[str, Any]]) -> list[int]:
+    # [FUNCTION DOC]
+    # HELPER: scans messages from newest to oldest for a legal action list, either in a
+    # JSON-object content with a legal_actions key or in text "Legal actions: [..]".
+    # Returns: list of ints (empty if the textual list is empty or nothing is found).
+    # Raises: ValueError if the textual list contains non-integers.
     """Scan messages for the most recent ``legal_actions`` list.
 
     The prompt and tool results both surface ``legal_actions`` — we look
@@ -132,6 +158,10 @@ def _extract_legal_actions(messages: list[dict[str, Any]]) -> list[int]:
 
 
 def scripted_teacher(messages, tools, sampling):
+    # [FUNCTION DOC]
+    # Scripted teacher model step: picks the first legal action found in the messages
+    # (0 if none) and returns a ModelStepResult whose response calls the play_move tool with
+    # that action_id. tools and sampling are ignored.
     """Pick the first legal action seen in the conversation so far."""
     del tools, sampling
     legal = _extract_legal_actions(messages)
@@ -151,6 +181,9 @@ def scripted_teacher(messages, tools, sampling):
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Parses CLI args: --num-episodes (5), --output-dir (/tmp/ttt-collect-demo), --max-turns
+    # (9) and optional --base-url. Returns: argparse Namespace.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--num-episodes", type=int, default=5)
     parser.add_argument("--output-dir", type=Path, default=Path("/tmp/ttt-collect-demo"))
@@ -167,6 +200,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: chooses a client factory (remote OpenSpielEnv or scripted), builds the
+    # session factory and serializer, writes metadata, runs CollectRunner with the scripted
+    # teacher, prints collected/skipped/dropped counts, average reward, success rate and file
+    # paths, then pretty-prints (truncated to 1500 chars) the first results line.
+    # Side effects: writes files to output dir, network in remote mode, stdout.
+    # KNOWN ISSUE: if no episode was written, the first line is empty and JSON parsing raises.
     args = parse_args()
 
     if args.base_url:

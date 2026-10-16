@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Implements "openenv skills" CLI commands that generate and install a SKILL.md
+# describing the OpenEnv CLI for AI coding assistants. The skill is written to a
+# central skills directory (".agents/skills" in the project, or
+# "~/.agents/skills" globally) under the "openenv-cli" folder, and relative
+# symlinks are created from per-agent skill directories (claude, codex, cursor,
+# opencode; local or global variants). Module globals hold the SKILL.md text
+# fragments, the central/target paths and the Typer app.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Commands to manage OpenEnv CLI skills for AI assistants."""
@@ -64,6 +72,10 @@ app = typer.Typer(help="Manage OpenEnv skills for AI assistants")
 
 
 def _build_skill_md() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds SKILL.md text: YAML frontmatter and intro, a line naming the
+    # installed openenv version (imported lazily from the openenv package), then the
+    # command tips. Returns the text stripped with a single trailing newline.
     """Generate SKILL.md content for the OpenEnv CLI skill."""
     from openenv import __version__
 
@@ -77,6 +89,10 @@ def _build_skill_md() -> str:
 
 
 def _remove_existing(path: Path, force: bool) -> None:
+    # [FUNCTION DOC]
+    # HELPER: If path exists (or is a dangling symlink): raises typer.Exit(1) when
+    # force is False, else deletes it (rmtree for real directories, unlink for files
+    # and symlinks). Does nothing if the path does not exist.
     """Remove existing file/directory/symlink if force is True, else fail."""
     if not (path.exists() or path.is_symlink()):
         return
@@ -90,6 +106,13 @@ def _remove_existing(path: Path, force: bool) -> None:
 
 
 def _install_to(skills_dir: Path, force: bool) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: Expands and resolves skills_dir, creates it, and creates
+    # "<skills_dir>/openenv-cli/SKILL.md" with generated content.
+    # Returns: the skill directory path.
+    # Raises: typer.Exit(1) (after printing a message) if the destination already
+    # exists and force is False; existing destination is removed when force is True.
+    # Side effects: filesystem writes/deletes.
     """Install the OpenEnv skill in a skills directory."""
     skills_dir = skills_dir.expanduser().resolve()
     skills_dir.mkdir(parents=True, exist_ok=True)
@@ -111,6 +134,14 @@ def _install_to(skills_dir: Path, force: bool) -> Path:
 def _create_symlink(
     agent_skills_dir: Path, central_skill_path: Path, force: bool
 ) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: Creates "<agent_skills_dir>/openenv-cli" as a relative symlink to
+    # central_skill_path (creating agent_skills_dir). Existing entry: Exit(1) with a
+    # message unless force, in which case it is removed first.
+    # Returns: the symlink path.
+    # KNOWN ISSUE: agent_skills_dir is resolved but central_skill_path is resolved
+    # too, so the relative link is between resolved paths; if the agent directory is
+    # itself a symlink the relative target may not point where expected.
     """Create a relative symlink from agent directory to central skill location."""
     agent_skills_dir = agent_skills_dir.expanduser().resolve()
     agent_skills_dir.mkdir(parents=True, exist_ok=True)
@@ -131,11 +162,16 @@ def _create_symlink(
 def _selected_agent_targets(
     targets: dict[str, Path], selected_agents: dict[str, bool]
 ) -> list[Path]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the target directories (from targets) for agents whose flag
+    # is True in selected_agents, in fixed order claude, codex, cursor, opencode.
     return [targets[agent] for agent in _AGENT_TARGET_ORDER if selected_agents[agent]]
 
 
 @app.command("preview")
 def skills_preview() -> None:
+    # [FUNCTION DOC]
+    # Typer command "openenv skills preview": prints the generated SKILL.md content.
     """Print generated SKILL.md content."""
     typer.echo(_build_skill_md())
 
@@ -177,6 +213,14 @@ def skills_add(
         typer.Option("--force", help="Overwrite existing skills in the destination."),
     ] = False,
 ) -> None:
+    # [FUNCTION DOC]
+    # Typer command "openenv skills add". With dest: rejects combination with any
+    # agent flag or --global (Exit(1)), installs directly into dest, prints and
+    # returns. Otherwise installs into the central location (global or local),
+    # then creates a symlink in each selected agent's skills directory (global or
+    # local variant). If no agent flag is given only the central copy is installed.
+    # Raises: typer.Exit(1) on conflicts or existing destinations without force.
+    # Side effects: filesystem writes, symlinks, console output.
     """Install OpenEnv CLI skill for AI assistants."""
     if dest:
         if claude or codex or cursor or opencode or global_:

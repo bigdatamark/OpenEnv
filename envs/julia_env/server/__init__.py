@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Server package for the Julia environment; re-exports JuliaCodeActEnv and
+# create_safe_julia_transform, falling back to top-level "server." imports when
+# not loaded as a package.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

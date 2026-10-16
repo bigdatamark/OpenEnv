@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: pure HTML-string builders for the tau2-bench Gradio UI: task explorer list, task detail page,
+# conversation timeline, scoring result, run list and run comparison. All task/model-derived values are
+# HTML-escaped; model messages are rendered as CommonMark with raw HTML disabled and images off.
+# Defines COMPONENTS, a mapping from reward-basis name to a human description.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +30,10 @@ COMPONENTS = {
 
 
 def points(text: str) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: splits loose instruction text into display points: one per non-empty line, and lines longer
+    # than 160 chars are further split into sentences (at . ! ? followed by whitespace and a capital).
+    # Returns a list of strings (empty for empty/None text).
     """τ²-bench writes instructions as loose paragraphs; one point per line or sentence reads better."""
     out = []
     for line in re.split(r"\n+", text or ""):
@@ -37,6 +46,10 @@ def points(text: str) -> list[str]:
 
 
 def title(task, limit: int = 100) -> str:
+    # [FUNCTION DOC]
+    # HELPER: headline for a task: first sentence of the first point of the user's reason_for_call, with a
+    # leading "first," / "you want to" / "you would like to" removed, first letter capitalised, truncated to
+    # limit chars with an ellipsis. Raises IndexError if reason_for_call yields no points.
     """The first sentence of why the customer calls, as a headline."""
     first = points(task.user_scenario.instructions.reason_for_call)[0]
     first = re.split(r"(?<=[.!?])\s", first)[0]
@@ -46,6 +59,8 @@ def title(task, limit: int = 100) -> str:
 
 
 def writes(task, tool_types: dict[str, str]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if any expected action of the task names a tool whose type in tool_types is "write".
     return any(
         tool_types.get(a.name) == "write"
         for a in task.evaluation_criteria.actions or []
@@ -53,6 +68,9 @@ def writes(task, tool_types: dict[str, str]) -> bool:
 
 
 def chips(task, tool_types: dict[str, str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns HTML chips for the task: one per reward-basis value, the count of expected calls, and
+    # "changes the database" or "read-only".
     ec = task.evaluation_criteria
     out = [f'<span class="t2-chip">{escape(b.value)}</span>' for b in ec.reward_basis]
     n = len(ec.actions or [])
@@ -67,6 +85,10 @@ def chips(task, tool_types: dict[str, str]) -> str:
 
 
 def explorer_html(tasks: list, tool_types: dict[str, str]) -> str:
+    # [FUNCTION DOC]
+    # Returns the task explorer HTML: a search box, write/read-only filter buttons, a task count and one card
+    # per task (first marked active) carrying data attributes for id, index, writes flag and lowercased
+    # search text (id, reason for call, title).
     cards = []
     for i, task in enumerate(tasks):
         search = " ".join(
@@ -92,10 +114,17 @@ def explorer_html(tasks: list, tool_types: dict[str, str]) -> str:
 
 
 def bullet_list(items: list[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns an HTML unordered list with each item escaped.
     return "<ul>" + "".join(f"<li>{escape(i)}</li>" for i in items) + "</ul>"
 
 
 def task_html(task, tool_types: dict[str, str], domain: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the hidden task page HTML: breadcrumb (domain, id), title, optional purpose, chips, and sections
+    # for what the customer wants, known/unknown info (if any), behaviour rules (collapsible, if any) and
+    # scoring (reward components with descriptions, expected tool calls, NL assertions labelled as judged or
+    # not part of the reward, and info the agent must communicate).
     ins = task.user_scenario.instructions
     ec = task.evaluation_criteria
     basis = [b.value for b in ec.reward_basis]
@@ -168,6 +197,8 @@ _markdown = MarkdownIt("commonmark", {"html": False}).disable("image")
 
 
 def summary_html(task, tool_types: dict[str, str]) -> str:
+    # [FUNCTION DOC]
+    # Returns a compact task summary card (id, title, chips) for side panels.
     """The task in two lines, for the side cards of the Play and Run tabs."""
     return (
         f'<div class="t2-summary"><div class="t2-crumb">task #{escape(task.id)}</div>'
@@ -177,6 +208,11 @@ def summary_html(task, tool_types: dict[str, str]) -> str:
 
 
 def timeline_html(events: list[dict], placeholder: str) -> str:
+    # [FUNCTION DOC]
+    # Returns conversation HTML from a list of event mappings. Empty list gives a placeholder div (placeholder
+    # inserted unescaped). "tool" events become collapsible rows with name, JSON arguments and result
+    # (pretty-printed if JSON; marked as error if it starts with "Error"; truncated to 6000 chars); other
+    # events become customer/agent bubbles rendered from markdown.
     """The conversation: customer and agent messages, with tool calls as collapsible rows."""
     if not events:
         return f'<div class="t2-timeline t2-empty">{placeholder}</div>'
@@ -206,11 +242,17 @@ def timeline_html(events: list[dict], placeholder: str) -> str:
 
 
 def status_html(stats: str, running: bool) -> str:
+    # [FUNCTION DOC]
+    # Returns a status line with escaped stats text and a spinner when running.
     spinner = '<span class="t2-spinner"></span>' if running else ""
     return f'<div class="t2-status">{spinner}{escape(stats)}</div>'
 
 
 def result_html(reward: float, info: dict, stats: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the scoring panel: Solved if reward >= 1.0, the reward, stats, a check/cross row per entry of
+    # info["reward_breakdown"] (required key; KeyError otherwise), rows for NL assertion and communicate
+    # checks, and an expected tool calls list from action_checks when present.
     solved = reward >= 1.0
     rows = []
     for name, value in info["reward_breakdown"].items():
@@ -251,11 +293,16 @@ def result_html(reward: float, info: dict, stats: str) -> str:
 
 
 def run_label(run: dict) -> str:
+    # [FUNCTION DOC]
+    # Returns a one-line label for a run mapping: id, model short name, domain and task id, solved/not solved.
     verdict = "solved" if run["reward"] >= 1.0 else "not solved"
     return f"{run['id']} · {run['model'].split('/')[-1]} · {run['domain']} #{run['task_id']} · {verdict}"
 
 
 def runs_html(runs: list[dict]) -> str:
+    # [FUNCTION DOC]
+    # Returns a list of run cards (newest first) with solved status/reward, model, domain/task and stats, or an
+    # empty-state message if there are no runs.
     if not runs:
         return (
             '<div class="t2-timeline t2-empty">No runs yet in this session. Run a model on a '
@@ -278,6 +325,9 @@ def runs_html(runs: list[dict]) -> str:
 
 
 def compare_html(runs: list[dict]) -> str:
+    # [FUNCTION DOC]
+    # Returns side-by-side columns (one per run) with result panel and timeline, or a prompt to select runs if
+    # fewer than two are given.
     if len(runs) < 2:
         return '<div class="t2-timeline t2-empty">Tick two to four runs above to compare them.</div>'
     columns = "".join(

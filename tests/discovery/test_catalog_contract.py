@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Contract tests for the discovery profile (0.1-draft): EnvironmentCard
+# validation rules (artifact/source binding, safe repository-relative paths,
+# interface descriptors, licence evidence, required wire fields), catalog
+# loading with digest tamper detection, shipped JSON Schemas staying in sync
+# with the Pydantic models, and representative-query count limits.
+# Module constants: REVISION is a 40-char fake commit; UNSAFE_LINE_PATHS are
+# paths containing control or line/paragraph separator characters.
 # SPDX-License-Identifier: BSD-3-Clause
 
 import copy
@@ -22,6 +30,9 @@ UNSAFE_LINE_PATHS = [
 
 @pytest.fixture
 def card() -> dict:
+    # [FUNCTION DOC]
+    # Fixture: a valid environment card mapping for echo_env with one git
+    # artifact and orchestration + declared MCP interfaces.
     return {
         "schema_version": "0.1-draft",
         "name": "echo_env",
@@ -60,6 +71,8 @@ def card() -> dict:
 
 @pytest.fixture
 def card_schema() -> Draft202012Validator:
+    # [FUNCTION DOC]
+    # Fixture: Draft 2020-12 validator for the packaged environment-card schema.
     root = files("openenv.discovery").joinpath("schemas", "0.1-draft")
     schema = json.loads(root.joinpath("environment-card.schema.json").read_text())
     return Draft202012Validator(schema)
@@ -74,12 +87,16 @@ def card_schema() -> Draft202012Validator:
     ],
 )
 def test_artifact_must_bind_to_the_same_selected_subject(card, field, value):
+    # [FUNCTION DOC]
+    # Changing artifact revision/path/uri away from the source fails validation.
     card["artifacts"][0][field] = value
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
 
 
 def test_tool_declaration_cannot_borrow_another_revision(card):
+    # [FUNCTION DOC]
+    # A tool interface with a different source_revision fails validation.
     card["interfaces"][1]["source_revision"] = "b" * 40
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
@@ -107,6 +124,9 @@ def test_tool_declaration_cannot_borrow_another_revision(card):
 def test_environment_locator_is_a_safe_repository_relative_path(
     card, path, card_schema
 ):
+    # [FUNCTION DOC]
+    # Absolute, traversing, backslash, double-slash, trailing-slash, dot-segment
+    # and control-character paths are rejected by both model and JSON schema.
     card["source"]["path"] = path
     card["artifacts"][0]["path"] = path
     with pytest.raises(ValidationError):
@@ -129,6 +149,9 @@ def test_environment_locator_is_a_safe_repository_relative_path(
     ],
 )
 def test_schema_and_model_preserve_valid_relative_locators(card, path, card_schema):
+    # [FUNCTION DOC]
+    # Valid relative paths (including ".", hidden, unicode, spaces) pass both
+    # and are preserved.
     card["source"]["path"] = path
     card["artifacts"][0]["path"] = path
     assert EnvironmentCard.model_validate(card).source.path == path
@@ -136,12 +159,17 @@ def test_schema_and_model_preserve_valid_relative_locators(card, path, card_sche
 
 
 def test_claimed_validated_tools_are_unsupported_in_the_declaration_profile(card):
+    # [FUNCTION DOC]
+    # Interface status "validated" is rejected.
     card["interfaces"][1]["status"] = "validated"
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
 
 
 def test_source_manifest_marker_does_not_become_a_protocol_version(card):
+    # [FUNCTION DOC]
+    # manifest_spec_version is kept top-level; interfaces have no version and
+    # adding one is rejected.
     parsed = EnvironmentCard.model_validate(card)
     assert parsed.manifest_spec_version == 1
     assert "version" not in parsed.interfaces[0].model_dump(exclude_none=True)
@@ -165,6 +193,8 @@ def test_source_manifest_marker_does_not_become_a_protocol_version(card):
     ],
 )
 def test_orchestration_descriptor_is_required(card, interfaces, card_schema):
+    # [FUNCTION DOC]
+    # Cards without an orchestration interface are rejected by model and schema.
     card["interfaces"] = interfaces
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
@@ -173,6 +203,8 @@ def test_orchestration_descriptor_is_required(card, interfaces, card_schema):
 
 
 def test_orchestration_must_not_be_duplicated(card, card_schema):
+    # [FUNCTION DOC]
+    # Two orchestration interfaces are rejected by model and schema.
     card["interfaces"].append(copy.deepcopy(card["interfaces"][0]))
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
@@ -184,6 +216,9 @@ def test_orchestration_must_not_be_duplicated(card, card_schema):
 def test_external_subject_does_not_claim_artifact_distribution(
     card, availability, card_schema
 ):
+    # [FUNCTION DOC]
+    # external/unknown availability with artifacts is rejected; without artifacts
+    # it validates.
     card["artifact_availability"] = availability
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
@@ -196,6 +231,8 @@ def test_external_subject_does_not_claim_artifact_distribution(
 
 @pytest.mark.parametrize("missing", [False, True], ids=["empty", "missing"])
 def test_resolvable_subject_requires_an_artifact(card, missing, card_schema):
+    # [FUNCTION DOC]
+    # Resolvable availability with empty or missing artifacts is rejected.
     if missing:
         del card["artifacts"]
     else:
@@ -210,6 +247,9 @@ def test_resolvable_subject_requires_an_artifact(card, missing, card_schema):
 def test_other_license_requires_evidence_and_unknown_remains_unknown(
     card, null_evidence, card_schema
 ):
+    # [FUNCTION DOC]
+    # license "other" without license_url (missing or null) is rejected; "unknown"
+    # is accepted as-is.
     card["license"] = "other"
     if null_evidence:
         card["license_url"] = None
@@ -223,6 +263,8 @@ def test_other_license_requires_evidence_and_unknown_remains_unknown(
 
 
 def test_schema_accepts_an_evidenced_custom_license(card, card_schema):
+    # [FUNCTION DOC]
+    # license "other" with a license_url is accepted.
     card["license"] = "other"
     card["license_url"] = "https://example.org/license"
     assert EnvironmentCard.model_validate(card).license == "other"
@@ -230,12 +272,16 @@ def test_schema_accepts_an_evidenced_custom_license(card, card_schema):
 
 
 def test_invalid_package_requirement_is_not_presented_as_compatibility(card):
+    # [FUNCTION DOC]
+    # An unparsable framework_requirement is rejected.
     card["framework_requirement"] = "openenv >=> 1"
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
 
 
 def test_a_publisher_policy_flag_is_not_part_of_the_card(card):
+    # [FUNCTION DOC]
+    # Unknown field requires_explicit_trust is rejected (extra fields forbidden).
     card["requires_explicit_trust"] = False
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
@@ -252,6 +298,8 @@ def test_a_publisher_policy_flag_is_not_part_of_the_card(card):
     ],
 )
 def test_required_wire_claims_are_not_invented_from_defaults(card, location):
+    # [FUNCTION DOC]
+    # Deleting each listed required nested key makes validation fail.
     parent = card
     for key in location[:-1]:
         parent = parent[key]
@@ -262,12 +310,16 @@ def test_required_wire_claims_are_not_invented_from_defaults(card, location):
 
 @pytest.mark.parametrize("field", ["name", "description"])
 def test_whitespace_is_not_a_useful_required_description(card, field):
+    # [FUNCTION DOC]
+    # Whitespace-only name/description is rejected.
     card[field] = "   "
     with pytest.raises(ValidationError):
         EnvironmentCard.model_validate(card)
 
 
 def test_loader_rejects_identifier_only_and_incomplete_records(tmp_path: Path):
+    # [FUNCTION DOC]
+    # load_catalog raises CatalogError for a file with an incomplete entry.
     path = tmp_path / "partial.json"
     path.write_text('{"entries":[{"identifier":"urn:air:example.org:openenv:echo"}]}')
     with pytest.raises(CatalogError):
@@ -275,6 +327,10 @@ def test_loader_rejects_identifier_only_and_incomplete_records(tmp_path: Path):
 
 
 def test_loader_rejects_tampering_even_when_json_is_well_formed(tmp_path: Path, card):
+    # [FUNCTION DOC]
+    # Builds a catalog with a sha256 digest over canonical JSON (sorted keys,
+    # compact separators); it loads, then after editing an entry without
+    # re-digesting load_catalog raises CatalogError mentioning "digest".
     payload = {
         "schema_version": "0.1-draft",
         "publisher": "example.org",
@@ -318,6 +374,9 @@ def test_loader_rejects_tampering_even_when_json_is_well_formed(tmp_path: Path, 
 
 
 def test_schema_files_ship_with_the_profile(card):
+    # [FUNCTION DOC]
+    # Packaged card/catalog/declaration schemas are valid Draft 2020-12, share
+    # $schema, pin schema_version, and validate the models' dumps.
     root = files("openenv.discovery").joinpath("schemas", "0.1-draft")
     card_schema = json.loads(root.joinpath("environment-card.schema.json").read_text())
     catalog_schema = json.loads(root.joinpath("catalog.schema.json").read_text())
@@ -344,6 +403,9 @@ def test_schema_files_ship_with_the_profile(card):
 def test_query_hint_counts_agree_across_declarations_entries_and_schemas(
     card, count, valid
 ):
+    # [FUNCTION DOC]
+    # For counts 0..6, DiscoveryDeclaration, DiscoveryEntry and their JSON
+    # schemas agree that 0 or 2-5 representative queries are valid and 1 or 6 are not.
     queries = [f"query {index}" for index in range(count)]
     declaration = {"representative_queries": queries}
     entry = {

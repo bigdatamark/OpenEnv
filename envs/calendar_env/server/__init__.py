@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Calendar server package containing the FastAPI app, database layer, REST API routers and MCP tool definitions.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

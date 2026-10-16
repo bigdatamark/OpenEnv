@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: Constant prompt strings shared by the expert-in-the-loop recipe: the baseline agent system prompt (list_tools
+# and call_tool via <tool_call> JSON), the adaptive prompt that additionally offers ask_expert, the expert's planning
+# system prompt (asks for a JSON plan), the verifier-analysis prompt template (placeholders code and task), and two
+# nudge messages injected after a tool error or after a stall (placeholder steps). No functions or side effects.
 """System prompts and expert instructions for the AWM expert-in-the-loop recipe.
 
 These strings define the agent's tool-use protocol (XML ``<tool_call>`` tags) and

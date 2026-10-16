@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the OpenApp environment (simulated web apps driven by BrowserGym-style actions).
+# Defines OpenAppEnv, which serializes OpenAppAction and parses observations/state from the server.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,9 @@ except ImportError:
 
 
 class OpenAppEnv(EnvClient[OpenAppAction, OpenAppObservation, State]):
+    # [CLASS DOC]
+    # EnvClient subclass for OpenApp sessions; implements payload building and response parsing.
+    # Transport (WebSocket session, docker helpers) is inherited.
     """
     HTTP client for the OpenApp Environment.
 
@@ -58,6 +64,9 @@ class OpenAppEnv(EnvClient[OpenAppAction, OpenAppObservation, State]):
     """
 
     def _step_payload(self, action: OpenAppAction) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Builds the step body: always "action_type", plus bid, text, value, url, direction when
+        # not None, and metadata when non-empty. Returns that mapping.
         """
         Convert OpenAppAction to JSON payload for step request.
 
@@ -88,6 +97,11 @@ class OpenAppEnv(EnvClient[OpenAppAction, OpenAppObservation, State]):
         return payload
 
     def _parse_result(self, payload: Dict) -> StepResult[OpenAppObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a step/reset response into a StepResult wrapping an OpenAppObservation built
+        # from the nested "observation" mapping (html, url, open_pages_urls, active_page_index, screenshot,
+        # axtree_txt, app_state, task_info, last_action_error) with empty/zero/None defaults; done and
+        # reward come from the top level, metadata prefers the top level over the nested one.
         """
         Parse server response into StepResult[OpenAppObservation].
 
@@ -121,6 +135,8 @@ class OpenAppEnv(EnvClient[OpenAppAction, OpenAppObservation, State]):
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # HELPER: Converts a state response into a generic State with episode_id and step_count (default 0).
         """
         Parse server response into State object.
 

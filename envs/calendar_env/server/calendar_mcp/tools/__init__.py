@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Aggregates all Calendar MCP tool schemas into MCP_TOOLS (calendars, calendarList, events, colors, users, settings,
+# ACL, freebusy, in that order). Side effect: prints a load message with the tool count to stdout at import.
 """
 MCP Tools Module - Calendar API Tools
 

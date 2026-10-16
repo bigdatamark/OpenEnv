@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# CPU-only demo of ECHO on an Agent World Model episode: loads the bundled fixture (or replays it live against a server),
+# converts it to a role-masked trajectory, reports per-role token counts and the "free" env-output signal, and computes
+# the loss on one forward pass three ways (vanilla GRPO, ECHO with lambda, verifier-free env CE). Uses a tiny character
+# tokenizer and seeded toy LM by default or a Hugging Face model with --hf. Side effects: file reads, optional
+# network/model downloads, stdout.
 """ECHO on the Agent World Model env — a runnable, CPU-only walkthrough.
 
 What it shows, end to end:
@@ -37,31 +43,45 @@ FIXTURE = HERE / "fixtures" / "awm_ecommerce_episode.json"
 
 # ── tiny, deterministic, zero-download tokenizer + model ─────────────────────
 class CharTokenizer:
+    # [CLASS DOC]
+    # Minimal character-level tokenizer with a Hugging Face-like call interface; vocabulary built from the given corpus with id 0 reserved for padding.
     """A minimal Hugging Face-shaped tokenizer (callable -> {"input_ids": [...]})."""
 
     def __init__(self, corpus: str) -> None:
+        # [FUNCTION DOC]
+        # Builds the character-to-id mapping (ids from 1, sorted characters) and sets vocab_size to the count plus one.
         chars = sorted(set(corpus))
         self.stoi = {c: i + 1 for i, c in enumerate(chars)}  # 0 reserved for pad
         self.vocab_size = len(self.stoi) + 1
 
     def __call__(self, text: str, add_special_tokens: bool = False) -> dict:
+        # [FUNCTION DOC]
+        # Returns a dict with "input_ids" mapping each character to its id; add_special_tokens is ignored. Raises KeyError for characters not in the corpus.
         return {"input_ids": [self.stoi[c] for c in text]}
 
 
 class ToyLM(torch.nn.Module):
+    # [CLASS DOC]
+    # Tiny next-token model: embedding followed by a linear projection to the vocabulary, with weights seeded deterministically.
     """A small seeded next-token model — enough to make the loss numbers real."""
 
     def __init__(self, vocab_size: int, dim: int = 48) -> None:
+        # [FUNCTION DOC]
+        # Seeds torch's global RNG with 0 (side effect) and creates the embedding and output layers.
         super().__init__()
         torch.manual_seed(0)
         self.emb = torch.nn.Embedding(vocab_size, dim)
         self.lm = torch.nn.Linear(dim, vocab_size)
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:  # [B, T] -> [B, T, V]
+        # [FUNCTION DOC]
+        # Maps a batch of token ids of shape B x T to logits of shape B x T x V.
         return self.lm(self.emb(ids))
 
 
 def load_episode(args: argparse.Namespace) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Loads the fixture episode JSON; if a live URL is given, replays it via live_capture and returns the captured episode instead.
     episode = json.loads(FIXTURE.read_text())
     if args.live:
         print(
@@ -73,6 +93,9 @@ def load_episode(args: argparse.Namespace) -> dict:
 
 
 def build_logits(tok: dict, args: argparse.Namespace):
+    # [FUNCTION DOC]
+    # Returns a tuple of (input_ids with a batch dimension, logits). With --hf loads the causal LM, truncates the ids to the
+    # model's maximum positions if known, and computes logits without gradients; otherwise uses ToyLM sized to the max id plus 2.
     """Return ``(input_ids, logits)`` for the loss pass.
 
     Real AWM episodes are long; a small ``--hf`` model may have a shorter context
@@ -105,6 +128,10 @@ def build_logits(tok: dict, args: argparse.Namespace):
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses --hf, --live and --lam; builds the trajectory and tokenizer, tokenises with env_only masks, prints role counts
+    # and ratios for target tokens, computes the three loss variants (advantage = trajectory reward, masks truncated to the
+    # loss length) and prints them with an explanation when the reward is zero.
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--hf", metavar="MODEL", help="HF model id for real tokenizer+logits"

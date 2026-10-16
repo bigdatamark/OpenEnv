@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Builds the per-rollout JSON document a trainer consumes from a capture session's
+# rollout graph: labelled sequences (agent / auxiliary / discarded) with input ids,
+# loss masks, logprobs and validation findings, every turn in arrival order, graph
+# stats, rollout-level validation and a single "trainable" gate. Also renders a
+# one-screen text summary of a document.
 """Graph -> the JSON a trainer consumes.
 
 One document per rollout. Every field a trainer needs is precomputed and validated; nothing
@@ -36,6 +42,14 @@ AGENT, AUXILIARY, DISCARDED = "agent", "auxiliary", "discarded"
 
 
 def _assign_roles(graph, sequences, *, trainable_capture: bool = True) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Assigns a role to each flattened sequence. A sequence whose last node is a
+    # discarded node is "discarded". If no live sequence's nodes have tools (n_tools > 0),
+    # live sequences are "agent" when usable (n_trainable when trainable_capture, else
+    # non-empty node list) and "auxiliary" otherwise. If any tools exist, a live sequence
+    # is "agent" iff any of its nodes has tools, else "auxiliary".
+    # Inputs: graph (RolloutGraph), sequences (graph sequences), trainable_capture flag.
+    # Returns: list of role strings aligned with sequences.
     """Label each flattened path. Purely structural.
 
     - a path ending in a discarded node (a sibling that never continued) is a retry
@@ -99,6 +113,22 @@ def export_session(
     include_messages: bool = False,
     capture_level: str = "tokens",
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds the rollout document for a capture session.
+    # Inputs: session - object with graph, session_id, metadata, findings and optionally
+    # budget_stop_count and purpose; include_discarded - keep discarded rows;
+    # include_messages - add request messages/tools/response per turn; capture_level -
+    # "tokens" or lower (anything else, or purpose "eval", makes this an eval rollout).
+    # Behavior: runs check_rollout; builds sequences and roles; per kept sequence runs
+    # check_sequence (train only) and emits a row with role, root_id, node_ids, n_turns,
+    # prompt_len, n_trainable (0 for eval), turn_lengths, input_ids, loss_mask (all zeros
+    # for eval), logprobs, trainable (report ok and role agent) and validation strings.
+    # Emits per-node turn summaries (ids, root, counts, finish reason, harness session,
+    # sampling params, sampled logprobs, discarded flag, optional messages).
+    # Returns: dict with session_id, metadata, budget_stop_count, turns, stats (graph stats
+    # plus sequence/trainable counts and trainable tokens), sequences, validation
+    # (rollout findings plus session.findings), trainable (any trainable row and rollout
+    # ok), capture_level and rollout_type ("train" or "eval").
     """Build the document for one rollout: training rows when there are any, the trace always.
 
     Args:
@@ -221,6 +251,10 @@ def export_session(
 
 
 def summarise(document: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # Renders a multi-line text summary of a document: header with session id, rollout
+    # type and trainable flag; graph and training stats; one line per sequence plus its
+    # non-INFO findings; then rollout-level findings. Returns the string.
     """One screen of text. What you actually read after a rollout."""
     stats = document["stats"]
     lines = [

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Server-side OpenApp environment. Drives a BrowserGym BrowserEnv (Playwright browser) pointed at
+# an externally running OpenApps web server, translating OpenAppAction values into BrowserGym
+# action strings (or direct Playwright calls for CSS selectors) and returning OpenAppObservation.
+# Rewards: whatever BrowserGym reports (generic task gives 0), -0.1 for failed/unknown actions.
+# Episodes end after max_steps. BrowserGym/Playwright are imported lazily.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -34,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 
 class GenericOpenAppsTask:
+    # [CLASS DOC]
+    # Minimal BrowserGym task with no goal: navigates to the OpenApps base URL on setup and never
+    # rewards or finishes. Holds viewport (1024x768), slow_mo, timeout and locale/timezone/geolocation
+    # placeholders that BrowserGym reads.
     """
     A generic task for OpenApps interaction without specific goals.
 
@@ -48,6 +58,9 @@ class GenericOpenAppsTask:
         seed: int = 1,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores base_url and seed and sets the BrowserGym task attributes; extra kwargs are ignored.
+        # Raises ImportError if playwright or browsergym cannot be imported.
         """
         Initialize generic OpenApps task.
 
@@ -79,6 +92,8 @@ class GenericOpenAppsTask:
         self.geolocation = None
 
     def setup(self, page: "playwright.sync_api.Page") -> Tuple[str, Dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Navigates the Playwright page to base_url. Returns the goal text "Explore OpenApps" and an empty info mapping.
         """
         Set up the task by navigating to the base URL.
 
@@ -92,12 +107,16 @@ class GenericOpenAppsTask:
         return "Explore OpenApps", {}
 
     def teardown(self) -> None:
+        # [FUNCTION DOC]
+        # No-op cleanup hook.
         """Clean up after task completion."""
         pass
 
     def validate(
         self, page: "playwright.sync_api.Page", chat_messages: list[str]
     ) -> Tuple[float, bool, str, Dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Always returns reward 0.0, done False, empty message and empty info (the task never completes).
         """
         Validate task state and return reward.
 
@@ -112,11 +131,17 @@ class GenericOpenAppsTask:
         return 0.0, False, "", {}
 
     def cheat(self, page: "playwright.sync_api.Page", chat_messages: list[str]) -> None:
+        # [FUNCTION DOC]
+        # No-op cheat hook required by BrowserGym.
         """Cheat method (no-op for generic task)."""
         pass
 
 
 class OpenAppEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment wrapping OpenApps plus BrowserGym. Keeps a generic State, cached html/url/
+    # accessibility tree/app-state strings updated from BrowserGym observations, the last action
+    # error, the episode reward and optional browser and server-process handles.
     """
     A web application environment that wraps OpenApps and BrowserGym.
 
@@ -152,6 +177,10 @@ class OpenAppEnvironment(Environment):
         apps_config: Optional[Dict[str, Any]] = None,
         max_steps: int = 50,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration without starting anything. openapps_url falls back to the OPENAPPS_URL
+        # environment variable, then to http://localhost:<web_app_port>. Other inputs: openapps_path,
+        # headless, task_name (only echoed in task_info), apps_config (stored, unused), max_steps.
         """Initialize the OpenApp environment."""
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._max_steps = max_steps
@@ -179,6 +208,10 @@ class OpenAppEnvironment(Environment):
         self._episode_reward = 0.0
 
     def _detect_openapps_path(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the OpenApps install directory: the OPENAPPS_PATH environment variable if that
+        # path exists, else the parent of the installed open_apps package's directory.
+        # Raises ValueError if neither is found. Not called anywhere in this module.
         """
         Auto-detect OpenApps path.
 
@@ -207,6 +240,9 @@ class OpenAppEnvironment(Environment):
         )
 
     def _launch_openapps_server(self) -> Optional[subprocess.Popen]:
+        # [FUNCTION DOC]
+        # HELPER: If OPENAPPS_URL is set, waits up to 5 seconds for the server and returns None.
+        # Otherwise raises NotImplementedError with manual-start instructions (automatic launch is not implemented).
         """
         Launch OpenApps web server in background.
 
@@ -236,6 +272,9 @@ class OpenAppEnvironment(Environment):
         )
 
     def _wait_for_server(self, max_wait: int = 30):
+        # [FUNCTION DOC]
+        # HELPER: Polls openapps_url once per second (HTTP GET, 2 s timeout) up to max_wait attempts;
+        # returns on a 200 response. Raises TimeoutError if never reachable. Blocks with sleeps.
         """Wait for OpenApps server to become available."""
         for i in range(max_wait):
             try:
@@ -249,6 +288,10 @@ class OpenAppEnvironment(Environment):
         raise TimeoutError(f"OpenApps server did not start within {max_wait} seconds")
 
     def _initialize_browser(self):
+        # [FUNCTION DOC]
+        # HELPER: Creates the BrowserGym BrowserEnv using GenericOpenAppsTask for openapps_url, the
+        # headless setting and a 200 ms slow-motion delay; stores it on the instance.
+        # Raises ImportError if browsergym is missing.
         """Initialize BrowserGym environment for interaction."""
         try:
             from browsergym.core.env import BrowserEnv
@@ -267,6 +310,10 @@ class OpenAppEnvironment(Environment):
         )
 
     def _get_current_observation(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the observation fields as a mapping (html, url, open_pages_urls with only the
+        # current url, active_page_index 0, axtree_txt, app_state). Without a browser it returns empty
+        # html and the base url.
         """Extract current observation from browser state."""
         if self._browser_env is None:
             return {
@@ -290,6 +337,14 @@ class OpenAppEnvironment(Environment):
         }
 
     def reset(self) -> OpenAppObservation:
+        # [FUNCTION DOC]
+        # Starts a new episode: fresh State, reward and error cleared; calls the server launcher when no
+        # process exists and OPENAPPS_URL is unset (which raises NotImplementedError); creates the browser
+        # if needed and resets it, caching url, DOM text and axtree. Browser reset errors are logged and
+        # replaced with placeholder html. Returns an OpenAppObservation with reward 0, done False and
+        # task_info holding task_name if set.
+        # KNOWN ISSUE: openapps_url passed to the constructor does not prevent the launcher call; without
+        # the OPENAPPS_URL environment variable reset always raises NotImplementedError.
         """
         Reset the environment.
 
@@ -341,6 +396,11 @@ class OpenAppEnvironment(Environment):
         )
 
     def step(self, action: OpenAppAction) -> OpenAppObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Executes one action: increments step_count, dispatches on action_type (click, fill,
+        # select_option, goto, scroll, send_keys, noop); unknown types or raised exceptions set
+        # last_action_error and give reward -0.1. Adds the reward to the episode total; done when
+        # step_count reaches max_steps. Returns an observation with metadata cumulative_reward.
         """
         Execute a step in the environment.
 
@@ -402,6 +462,10 @@ class OpenAppEnvironment(Environment):
         )
 
     def _execute_click(self, bid: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Clicks the element bid. Bids starting with "#", "." or "[" go through Playwright;
+        # otherwise sends a BrowserGym click action and updates cached url/html/axtree. Returns the
+        # BrowserGym reward as float (0 if falsy), 0.0 without a browser, or -0.1 on error (sets the error).
         """Execute click action. Returns reward.
 
         Supports two modes:
@@ -433,6 +497,10 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_fill(self, bid: str, text: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Fills element bid with text; same selector/BrowserGym split, caching and return values as click.
+        # KNOWN ISSUE: text is inserted unescaped inside double quotes in the BrowserGym action string,
+        # so quotes in text break the action. The same applies to the other string-built actions.
         """Execute fill action. Returns reward.
 
         Supports two modes:
@@ -464,6 +532,9 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_fill_playwright(self, selector: str, text: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Fills a CSS selector via the underlying Playwright page (waits up to 5 s for it, then
+        # 200 ms), updates the cached url. Returns 0.0, or -0.1 on error with last_action_error set.
         """Execute fill action using Playwright directly with CSS selector."""
         try:
             # Access the underlying Playwright page from BrowserGym
@@ -485,6 +556,9 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_click_playwright(self, selector: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Clicks a CSS selector via Playwright (5 s wait, then 500 ms for HTMX), updates the cached url.
+        # Returns 0.0, or -0.1 on error with last_action_error set.
         """Execute click action using Playwright directly with CSS selector."""
         try:
             # Access the underlying Playwright page from BrowserGym
@@ -506,6 +580,9 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_press_key_playwright(self, key: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Presses a keyboard key via Playwright, waits 500 ms, updates the cached url.
+        # Returns 0.0, or -0.1 on error with last_action_error set.
         """Execute key press using Playwright directly."""
         try:
             # Access the underlying Playwright page from BrowserGym
@@ -526,6 +603,8 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _update_observation_from_page(self, page) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Copies the page URL into the cached url; swallows any error. Does not refresh html or axtree.
         """Update internal observation state from Playwright page."""
         try:
             self._current_url = page.url
@@ -535,6 +614,9 @@ class OpenAppEnvironment(Environment):
             pass
 
     def _execute_select(self, bid: str, value: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Sends a BrowserGym select_option action for bid/value and updates caches.
+        # Returns the reward, 0.0 without a browser, or -0.1 on error.
         """Execute select option action. Returns reward."""
         if self._browser_env is None:
             return 0.0
@@ -555,6 +637,9 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_goto(self, url: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Navigates to url via a BrowserGym goto action and updates caches. Without a browser it
+        # only sets the cached url. On error sets the url anyway and returns -0.1.
         """Execute navigation action. Returns reward."""
         if self._browser_env is None:
             self._current_url = url
@@ -577,6 +662,9 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_scroll(self, direction: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Sends a BrowserGym scroll action with the direction string and updates caches.
+        # Returns the reward, 0.0 without a browser, or -0.1 on error.
         """Execute scroll action. Returns reward."""
         if self._browser_env is None:
             return 0.0
@@ -597,6 +685,10 @@ class OpenAppEnvironment(Environment):
             return -0.1
 
     def _execute_send_keys(self, text: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Sends text as key input. A newline or "enter" (case-insensitive) is pressed as the Enter
+        # key through Playwright; otherwise a BrowserGym send_keys action is used and caches updated.
+        # Returns the reward, 0.0 without a browser, or -0.1 on error.
         """Execute send keys action. Returns reward."""
         if self._browser_env is None:
             return 0.0
@@ -622,6 +714,8 @@ class OpenAppEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property: returns the current State object.
         """
         Get the current environment state.
 
@@ -631,6 +725,9 @@ class OpenAppEnvironment(Environment):
         return self._state
 
     def close(self):
+        # [FUNCTION DOC]
+        # Closes the browser and terminates the server process (waiting up to 5 s, killing on failure),
+        # ignoring errors, and clears both handles. Safe to call multiple times.
         """Clean up resources."""
         if hasattr(self, "_browser_env") and self._browser_env is not None:
             try:
@@ -648,5 +745,7 @@ class OpenAppEnvironment(Environment):
             self._apps_process = None
 
     def __del__(self):
+        # [FUNCTION DOC]
+        # Destructor: calls close.
         """Cleanup on deletion."""
         self.close()

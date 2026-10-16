@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client-side result types shared by environment clients: the generic
+# StepResult dataclass and the ObsT/StateT type variables.
 # Type definitions for EnvTorch
 from dataclasses import dataclass
 from typing import Any, Dict, Generic, Optional, TypeVar
@@ -9,6 +12,9 @@ StateT = TypeVar("StateT")
 
 @dataclass
 class StepResult(Generic[ObsT]):
+    # [CLASS DOC]
+    # Dataclass holding one step's result: observation (generic type), optional
+    # float reward, done flag (default False) and optional metadata dict.
     """
     Represents the result of one environment step.
 

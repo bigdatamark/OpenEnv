@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# GitHub PR helper for the automated review bot (PyGithub): lists open PRs in a repo where
+# the authenticated user has unread "mention" or "review_requested" notifications, fetches
+# PR details, records reviewed head SHAs in a JSON state file (~/.openenv-review-state.json
+# by default) and posts reviews. When run as a script, provides --list/--details CLI output
+# as JSON.
 """
 PR Tracker - Fetches PRs that need review using GitHub API.
 
@@ -32,6 +38,10 @@ DEFAULT_STATE_FILE = Path.home() / ".openenv-review-state.json"
 
 
 def _get_github_client() -> Github:
+    # [FUNCTION DOC]
+    # HELPER: returns a PyGithub client authenticated with GITHUB_TOKEN, or else with the token
+    # printed by "gh auth token". Raises: RuntimeError if neither is available.
+    # Side effects: may spawn the gh subprocess.
     """Get authenticated GitHub client."""
     token = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -58,6 +68,10 @@ def _get_github_client() -> Github:
 
 
 def parse_since(since_str: str) -> datetime:
+    # [FUNCTION DOC]
+    # Parses "since": a duration "<n>m|h|d|w" (case-insensitive) relative to now in UTC, or an
+    # ISO timestamp (a trailing Z becomes +00:00). Returns: datetime.
+    # Raises: ValueError for any other format.
     """
     Parse a 'since' argument into a datetime.
 
@@ -104,6 +118,13 @@ def get_prs_needing_review(
     state_file: Optional[Path] = None,
     reasons: tuple[str, ...] = REVIEW_REASONS,
 ) -> list[dict]:
+    # [FUNCTION DOC]
+    # Lists unread notifications (optionally since a time) and keeps those with a wanted reason,
+    # a PullRequest subject in this repo (case-insensitive canonical name), a parsable PR number
+    # (deduplicated), and a PR that is open and not a draft; with a state file, skips PRs whose
+    # head SHA equals the recorded last reviewed SHA (state looked up by canonical then given repo
+    # name; unreadable JSON ignored). Returns: list of dicts with number, repo, title, author,
+    # url, head_sha, updated_at (ISO) and reason. Side effects: GitHub API calls.
     """
     Get open PRs the authenticated user was *pinged* on.
 
@@ -203,6 +224,9 @@ def get_prs_needing_review(
 
 
 def get_pr_details(pr_number: int, repo: str = DEFAULT_REPO) -> dict:
+    # [FUNCTION DOC]
+    # Fetches one PR and returns a dict with number, title, author, url, head_sha, updated_at,
+    # body (empty if none), changed file names, diff_url, additions, deletions, changed_files.
     """Get detailed information about a specific PR."""
     gh = _get_github_client()
     repo_obj = gh.get_repo(repo)
@@ -231,6 +255,10 @@ def record_review(
     repo: str = DEFAULT_REPO,
     state_file: Path = DEFAULT_STATE_FILE,
 ):
+    # [FUNCTION DOC]
+    # Loads the state JSON (empty if missing or invalid), sets state[repo][pr number] to the
+    # reviewed SHA, current UTC timestamp and verdict, and writes it back (creating parent dirs)
+    # with file mode 0600.
     """Record that a PR was reviewed (for SHA-based tracking)."""
     state = {}
     if state_file.exists():
@@ -259,6 +287,11 @@ def post_review(
     body: str,
     repo: str = DEFAULT_REPO,
 ):
+    # [FUNCTION DOC]
+    # Posts a review: maps verdict approve/comment/request_changes to the GitHub event (unknown
+    # verdicts become COMMENT). If approving one's own PR, posts the raw body as an issue comment
+    # instead. Otherwise wraps the body with an automated-review header and footer and creates
+    # the review. Side effects: GitHub API writes.
     """
     Post a review to a PR.
 

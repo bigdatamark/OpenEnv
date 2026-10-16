@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Builds the FastAPI application for the Snake environment at import time (module-level "app") and
+# provides a main() entry point that serves it with uvicorn on 0.0.0.0:8000.
+# Side effects: importing the module constructs the app (and possibly a SnakeEnvironment instance).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -39,6 +43,13 @@ except ImportError:
 
 
 def _create_snake_app():
+    # [FUNCTION DOC]
+    # HELPER: builds the app while staying compatible with versions of create_app that take either an
+    # environment factory or an environment instance. Inspects the annotation of create_app's first
+    # parameter; if it mentions "Environment" but not "Callable", passes a new SnakeEnvironment instance,
+    # otherwise passes the class as a factory (also the fallback if introspection fails).
+    # Uses env_name "snake_env" and max_concurrent_envs from the MAX_CONCURRENT_ENVS env var (default 8).
+    # Returns: the FastAPI app.
     """Build app across create_app variants that may expect a factory or an instance."""
     try:
         first_param = next(iter(inspect.signature(create_app).parameters.values()))
@@ -64,6 +75,8 @@ app = _create_snake_app()
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the module-level app with uvicorn on host 0.0.0.0, port 8000. Blocks until the server stops.
     """
     Entry point for direct execution via uv run or python -m.
 

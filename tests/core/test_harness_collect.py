@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for openenv.core.harness.collect: EpisodeRecord construction from rollouts, the JSONL
+# RolloutSerializer (append/resume semantics and corruption handling), CollectRunner (episode
+# loop, resume, filtering, failures, stats), build_model_step (adapting an LLMClient to the
+# ModelStep protocol), push_to_hf_hub (mocked HfApi) and build_dataset_readme.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for rollout collection, serialization, and resume."""
@@ -45,6 +51,11 @@ def _fake_rollout(
     done: bool = True,
     turns: int = 1,
 ) -> HarnessRolloutResult:
+    # [FUNCTION DOC]
+    # HELPER: Builds a HarnessRolloutResult for a play_move game with the given number of turns: a user
+    # message, then per turn an assistant message, a tool message and a ToolTraceEntry whose result's
+    # reward metadata is 0 except the last turn (which carries reward and the done flag). Metrics
+    # record turns and tool_calls.
     messages: list[dict[str, Any]] = [
         {"role": "user", "content": "play"},
     ]
@@ -83,6 +94,8 @@ def _fake_rollout(
 
 
 def _fake_verify(reward: float = 1.0) -> VerifyResult:
+    # [FUNCTION DOC]
+    # HELPER: Builds a done VerifyResult with the given env reward, step_count metric and a final_state artifact.
     return VerifyResult(
         env_reward=reward,
         done=True,
@@ -92,7 +105,11 @@ def _fake_verify(reward: float = 1.0) -> VerifyResult:
 
 
 class TestEpisodeRecord:
+    # [CLASS DOC]
+    # Tests EpisodeRecord.from_rollout and to_dict.
     def test_from_rollout_populates_core_fields(self):
+        # [FUNCTION DOC]
+        # episode_id, messages, reward, done and metrics are copied from the rollout/verify.
         rollout = _fake_rollout(reward=1.0)
         verify = _fake_verify(reward=1.0)
 
@@ -105,6 +122,8 @@ class TestEpisodeRecord:
         assert record.metrics == {"turns": 1, "tool_calls": 1}
 
     def test_from_rollout_flattens_tool_trace(self):
+        # [FUNCTION DOC]
+        # Tool trace entries become dicts with tool_name, arguments and a result dict.
         rollout = _fake_rollout(turns=2)
         verify = _fake_verify()
 
@@ -118,6 +137,8 @@ class TestEpisodeRecord:
         assert first["result"]["done"] is False
 
     def test_from_rollout_uses_resolve_env_reward(self):
+        # [FUNCTION DOC]
+        # A verify reward disagreeing with the tool-reported reward raises ValueError.
         """Reward must be derived through _resolve_env_reward to respect the
         'rewards in env' invariant enforced by the harness runtime."""
         rollout = _fake_rollout(reward=1.0)
@@ -128,6 +149,8 @@ class TestEpisodeRecord:
             EpisodeRecord.from_rollout("ep1", rollout, verify)
 
     def test_from_rollout_accepts_task_and_extra(self):
+        # [FUNCTION DOC]
+        # task and extra values are stored.
         rollout = _fake_rollout()
         verify = _fake_verify()
 
@@ -143,6 +166,8 @@ class TestEpisodeRecord:
         assert record.extra == {"teacher": "gpt-5-mini"}
 
     def test_to_dict_returns_json_safe_payload(self):
+        # [FUNCTION DOC]
+        # to_dict converts Path values in task/extra to strings so the payload is JSON-serializable.
         record = EpisodeRecord.from_rollout(
             "ep1",
             _fake_rollout(),
@@ -159,7 +184,11 @@ class TestEpisodeRecord:
 
 
 class TestRolloutSerializer:
+    # [CLASS DOC]
+    # Tests RolloutSerializer.
     def test_writes_one_jsonl_line_per_episode(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Each written episode is one JSON line, in order.
         serializer = RolloutSerializer(tmp_path)
 
         serializer.write_episode(
@@ -173,6 +202,8 @@ class TestRolloutSerializer:
         assert [json.loads(line)["episode_id"] for line in lines] == ["ep1", "ep2"]
 
     def test_line_contains_trl_ready_messages_column(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Each line has the rollout's chat messages in a messages column.
         serializer = RolloutSerializer(tmp_path)
         rollout = _fake_rollout(turns=2)
 
@@ -185,6 +216,8 @@ class TestRolloutSerializer:
         assert payload["messages"][0]["role"] == "user"
 
     def test_record_schema_has_required_keys(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Each line contains episode_id, messages, reward, done, tool_trace, metrics, verify_metrics, artifacts.
         serializer = RolloutSerializer(tmp_path)
         serializer.write_episode(
             EpisodeRecord.from_rollout("ep1", _fake_rollout(), _fake_verify())
@@ -204,6 +237,8 @@ class TestRolloutSerializer:
             assert key in payload, f"missing {key}"
 
     def test_writes_metadata_sidecar(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # write_metadata writes the metadata JSON file.
         serializer = RolloutSerializer(tmp_path)
         serializer.write_metadata(
             {"env_id": "tic_tac_toe", "teacher_model": "gpt-5-mini", "num_episodes": 10}
@@ -214,6 +249,8 @@ class TestRolloutSerializer:
         assert metadata["teacher_model"] == "gpt-5-mini"
 
     def test_collected_episode_ids_from_prior_run(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A new serializer on the same directory reports previously written episode ids.
         serializer = RolloutSerializer(tmp_path)
         serializer.write_episode(
             EpisodeRecord.from_rollout("ep1", _fake_rollout(), _fake_verify())
@@ -226,10 +263,14 @@ class TestRolloutSerializer:
         assert reopened.collected_episode_ids() == {"ep1", "ep2"}
 
     def test_collected_episode_ids_empty_when_no_file(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Without a results file, collected ids are empty.
         serializer = RolloutSerializer(tmp_path / "brand-new")
         assert serializer.collected_episode_ids() == set()
 
     def test_creates_output_dir_on_first_write(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # The output directory is created on the first write.
         target = tmp_path / "nested" / "out"
         serializer = RolloutSerializer(target)
 
@@ -241,6 +282,8 @@ class TestRolloutSerializer:
         assert serializer.results_path.exists()
 
     def test_append_mode_survives_new_serializer_instance(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A new serializer appends rather than truncating.
         """Serializer must append, not truncate, when a previous run exists."""
         first = RolloutSerializer(tmp_path)
         first.write_episode(
@@ -259,6 +302,8 @@ class TestRolloutSerializer:
     def test_append_separates_complete_record_without_trailing_newline(
         self, tmp_path: Path
     ):
+        # [FUNCTION DOC]
+        # A final complete record lacking a newline gets one before the appended record.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text(json.dumps({"episode_id": "ep1"}))
 
@@ -270,6 +315,8 @@ class TestRolloutSerializer:
         assert [json.loads(line)["episode_id"] for line in lines] == ["ep1", "ep2"]
 
     def test_append_does_not_read_the_entire_results_file(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Appending does not call Path.read_bytes on the whole file.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text('{"episode_id": "ep1"}\n')
 
@@ -284,6 +331,8 @@ class TestRolloutSerializer:
         assert [json.loads(line)["episode_id"] for line in lines] == ["ep1", "ep2"]
 
     def test_append_scans_a_long_final_record_across_chunks(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A long final record (spanning read chunks) is handled correctly when appending.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text(
             json.dumps({"episode_id": "ep1", "payload": "x" * 10_000})
@@ -297,6 +346,8 @@ class TestRolloutSerializer:
         assert [json.loads(line)["episode_id"] for line in lines] == ["ep1", "ep2"]
 
     def test_append_after_unterminated_blank_line(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A trailing whitespace-only partial line does not break appending.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text('{"episode_id": "ep1"}\n   ')
 
@@ -314,6 +365,8 @@ class TestRolloutSerializer:
     def test_append_rejects_partial_trailing_record_without_modifying_file(
         self, tmp_path: Path
     ):
+        # [FUNCTION DOC]
+        # A truncated final JSON record raises ValueError naming the final line and leaves the file unchanged.
         serializer = RolloutSerializer(tmp_path)
         original = b'{"episode_id": "ep1"}\n{"episode_id":'
         serializer.results_path.write_bytes(original)
@@ -328,6 +381,8 @@ class TestRolloutSerializer:
         assert serializer.results_path.read_bytes() == original
 
     def test_resume_rejects_malformed_interior_record(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Invalid JSON on an interior line raises ValueError with the line number.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text(
             '{"episode_id": "ep1"}\n{"episode_id":\n{"episode_id": "ep3"}\n'
@@ -337,6 +392,8 @@ class TestRolloutSerializer:
             serializer.collected_episode_ids()
 
     def test_resume_rejects_non_object_record(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A non-object JSON line raises ValueError.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text('{"episode_id": "ep1"}\n["ep2"]\n')
 
@@ -344,6 +401,8 @@ class TestRolloutSerializer:
             serializer.collected_episode_ids()
 
     def test_resume_rejects_record_without_episode_id(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A record lacking a string episode_id raises ValueError.
         serializer = RolloutSerializer(tmp_path)
         serializer.results_path.write_text('{"episode_id": "ep1"}\n{"messages": []}\n')
 
@@ -354,20 +413,31 @@ class TestRolloutSerializer:
 
 
 class _FakeSession(ResourceSession):
+    # [CLASS DOC]
+    # HELPER: ResourceSession stub with a fixed reward: one user message naming the task, no tools,
+    # call_tool returns a done result with reward metadata, verify returns the reward, close sets closed.
     """Minimal session that returns a fixed reward on verify()."""
 
     def __init__(self, *, task: Any = None, reward: float = 1.0):
+        # [FUNCTION DOC]
+        # HELPER: Stores task and reward; closed starts False.
         self.task = task
         self._reward = reward
         self.closed = False
 
     def initial_messages(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a single user message "task=<task>".
         return [{"role": "user", "content": f"task={self.task}"}]
 
     def list_tools(self) -> list[Tool]:
+        # [FUNCTION DOC]
+        # HELPER: Returns an empty list.
         return []
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        # [FUNCTION DOC]
+        # HELPER: Returns a done ToolResult acknowledging the tool name with reward metadata.
         return ToolResult(
             data={"ack": name},
             done=True,
@@ -379,6 +449,8 @@ class _FakeSession(ResourceSession):
         transcript: list[dict[str, Any]],
         final_state: Any | None = None,
     ) -> VerifyResult:
+        # [FUNCTION DOC]
+        # HELPER: Returns a done VerifyResult with the fixed reward and the task as an artifact.
         return VerifyResult(
             env_reward=self._reward,
             done=True,
@@ -387,13 +459,20 @@ class _FakeSession(ResourceSession):
         )
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Marks the session closed.
         self.closed = True
 
 
 class _FakeFactory(ResourceSessionFactory):
+    # [CLASS DOC]
+    # HELPER: ResourceSessionFactory recording create calls and sessions; rewards per task come from an
+    # optional map (default 1.0).
     """Records create() calls and hands out deterministic sessions."""
 
     def __init__(self, reward_map: dict[Any, float] | None = None):
+        # [FUNCTION DOC]
+        # HELPER: Initializes the call log, reward map and session list.
         self.created: list[dict[str, Any]] = []
         self._reward_map = reward_map or {}
         self.sessions: list[_FakeSession] = []
@@ -404,6 +483,9 @@ class _FakeFactory(ResourceSessionFactory):
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> _FakeSession:
+        # [FUNCTION DOC]
+        # HELPER: Records (task, seed, episode_id), creates a _FakeSession with the mapped reward, records
+        # and returns it.
         self.created.append({"task": task, "seed": seed, "episode_id": episode_id})
         reward = self._reward_map.get(task, 1.0) if self._reward_map else 1.0
         session = _FakeSession(task=task, reward=reward)
@@ -412,6 +494,9 @@ class _FakeFactory(ResourceSessionFactory):
 
 
 class _FakeAdapter(HarnessAdapter):
+    # [CLASS DOC]
+    # HELPER: HarnessAdapter whose white-box run performs one play_move tool call on the session and
+    # returns a done rollout; black-box runs are unsupported.
     """Produces a scripted rollout keyed off the session's task."""
 
     def run_white_box(
@@ -420,6 +505,9 @@ class _FakeAdapter(HarnessAdapter):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # HELPER: Builds messages from the session plus an assistant and tool message, calls play_move once
+        # and returns a done HarnessRolloutResult with metrics including the session reward.
         fake_session = session  # type: ignore[assignment]
         reward = fake_session._reward  # type: ignore[attr-defined]
         messages = list(session.initial_messages())
@@ -446,6 +534,8 @@ class _FakeAdapter(HarnessAdapter):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # HELPER: Raises NotImplementedError.
         raise NotImplementedError
 
 
@@ -454,11 +544,17 @@ def _noop_model_step(
     tools: list[Tool],
     sampling: dict[str, Any],
 ) -> ModelStepResult:
+    # [FUNCTION DOC]
+    # HELPER: ModelStep returning a response with content "ok" and no tool calls.
     return ModelStepResult(response=LLMResponse(content="ok", tool_calls=[]))
 
 
 class TestCollectRunner:
+    # [CLASS DOC]
+    # Tests CollectRunner.run.
     def test_writes_requested_number_of_episodes(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Three requested episodes are collected and written.
         runner = CollectRunner(
             session_factory=_FakeFactory(),
             harness_adapter=_FakeAdapter(),
@@ -473,6 +569,8 @@ class TestCollectRunner:
         assert len(lines) == 3
 
     def test_assigns_deterministic_episode_ids(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Episode ids are "<prefix>-<6-digit index>".
         runner = CollectRunner(
             session_factory=_FakeFactory(),
             harness_adapter=_FakeAdapter(),
@@ -488,6 +586,8 @@ class TestCollectRunner:
         assert result.episode_ids == ["ttt-000000", "ttt-000001"]
 
     def test_resume_skips_already_collected(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A second run on the same directory collects only missing episodes and only creates sessions for them.
         """Running twice on the same dir with resume=True (default) must
         pick up where the last run left off."""
         factory = _FakeFactory()
@@ -514,6 +614,8 @@ class TestCollectRunner:
         assert len(factory2.created) == 3
 
     def test_resume_rejects_corrupt_file_before_starting_sessions(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A corrupt results file raises ValueError before any session is created, leaving the file unchanged.
         original = b'{"episode_id": "ep-000000"}\n{"episode_id":'
         results_path = tmp_path / "results.jsonl"
         results_path.write_bytes(original)
@@ -531,6 +633,8 @@ class TestCollectRunner:
         assert results_path.read_bytes() == original
 
     def test_resume_false_forces_full_rerun(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # resume=False moves the existing results to a backup file (with a RuntimeWarning) and collects again.
         runner = CollectRunner(
             session_factory=_FakeFactory(),
             harness_adapter=_FakeAdapter(),
@@ -553,6 +657,8 @@ class TestCollectRunner:
         assert len(backups[0].read_text().strip().splitlines()) == 2
 
     def test_closes_session_after_each_episode(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # All sessions are closed.
         factory = _FakeFactory()
         runner = CollectRunner(
             session_factory=factory,
@@ -565,6 +671,8 @@ class TestCollectRunner:
         assert all(session.closed for session in factory.sessions)
 
     def test_should_keep_filter_drops_episodes(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Records rejected by should_keep are counted as dropped and not written.
         factory = _FakeFactory(reward_map={0: 1.0, 1: 0.0, 2: 1.0})
         runner = CollectRunner(
             session_factory=factory,
@@ -585,6 +693,8 @@ class TestCollectRunner:
         assert len(lines) == 2
 
     def test_passes_tasks_from_iterable_to_factory(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Tasks from the iterable are passed to the factory in order.
         factory = _FakeFactory()
         runner = CollectRunner(
             session_factory=factory,
@@ -598,6 +708,8 @@ class TestCollectRunner:
         assert [call["task"] for call in factory.created] == ["a", "b", "c"]
 
     def test_resume_consumes_task_slots_for_skipped_episodes(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # On resume, tasks for already-collected episodes are skipped so new episodes get the right tasks and ids.
         first_runner = CollectRunner(
             session_factory=_FakeFactory(),
             harness_adapter=_FakeAdapter(),
@@ -626,6 +738,8 @@ class TestCollectRunner:
         assert payloads[3]["task"] == "d"
 
     def test_collect_result_reports_success_rate(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # CollectResult reports collected count, success rate and average reward.
         factory = _FakeFactory(reward_map={0: 1.0, 1: 0.0, 2: 1.0, 3: 1.0})
         runner = CollectRunner(
             session_factory=factory,
@@ -645,13 +759,19 @@ class TestCollectRunner:
         self,
         tmp_path: Path,
     ):
+        # [FUNCTION DOC]
+        # A failing episode is counted as failed, its session closed, and collection continues.
         class FailingAdapter(_FakeAdapter):
+            # [CLASS DOC]
+            # HELPER: _FakeAdapter that raises RuntimeError for the "bad" task.
             def run_white_box(
                 self,
                 model_step: ModelStep,
                 session: ResourceSession,
                 limits: HarnessRunLimits | None = None,
             ) -> HarnessRolloutResult:
+                # [FUNCTION DOC]
+                # HELPER: Raises RuntimeError when the session task is "bad", else defers to the parent.
                 if getattr(session, "task") == "bad":
                     raise RuntimeError("episode failed")
                 return super().run_white_box(model_step, session, limits)
@@ -677,14 +797,21 @@ class TestCollectRunner:
 
 
 class _RecordingLLMClient(LLMClient):
+    # [CLASS DOC]
+    # HELPER: LLMClient that records messages, tools and sampling keywords of each complete_with_tools
+    # call and returns a canned response.
     """Captures the args passed to complete_with_tools and returns a canned response."""
 
     def __init__(self, response: LLMResponse):
+        # [FUNCTION DOC]
+        # HELPER: Initializes with a dummy endpoint, the canned response and an empty call log.
         super().__init__(endpoint="http://recorder", port=0)
         self._response = response
         self.calls: list[dict[str, Any]] = []
 
     async def complete(self, prompt: str, **kwargs: Any) -> str:  # pragma: no cover
+        # [FUNCTION DOC]
+        # HELPER: Not supported; raises NotImplementedError.
         raise NotImplementedError
 
     async def complete_with_tools(
@@ -693,6 +820,8 @@ class _RecordingLLMClient(LLMClient):
         tools: list[dict[str, Any]],
         **kwargs: Any,
     ) -> LLMResponse:
+        # [FUNCTION DOC]
+        # HELPER: Records the call and returns the canned response.
         self.calls.append(
             {"messages": messages, "tools": tools, "sampling": dict(kwargs)}
         )
@@ -700,13 +829,20 @@ class _RecordingLLMClient(LLMClient):
 
 
 class _PooledHttpLLMClient(LLMClient):
+    # [CLASS DOC]
+    # HELPER: LLMClient holding one pooled httpx.AsyncClient across calls (like provider SDKs), posting
+    # messages to its endpoint.
     """Holds one pooled `httpx.AsyncClient` across calls, like the provider SDKs do."""
 
     def __init__(self, url: str):
+        # [FUNCTION DOC]
+        # HELPER: Stores the URL as endpoint and creates the async HTTP client.
         super().__init__(endpoint=url, port=None)
         self._client = httpx.AsyncClient()
 
     async def complete(self, prompt: str, **kwargs: Any) -> str:  # pragma: no cover
+        # [FUNCTION DOC]
+        # HELPER: Not supported; raises NotImplementedError.
         raise NotImplementedError
 
     async def complete_with_tools(
@@ -715,14 +851,20 @@ class _PooledHttpLLMClient(LLMClient):
         tools: list[dict[str, Any]],
         **kwargs: Any,
     ) -> LLMResponse:
+        # [FUNCTION DOC]
+        # HELPER: POSTs the messages as JSON and returns an LLMResponse with the response's content field.
         response = await self._client.post(self.endpoint, json={"messages": messages})
         return LLMResponse(content=response.json()["content"], tool_calls=[])
 
 
 class _OkHandler(BaseHTTPRequestHandler):
+    # [CLASS DOC]
+    # HELPER: HTTP/1.1 request handler answering every POST with JSON {"content": "ok"}.
     protocol_version = "HTTP/1.1"
 
     def do_POST(self):
+        # [FUNCTION DOC]
+        # HELPER: Reads the request body and writes a 200 JSON response with content length.
         self.rfile.read(int(self.headers["Content-Length"]))
         body = json.dumps({"content": "ok"}).encode()
         self.send_response(200)
@@ -732,11 +874,17 @@ class _OkHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, *args):
+        # [FUNCTION DOC]
+        # HELPER: Suppresses request logging.
         pass
 
 
 class TestBuildModelStep:
+    # [CLASS DOC]
+    # Tests build_model_step.
     def _tool(self) -> Tool:
+        # [FUNCTION DOC]
+        # HELPER: Returns a play_move Tool with an integer action_id parameter.
         return Tool(
             name="play_move",
             description="Play a move.",
@@ -748,6 +896,8 @@ class TestBuildModelStep:
         )
 
     def test_returns_callable_matching_model_step_protocol(self):
+        # [FUNCTION DOC]
+        # The built step returns a ModelStepResult wrapping the client response.
         client = _RecordingLLMClient(LLMResponse(content="ok", tool_calls=[]))
         step = build_model_step(client)
 
@@ -757,6 +907,8 @@ class TestBuildModelStep:
         assert result.response.content == "ok"
 
     def test_converts_tools_to_mcp_dict_shape(self):
+        # [FUNCTION DOC]
+        # Tools are passed to the client as dicts with name, description and inputSchema.
         client = _RecordingLLMClient(LLMResponse(content="", tool_calls=[]))
         step = build_model_step(client)
 
@@ -768,6 +920,8 @@ class TestBuildModelStep:
         assert tools[0]["inputSchema"]["properties"]["action_id"]["type"] == "integer"
 
     def test_forwards_messages_verbatim(self):
+        # [FUNCTION DOC]
+        # Messages are forwarded unchanged.
         client = _RecordingLLMClient(LLMResponse(content="", tool_calls=[]))
         step = build_model_step(client)
 
@@ -780,6 +934,8 @@ class TestBuildModelStep:
         assert client.calls[0]["messages"] == messages
 
     def test_prepends_system_prompt_when_missing(self):
+        # [FUNCTION DOC]
+        # A configured system prompt is prepended when there is no system message.
         client = _RecordingLLMClient(LLMResponse(content="", tool_calls=[]))
         step = build_model_step(client, system_prompt="You are a TTT expert.")
 
@@ -790,6 +946,8 @@ class TestBuildModelStep:
         assert sent[1]["role"] == "user"
 
     def test_does_not_double_prepend_system_prompt(self):
+        # [FUNCTION DOC]
+        # An existing system message is kept and no second one is added.
         client = _RecordingLLMClient(LLMResponse(content="", tool_calls=[]))
         step = build_model_step(client, system_prompt="A")
 
@@ -808,6 +966,8 @@ class TestBuildModelStep:
         assert system_roles[0]["content"] == "pre-existing"
 
     def test_forwards_sampling_kwargs(self):
+        # [FUNCTION DOC]
+        # Supported sampling keys are forwarded; unknown keys are dropped with a RuntimeWarning.
         client = _RecordingLLMClient(LLMResponse(content="", tool_calls=[]))
         step = build_model_step(client)
 
@@ -828,6 +988,8 @@ class TestBuildModelStep:
         assert "unknown" not in sampling
 
     def test_passes_through_tool_calls(self):
+        # [FUNCTION DOC]
+        # Tool calls in the client response are preserved.
         response = LLMResponse(
             content="Playing cell 0.",
             tool_calls=[ToolCall(id="abc", name="play_move", args={"action_id": 0})],
@@ -843,6 +1005,8 @@ class TestBuildModelStep:
 
     @pytest.mark.asyncio
     async def test_runs_safely_inside_existing_event_loop(self):
+        # [FUNCTION DOC]
+        # The sync step can be called from inside a running event loop.
         client = _RecordingLLMClient(LLMResponse(content="ok", tool_calls=[]))
         step = build_model_step(client)
 
@@ -852,6 +1016,8 @@ class TestBuildModelStep:
         assert client.calls[0]["messages"] == [{"role": "user", "content": "play"}]
 
     def test_reuses_pooled_client_across_steps(self):
+        # [FUNCTION DOC]
+        # Repeated steps with a pooled HTTP client against a local server all succeed (one persistent loop).
         # Regression: a fresh event loop per step broke the client's connection
         # pool, bound to the first loop, with "Event loop is closed".
         server = ThreadingHTTPServer(("127.0.0.1", 0), _OkHandler)
@@ -868,6 +1034,8 @@ class TestBuildModelStep:
             server.server_close()
 
     def test_repeated_builds_share_one_loop_thread(self):
+        # [FUNCTION DOC]
+        # Building many steps adds at most one thread.
         client = _RecordingLLMClient(LLMResponse(content="ok", tool_calls=[]))
         threads_before = threading.active_count()
 
@@ -879,6 +1047,8 @@ class TestBuildModelStep:
 
 
 def _populated_output_dir(tmp_path: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: Writes metadata and one episode into the directory and returns it.
     """Write a minimal results.jsonl + metadata.json into tmp_path."""
     serializer = RolloutSerializer(tmp_path)
     serializer.write_metadata({"env_id": "tic_tac_toe", "num_episodes": 1})
@@ -889,7 +1059,11 @@ def _populated_output_dir(tmp_path: Path) -> Path:
 
 
 class TestPushToHfHub:
+    # [CLASS DOC]
+    # Tests push_to_hf_hub with HfApi patched.
     def test_creates_dataset_repo_and_uploads(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Creates a dataset repo (exist_ok) and uploads the folder; returns the dataset URL.
         output = _populated_output_dir(tmp_path)
         mock_api = MagicMock()
 
@@ -911,6 +1085,8 @@ class TestPushToHfHub:
         assert url == "https://huggingface.co/datasets/user/ttt-sft-v1"
 
     def test_private_flag_propagates(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # private=True is passed to create_repo.
         output = _populated_output_dir(tmp_path)
         mock_api = MagicMock()
 
@@ -920,6 +1096,8 @@ class TestPushToHfHub:
         assert mock_api.create_repo.call_args.kwargs["private"] is True
 
     def test_custom_commit_message(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A custom commit message is passed to upload_folder.
         output = _populated_output_dir(tmp_path)
         mock_api = MagicMock()
 
@@ -932,6 +1110,8 @@ class TestPushToHfHub:
         )
 
     def test_default_commit_message_mentions_episodes(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # The default commit message mentions the episode count.
         output = _populated_output_dir(tmp_path)
         mock_api = MagicMock()
 
@@ -943,11 +1123,15 @@ class TestPushToHfHub:
         assert "1" in msg and "episode" in msg.lower()
 
     def test_errors_when_results_jsonl_missing(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A directory without results.jsonl raises FileNotFoundError.
         # Empty dir — no results.jsonl written.
         with pytest.raises(FileNotFoundError):
             push_to_hf_hub(tmp_path, "user/ds")
 
     def test_token_forwarded_to_hfapi(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # The token is passed to the HfApi constructor.
         output = _populated_output_dir(tmp_path)
         mock_api = MagicMock()
         api_cls = MagicMock(return_value=mock_api)
@@ -958,6 +1142,8 @@ class TestPushToHfHub:
         assert api_cls.call_args.kwargs["token"] == "hf_xxx"
 
     def test_writes_readme_with_viewer_frontmatter(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # A README with YAML front matter pointing the viewer's train split at results.jsonl is written.
         """HF Dataset Viewer needs YAML front-matter to know which file is the
         dataset — otherwise it tries to cast ``metadata.json`` into the same
         schema as ``results.jsonl`` and errors out."""
@@ -975,7 +1161,11 @@ class TestPushToHfHub:
 
 
 class TestBuildDatasetReadme:
+    # [CLASS DOC]
+    # Tests build_dataset_readme.
     def test_includes_episode_count(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # The README states the episode count.
         _populated_output_dir(tmp_path)
 
         readme = build_dataset_readme(tmp_path)
@@ -983,6 +1173,8 @@ class TestBuildDatasetReadme:
         assert "Episodes:** 1" in readme
 
     def test_includes_metadata_table(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Metadata keys and values appear in the README.
         _populated_output_dir(tmp_path)
         # overwrite metadata with a known payload
         (tmp_path / "metadata.json").write_text(
@@ -997,6 +1189,8 @@ class TestBuildDatasetReadme:
         assert "`gpt-5-mini`" in readme
 
     def test_resilient_to_missing_metadata(self, tmp_path: Path):
+        # [FUNCTION DOC]
+        # Without metadata.json the README is still generated with title and schema sections.
         serializer = RolloutSerializer(tmp_path)
         serializer.write_episode(
             EpisodeRecord.from_rollout("ep1", _fake_rollout(), _fake_verify())

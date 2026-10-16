@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for the TrainingTrace / TrainingTurn wire contract: validation of token ids,
+# logprobs and loss masks, JSON round trips, conversion from a RolloutGraph capture
+# (shared-prefix dedup) and conversion from Harbor rollout results.
 # SPDX-License-Identifier: BSD-3-Clause
 
 
@@ -10,6 +14,10 @@ from openenv.harbor.models import HarborRolloutResult, HarborTurn
 
 
 def turn(**changes):
+    # [FUNCTION DOC]
+    # HELPER: Builds a valid TrainingTurn (node "agent", 2 prompt tokens, 3 completion
+    # tokens with negative logprobs, 5-entry loss mask) with keyword overrides applied.
+    # Returns: the TrainingTurn. Raises: ValueError (pydantic) if overrides are invalid.
     return TrainingTurn(
         **{
             "node_id": "agent",
@@ -23,6 +31,9 @@ def turn(**changes):
 
 
 def test_partial_mask_and_zero_mask_survive_wire_round_trip():
+    # [FUNCTION DOC]
+    # Checks that a trace with a partial mask and an all-zero mask is equal after a
+    # JSON dump/validate round trip and that masks/logprobs are preserved.
     original = TrainingTrace(turns=[turn(), turn(node_id="context", loss_mask=[0] * 5)])
     restored = TrainingTrace.model_validate_json(original.model_dump_json())
     assert restored == original
@@ -46,11 +57,16 @@ def test_partial_mask_and_zero_mask_survive_wire_round_trip():
     ],
 )
 def test_malformed_capture_fails_at_producer_boundary(changes):
+    # [FUNCTION DOC]
+    # Parametrized: each malformed override (missing/short/bad masks, bool tokens, empty
+    # or NaN/positive/bool logprobs, empty prompt) must raise ValueError on construction.
     with pytest.raises(ValueError):
         turn(**changes)
 
 
 def test_missing_mask_and_unknown_version_rejected():
+    # [FUNCTION DOC]
+    # Checks a turn without loss_mask fails validation and schema_version 2 is rejected.
     values = turn().model_dump(exclude={"loss_mask"})
     with pytest.raises(ValueError):
         TrainingTurn.model_validate(values)
@@ -59,11 +75,17 @@ def test_missing_mask_and_unknown_version_rejected():
 
 
 def test_duplicate_call_is_not_supervised_twice():
+    # [FUNCTION DOC]
+    # Checks a trace with two turns sharing a node_id raises "duplicate node_ids".
     with pytest.raises(ValueError, match="duplicate node_ids"):
         TrainingTrace(turns=[turn(), turn()])
 
 
 def test_shared_graph_prefix_is_emitted_once_and_partial_masks_preserved():
+    # [FUNCTION DOC]
+    # Builds a 4-node RolloutGraph and a document of two agent sequences sharing a
+    # "root" prefix plus an auxiliary one; checks the converted trace emits root once,
+    # skips auxiliary, keeps 3 supervised tokens and slices root's mask to [0,1,0].
     graph = RolloutGraph()
     for name, prompt, sampled in [
         ("root", [1], [2, 3]),
@@ -101,6 +123,10 @@ def test_shared_graph_prefix_is_emitted_once_and_partial_masks_preserved():
 
 
 def test_harbor_masks_do_not_change_reward_or_drop_zero_masked_agent_calls():
+    # [FUNCTION DOC]
+    # For rewards None/0/1, checks Harbor conversion keeps agent turns (even zero-masked),
+    # drops auxiliary/discarded turns, leaves reward untouched, and raises when an agent
+    # turn has no explicit loss_mask. Mutates and then restores turn 0's mask.
     turns = [
         HarborTurn(
             turn=0, **turn().model_dump(exclude={"request", "response", "metadata"})
@@ -126,6 +152,8 @@ def test_harbor_masks_do_not_change_reward_or_drop_zero_masked_agent_calls():
 
 
 def test_eval_and_fatal_capture_are_not_empty_successful_training():
+    # [FUNCTION DOC]
+    # Checks conversion raises for eval-only rollouts and for rollouts with a [FATAL] finding.
     with pytest.raises(ValueError, match="eval-only"):
         to_training_trace(HarborRolloutResult(rollout_type="eval"))
     with pytest.raises(ValueError, match="fatal"):

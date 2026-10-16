@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Environment discovery package: builds, serializes, loads, searches and diffs a
+# versioned metadata-only catalog of environments (EnvironmentCard / DiscoveryEntry
+# records in a CatalogSnapshot). Independent of AutoEnv resolution; nothing here
+# imports or runs environments. Re-exports the public API from its submodules.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Versioned, metadata-only environment discovery, separate from AutoEnv resolution."""

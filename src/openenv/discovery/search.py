@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Read-only queries over a complete CatalogSnapshot: deterministic lexical search,
+# exact identifier lookup, and diffing two snapshots. Every function first checks
+# the snapshot is complete and its digest matches (CatalogError otherwise).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """A deterministic lexical baseline and exact, read-only record inspection."""
@@ -22,10 +26,16 @@ SUPPORTED_FILTERS = frozenset(
 
 
 def _tokens(value: str) -> set[str]:
+    # [FUNCTION DOC]
+    # HELPER: casefolds text and returns the set of alphanumeric word tokens (underscore splits).
     return set(re.findall(r"[^\W_]+", value.casefold()))
 
 
 def _filter_values(entry: DiscoveryEntry, key: str) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the list of values an entry exposes for a filter key: provider from the
+    # card source, tags, entry media type, else the attribute of the card with that name
+    # (license, artifact_availability, name).
     if key == "provider":
         return [entry.data.source.provider]
     if key == "tags":
@@ -42,6 +52,13 @@ def search_catalog(
     filters: dict[str, str] | None = None,
     limit: int = 20,
 ) -> list[SearchMatch]:
+    # [FUNCTION DOC]
+    # Searches entries. Validates limit (1-1000), query length (<= 8192) and filter keys
+    # (must be in SUPPORTED_FILTERS), raising CatalogError. Entries failing any exact filter
+    # are skipped. Text = display name, card description, tags, capabilities and
+    # representative queries; score = rounded percent of query tokens present. With a
+    # non-empty query, entries sharing no token are dropped; an empty query matches all with
+    # score 0. Returns SearchMatch list sorted by score desc then identifier, truncated to limit.
     """
     Find candidate metadata by task without contacting candidate environments.
 
@@ -91,6 +108,9 @@ def search_catalog(
 
 
 def resolve_entry(snapshot: CatalogSnapshot, identifier: str) -> DiscoveryEntry:
+    # [FUNCTION DOC]
+    # Returns the entry with exactly this identifier; raises CatalogError if absent or the
+    # snapshot is incomplete/tampered.
     """Inspect an exact identifier in the configured snapshot, without URL inference."""
     require_complete(snapshot)
     for entry in snapshot.entries:
@@ -102,6 +122,11 @@ def resolve_entry(snapshot: CatalogSnapshot, identifier: str) -> DiscoveryEntry:
 def compare_catalogs(
     previous: CatalogSnapshot, current: CatalogSnapshot
 ) -> CatalogChanges:
+    # [FUNCTION DOC]
+    # Diffs two complete snapshots that share publisher, source uri and inventory root
+    # (CatalogError otherwise). Keys entries by environment path and returns CatalogChanges:
+    # added (new paths), withdrawn (gone paths), superseded (same path, different identifier)
+    # and corrected (same identifier, different content), each sorted by path.
     """Distinguish new revision cards from withdrawn listings after a complete refresh."""
     require_complete(previous)
     require_complete(current)

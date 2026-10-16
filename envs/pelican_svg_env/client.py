@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the Pelican SVG environment: serializes the raw model reply and parses scored
+# observations and state from the server.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Client for the Pelican SVG environment."""
@@ -15,6 +18,8 @@ from .models import PelicanSvgAction, PelicanSvgObservation, PelicanSvgState
 class PelicanSvgEnv(
     EnvClient[PelicanSvgAction, PelicanSvgObservation, PelicanSvgState]
 ):
+    # [CLASS DOC]
+    # EnvClient subclass implementing the payload/parsing hooks for Pelican SVG sessions.
     """Connects to a running Pelican SVG environment server.
 
     Examples:
@@ -29,12 +34,19 @@ class PelicanSvgEnv(
     """
 
     def _step_payload(self, action: PelicanSvgAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a mapping with the single key "response" holding the action's raw reply text.
         """Convert an action into the JSON body of a step request."""
         return {"response": action.response}
 
     def _parse_result(
         self, payload: Dict[str, Any]
     ) -> StepResult[PelicanSvgObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult from a server response. reward and done are read from the top level
+        # first, then from the nested observation (done defaults False). All observation fields are copied
+        # with defaults (expected_wheels 2, held_out True, scores 0.0, empty lists/maps, image None);
+        # metadata prefers the top level. The StepResult carries no metadata.
         """Parse a server response into a typed step result.
 
         The server hoists `reward` and `done` onto the response envelope and
@@ -70,6 +82,9 @@ class PelicanSvgEnv(
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> PelicanSvgState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a PelicanSvgState with episode_id, step_count (default 0), task_id (default empty)
+        # and submitted (default False).
         """Parse a response from the state endpoint into a typed state."""
         return PelicanSvgState(
             episode_id=payload.get("episode_id"),

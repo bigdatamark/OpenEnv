@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Color validation helpers for the calendar API. Each returns None on success or an error
+# message string on failure (they do not raise). Database-backed checks use ColorManager;
+# combination checks use the static CALENDAR_COLORS / EVENT_COLORS tables (colorId ->
+# {"background", "foreground"} hex strings).
 """
 Validation utilities for Calendar API
 Provides common validation functions used across different API endpoints
@@ -12,6 +17,10 @@ from database.managers.color_manager import ColorManager
 def validate_calendar_color_id(
     color_id: Optional[str], database_id: str
 ) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Checks a calendar colorId against the database for database_id. None is valid; non-strings,
+    # unknown ids, or a ColorManager failure produce an error message.
+    # Side effects: database read via ColorManager.
     """
     Validate calendar colorId against database
 
@@ -42,6 +51,8 @@ def validate_calendar_color_id(
 
 
 def validate_event_color_id(color_id: Optional[str], database_id: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Same as validate_calendar_color_id but for the "event" color type.
     """
     Validate event colorId against database
 
@@ -74,6 +85,9 @@ def validate_event_color_id(color_id: Optional[str], database_id: str) -> Option
 def validate_request_colors(
     data: dict, color_type: str, database_id: str
 ) -> Optional[str]:
+    # [FUNCTION DOC]
+    # If the request dict contains "colorId", dispatches to the calendar or event validator by
+    # color_type; returns an error string for an unknown color_type, else the validator result.
     """
     Validate colorId in request data against database
 
@@ -101,6 +115,9 @@ def validate_request_colors(
 def validate_color_combination(
     background_color: str, foreground_color: str, color_type: str
 ) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Returns None if (background_color, foreground_color) matches, case-insensitively, an entry in
+    # the static table for color_type; otherwise an error message (also for unknown color_type).
     """
     Validate that backgroundColor and foregroundColor combination exists in color data
 
@@ -133,6 +150,9 @@ def validate_color_combination(
 def find_color_id_by_combination(
     background_color: str, foreground_color: str, color_type: str
 ) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Returns the colorId whose background/foreground match (case-insensitive) in the static table
+    # for color_type, or None if none matches or color_type is unknown.
     """
     Find the colorId that matches the given backgroundColor and foregroundColor combination
 
@@ -163,6 +183,11 @@ def find_color_id_by_combination(
 
 
 def set_colors_from_color_id(data: dict, color_type: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # If data has a truthy colorId and neither backgroundColor nor foregroundColor, looks it up in the
+    # static table and writes both colors into data.
+    # Returns: None on success or when skipped; error message for unknown color_type or colorId.
+    # Side effects: mutates data.
     """
     Set backgroundColor and foregroundColor from colorId if they are not provided
 
@@ -203,6 +228,10 @@ def set_colors_from_color_id(data: dict, color_type: str) -> Optional[str]:
 
 
 def validate_and_set_color_id(data: dict, color_type: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # If data has both backgroundColor and foregroundColor, validates the pair and sets data["colorId"]
+    # to the matching id. Returns None on success/skip, or the validation error message.
+    # Side effects: mutates data.
     """
     Validate RGB color combination and set appropriate colorId if valid combination exists
 

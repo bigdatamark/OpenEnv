@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for harbor_env.harness.HarborSessionFactory / HarborSession, the TRL rollout-worker adapter
+# (create -> wait_for_completion -> fetch_proxy_trace -> verify) over a hosted Harbor server, using a
+# FakeEnv in place of the remote client. Covers trainability filtering, failure-as-return-code,
+# ungraded rewards, prompt-to-task mapping, tool-call shape conversion, pickling, and client ownership.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -27,6 +32,9 @@ models = pytest.importorskip("openenv.harbor.models")
 
 
 def turn(**kw):
+    # [FUNCTION DOC]
+    # HELPER: Returns a models.HarborTurn with trainable defaults (prompt/completion ids, logprobs,
+    # request messages, text) overridden by keyword arguments.
     defaults = dict(
         turn=0,
         prompt_token_ids=[1, 2, 3],
@@ -42,6 +50,9 @@ def turn(**kw):
 
 
 def result(**kw):
+    # [FUNCTION DOC]
+    # HELPER: Returns an ok train/tokens HarborRolloutResult with reward 1.0 and one default turn,
+    # overridden by keyword arguments.
     defaults = dict(
         ok=True,
         rollout_type="train",
@@ -54,9 +65,14 @@ def result(**kw):
 
 
 class FakeEnv:
+    # [CLASS DOC]
+    # HELPER: Fake deployed server; returns a fixed outcome (or raises a given exception) from
+    # run_rollout and records each call's kwargs. Defaults to two tasks.
     """Stands in for a deployed server. Records what it was asked for."""
 
     def __init__(self, outcome=None, tasks=None, raises=None):
+        # [FUNCTION DOC]
+        # HELPER: Stores outcome, exception, task list (default two tasks) and an empty call log.
         self._outcome = outcome
         self._raises = raises
         self._tasks = tasks or [
@@ -66,15 +82,23 @@ class FakeEnv:
         self.calls: list[dict] = []
 
     def splits(self):
+        # [FUNCTION DOC]
+        # HELPER: Returns one split "train-split" with the task count.
         return [{"name": "train-split", "num_tasks": len(self._tasks)}]
 
     def num_tasks(self, split=""):
+        # [FUNCTION DOC]
+        # HELPER: Returns the number of tasks.
         return len(self._tasks)
 
     def get_task_range(self, split, start=None, stop=None):
+        # [FUNCTION DOC]
+        # HELPER: Returns the slice of task dicts.
         return self._tasks[start:stop]
 
     def run_rollout(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records kwargs, then raises the configured exception or returns the outcome.
         self.calls.append(kwargs)
         if self._raises:
             raise self._raises
@@ -82,6 +106,9 @@ class FakeEnv:
 
 
 def factory_with(env, **kw):
+    # [FUNCTION DOC]
+    # HELPER: Builds a HarborSessionFactory for a dummy URL and split "train-split" with extra kwargs,
+    # then replaces its metadata client and new_client so both return the fake env.
     """A factory whose metadata client AND per-session clients are the same fake.
 
     Sessions get their own client in production (a shared socket cannot carry overlapping rollouts),
@@ -95,6 +122,9 @@ def factory_with(env, **kw):
 
 
 def test_a_train_rollout_becomes_trace_entries():
+    # [FUNCTION DOC]
+    # A train rollout completes with 0 and yields one trace entry with completion ids, logprobs and the
+    # request messages.
     env = FakeEnv(result())
     session = factory_with(env).create([{"role": "user", "content": "first task"}])
     assert session.wait_for_completion() == 0
@@ -109,6 +139,8 @@ def test_a_train_rollout_becomes_trace_entries():
 
 
 def test_factory_passes_an_explicit_training_policy_to_each_rollout():
+    # [FUNCTION DOC]
+    # A sampling override reaches run_rollout with defaults top_p 1.0 and top_k -1 filled in.
     env = FakeEnv(result())
     session = factory_with(env, sampling={"temperature": 0.8}).create(
         [{"role": "user", "content": "first task"}]
@@ -120,6 +152,8 @@ def test_factory_passes_an_explicit_training_policy_to_each_rollout():
 
 
 def test_factory_rejects_an_invalid_training_policy_before_opening_a_client():
+    # [FUNCTION DOC]
+    # temperature 0 raises ValueError at factory construction.
     with pytest.raises(ValueError, match="temperature"):
         harness.HarborSessionFactory(
             "http://unused.invalid", sampling={"temperature": 0}
@@ -127,6 +161,8 @@ def test_factory_rejects_an_invalid_training_policy_before_opening_a_client():
 
 
 def test_an_eval_rollout_yields_nothing_trainable():
+    # [FUNCTION DOC]
+    # An eval result yields an empty trace but verify still reports reward 1.0.
     """It has a reward and a readable trace; what it has no business producing is training rows."""
     env = FakeEnv(result(rollout_type="eval", capture_level="text", turns=[]))
     session = factory_with(env).create([{"role": "user", "content": "first task"}])
@@ -136,6 +172,8 @@ def test_an_eval_rollout_yields_nothing_trainable():
 
 
 def test_an_eval_rollout_that_somehow_carries_turns_still_yields_nothing():
+    # [FUNCTION DOC]
+    # An eval result with turns still yields an empty trace.
     """Guards the tier, not the emptiness: trusting turns present on an eval result would train on
     whatever the endpoint happened to return."""
     env = FakeEnv(result(rollout_type="eval", capture_level="logprobs", turns=[turn()]))
@@ -145,6 +183,8 @@ def test_an_eval_rollout_that_somehow_carries_turns_still_yields_nothing():
 
 
 def test_untrainable_and_discarded_turns_are_dropped():
+    # [FUNCTION DOC]
+    # Untrainable, discarded and empty-completion turns are excluded from the trace.
     env = FakeEnv(
         result(
             turns=[
@@ -161,6 +201,8 @@ def test_untrainable_and_discarded_turns_are_dropped():
 
 
 def test_a_server_error_is_returned_not_raised():
+    # [FUNCTION DOC]
+    # A raising server makes wait_for_completion return 1, an empty trace and reward None.
     """An exception here kills the rollout loop, and a dead loop hangs every training rank."""
     env = FakeEnv(raises=RuntimeError("websocket closed"))
     session = factory_with(env).create([{"role": "user", "content": "first task"}])
@@ -170,6 +212,8 @@ def test_a_server_error_is_returned_not_raised():
 
 
 def test_a_not_ok_rollout_reports_non_zero():
+    # [FUNCTION DOC]
+    # A not-ok result returns 1 and reward None.
     env = FakeEnv(result(ok=False, error="sandbox died", reward=None))
     session = factory_with(env).create([{"role": "user", "content": "first task"}])
     assert session.wait_for_completion() == 1
@@ -177,6 +221,8 @@ def test_a_not_ok_rollout_reports_non_zero():
 
 
 def test_the_prompt_selects_the_right_task():
+    # [FUNCTION DOC]
+    # The prompt text maps to task index 1.
     env = FakeEnv(result())
     session = factory_with(env).create([{"role": "user", "content": "second task"}])
     session.wait_for_completion()
@@ -184,6 +230,8 @@ def test_the_prompt_selects_the_right_task():
 
 
 def test_an_unknown_prompt_is_a_loud_error():
+    # [FUNCTION DOC]
+    # An unknown prompt raises KeyError ("does not match any task").
     """Silently defaulting to task 0 would train a whole run on one task and look like convergence."""
     env = FakeEnv(result())
     with pytest.raises(KeyError, match="does not match any task"):
@@ -193,6 +241,8 @@ def test_an_unknown_prompt_is_a_loud_error():
 
 
 def test_the_engine_and_bounds_reach_the_server():
+    # [FUNCTION DOC]
+    # llm_url, model and agent_timeout_sec are forwarded to run_rollout.
     env = FakeEnv(result())
     f = factory_with(
         env, llm_url="http://vllm:8000", model="Qwen/Qwen3.5-2B", agent_timeout_sec=300
@@ -205,6 +255,8 @@ def test_the_engine_and_bounds_reach_the_server():
 
 
 def test_prompt_rows_round_trip_through_create():
+    # [FUNCTION DOC]
+    # prompt_rows gives task indices 0 and 1 and each row's prompt maps back to its index via create.
     """The dataset a trainer builds must be the one the factory can resolve."""
     env = FakeEnv(result())
     f = factory_with(env)
@@ -215,6 +267,8 @@ def test_prompt_rows_round_trip_through_create():
 
 
 def test_the_agent_owns_its_loop_so_no_tools_are_exposed():
+    # [FUNCTION DOC]
+    # Sessions list no tools and call_tool returns an error result.
     session = factory_with(FakeEnv(result())).create(
         [{"role": "user", "content": "first task"}]
     )
@@ -223,14 +277,25 @@ def test_the_agent_owns_its_loop_so_no_tools_are_exposed():
 
 
 def test_prompt_skew_measures_against_the_engines_own_ids():
+    # [FUNCTION DOC]
+    # measure_prompt_skew yields exact_match_frac 1.0 for an exact tokenizer and, for a drifting one,
+    # 0.0 with worst common prefix 2 and length delta 1.
     """The point of the measurement: an exact re-render scores 1.0, a wrong one does not."""
 
     class ExactTokenizer:
+        # [CLASS DOC]
+        # HELPER: Tokenizer stub reproducing the captured prompt ids.
         def apply_chat_template(self, messages, **kw):
+            # [FUNCTION DOC]
+            # HELPER: Returns [1, 2, 3].
             return [1, 2, 3]
 
     class DriftingTokenizer:
+        # [CLASS DOC]
+        # HELPER: Tokenizer stub producing different ids.
         def apply_chat_template(self, messages, **kw):
+            # [FUNCTION DOC]
+            # HELPER: Returns [1, 2, 99, 100].
             return [1, 2, 99, 100]
 
     res = result()
@@ -245,6 +310,9 @@ def test_prompt_skew_measures_against_the_engines_own_ids():
 
 
 def test_tool_calls_reach_trl_in_the_shape_it_reads():
+    # [FUNCTION DOC]
+    # to_trace_entries converts flat {name, arguments} tool calls into the nested OpenAI function form
+    # with a non-empty id and raw JSON arguments.
     """The capture flattens tool calls to `{name, arguments}`; TRL and chat templates want the nested
     OpenAI form. Handing over the flat shape makes `has_tool_call` false for every turn, so
     `train_turn_fn=has_tool_call` — the documented default for a coding agent — throws away the whole
@@ -265,6 +333,8 @@ def test_tool_calls_reach_trl_in_the_shape_it_reads():
 
 
 def test_has_tool_call_sees_the_converted_calls():
+    # [FUNCTION DOC]
+    # TRL's has_tool_call recognises the converted entry. Skipped without TRL's async_grpo module.
     """The actual consequence, asserted through TRL's own predicate rather than by inspection."""
     trl = pytest.importorskip("trl.experimental.async_grpo.openenv_harness")
     res = result(turns=[turn(tool_calls=[{"name": "bash", "arguments": "{}"}])])
@@ -273,6 +343,8 @@ def test_has_tool_call_sees_the_converted_calls():
 
 
 def test_already_nested_tool_calls_pass_through_untouched():
+    # [FUNCTION DOC]
+    # Already-nested tool calls are passed through unchanged.
     nested = {
         "id": "call_x",
         "type": "function",
@@ -284,6 +356,9 @@ def test_already_nested_tool_calls_pass_through_untouched():
 
 
 def test_the_factory_survives_pickling():
+    # [FUNCTION DOC]
+    # A factory with a bound client pickles; the revived copy drops the client but keeps the
+    # instruction map and llm_url.
     """TRL spawns the rollout loop and pickles the factory into it. Building the dataset in the parent
     binds a websocket first, so without dropping it the pickle fails or the child inherits a
     connection owned by another process."""
@@ -306,6 +381,8 @@ def test_the_factory_survives_pickling():
 
 
 def test_duplicate_instructions_do_not_silently_shadow_each_other(caplog):
+    # [FUNCTION DOC]
+    # Duplicate instructions log a "share an instruction" warning and the first index wins.
     """Two tasks with one instruction produced two rows that both resolved to the LAST index, so a
     group trained on a task it was never given and nothing said so."""
     env = FakeEnv(
@@ -326,6 +403,8 @@ def test_duplicate_instructions_do_not_silently_shadow_each_other(caplog):
 
 
 def test_a_zero_timeout_defers_to_the_task_file():
+    # [FUNCTION DOC]
+    # wait_for_completion(timeout_s=0) forwards 0, not the factory default.
     """`0` is documented as "use the task's own timeout". `or` turns it into the factory default."""
     env = FakeEnv(result())
     session = factory_with(env, agent_timeout_sec=600).create(
@@ -336,6 +415,8 @@ def test_a_zero_timeout_defers_to_the_task_file():
 
 
 def test_no_timeout_argument_uses_the_factory_default():
+    # [FUNCTION DOC]
+    # Without a timeout argument, the factory's agent_timeout_sec is used.
     env = FakeEnv(result())
     session = factory_with(env, agent_timeout_sec=450).create(
         [{"role": "user", "content": "first task"}]
@@ -345,6 +426,9 @@ def test_no_timeout_argument_uses_the_factory_default():
 
 
 def test_explicit_indices_normalise_like_the_range_path():
+    # [FUNCTION DOC]
+    # With explicit indices, model-like tasks from get_task are normalised via model_dump so prompt rows
+    # and the instruction map work.
     """`get_task` returns a model, `get_task_range` returns dicts.
 
     Selecting specific tasks went through `get_task`, so every consumer doing `task.get(...)` hit
@@ -353,9 +437,13 @@ def test_explicit_indices_normalise_like_the_range_path():
     """
 
     class ModelLike:
+        # [CLASS DOC]
+        # HELPER: Pydantic-like task with model_dump and no get.
         """Stands in for a pydantic HarborTaskRef: has model_dump, has no .get."""
 
         def __init__(self, index, instruction):
+            # [FUNCTION DOC]
+            # HELPER: Stores a dict with index, name "t<index>" and the instruction.
             self._d = {
                 "index": index,
                 "task_name": f"t{index}",
@@ -363,13 +451,21 @@ def test_explicit_indices_normalise_like_the_range_path():
             }
 
         def model_dump(self):
+            # [FUNCTION DOC]
+            # HELPER: Returns a copy of the stored dict.
             return dict(self._d)
 
     class ModelEnv(FakeEnv):
+        # [CLASS DOC]
+        # HELPER: FakeEnv with 10 tasks served one at a time via get_task.
         def num_tasks(self, split=""):
+            # [FUNCTION DOC]
+            # HELPER: Returns 10.
             return 10
 
         def get_task(self, split, index):
+            # [FUNCTION DOC]
+            # HELPER: Returns a ModelLike with instruction "task <index>".
             return ModelLike(index, f"task {index}")
 
     f = harness.HarborSessionFactory(
@@ -384,10 +480,16 @@ def test_explicit_indices_normalise_like_the_range_path():
 
 
 def test_out_of_range_indices_are_rejected_loudly():
+    # [FUNCTION DOC]
+    # An index beyond num_tasks makes tasks() raise IndexError ("out of range").
     """Silently dropping them would train on fewer tasks than asked for, invisibly."""
 
     class ModelEnv(FakeEnv):
+        # [CLASS DOC]
+        # HELPER: FakeEnv reporting 5 tasks.
         def num_tasks(self, split=""):
+            # [FUNCTION DOC]
+            # HELPER: Returns 5.
             return 5
 
     f = harness.HarborSessionFactory(
@@ -399,6 +501,9 @@ def test_out_of_range_indices_are_rejected_loudly():
 
 
 def test_each_session_gets_its_own_client():
+    # [FUNCTION DOC]
+    # Temporarily replaces harness.HarborEnv with a recording subclass; two sessions construct two
+    # distinct owned clients, neither the factory's metadata client. Restores the class afterwards.
     """Sharing one client across concurrent rollouts fails every rollout of every step.
 
     The MCP transport sends and then receives on one socket with no request-id correlation, so two
@@ -415,9 +520,13 @@ def test_each_session_gets_its_own_client():
     built = []
 
     class Recording(harness.HarborEnv):
+        # [CLASS DOC]
+        # HELPER: HarborEnv subclass that records base URLs without connecting.
         def __init__(
             self, base_url, **kw
         ):  # no super().__init__: nothing here connects
+            # [FUNCTION DOC]
+            # HELPER: Appends base_url to the built list; does not call super.
             built.append(base_url)
 
     original = harness.HarborEnv
@@ -435,11 +544,17 @@ def test_each_session_gets_its_own_client():
 
 
 def test_a_session_closes_the_client_it_owns():
+    # [FUNCTION DOC]
+    # An owning session's close calls the client's close and clears its reference.
     """Left open, each rollout holds an env session until `max_concurrent_envs` is exhausted."""
     closed = []
 
     class Closable:
+        # [CLASS DOC]
+        # HELPER: Client stub recording close calls.
         def close(self):
+            # [FUNCTION DOC]
+            # HELPER: Appends True to the closed list.
             closed.append(True)
 
     session = harness.HarborSession(
@@ -459,11 +574,17 @@ def test_a_session_closes_the_client_it_owns():
 
 
 def test_a_borrowed_client_is_left_alone():
+    # [FUNCTION DOC]
+    # A non-owning session's close does not close the client.
     """A session handed someone else's client must not close it out from under them."""
     closed = []
 
     class Closable:
+        # [CLASS DOC]
+        # HELPER: Client stub recording close calls.
         def close(self):
+            # [FUNCTION DOC]
+            # HELPER: Appends True to the closed list.
             closed.append(True)
 
     borrowed = Closable()
@@ -483,6 +604,8 @@ def test_a_borrowed_client_is_left_alone():
 
 
 def test_an_empty_indices_list_is_refused_rather_than_meaning_everything():
+    # [FUNCTION DOC]
+    # indices=[] raises ValueError ("no tasks would be selected").
     """A selection that matched nothing must not silently become the whole split.
 
     `indices=[]` arrives from a caller whose filter found no tasks. Treating it as "no selection"
@@ -493,5 +616,7 @@ def test_an_empty_indices_list_is_refused_rather_than_meaning_everything():
 
 
 def test_omitting_indices_still_means_the_whole_split():
+    # [FUNCTION DOC]
+    # Without indices, the factory's private indices attribute is None.
     f = harness.HarborSessionFactory("http://server:8000", split="s")
     assert f._indices is None

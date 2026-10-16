@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# MCP tool-calling client for the QED Math environment. Adds typed convenience wrappers around the
+# get_problem, submit_proof and get_grading_guidelines tools and normalises reset/tool results into
+# ProblemObservation / ProofSubmissionObservation.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,6 +34,9 @@ from .models import ProblemObservation, ProofSubmissionObservation
 
 
 class QEDMathEnv(MCPToolClient):
+    # [CLASS DOC]
+    # MCPToolClient subclass with a longer default message timeout (600 s, since grading can be slow)
+    # and helper methods; each sync method dispatches its async counterpart through the base client.
     """
     Client for the QED Math Environment.
 
@@ -60,6 +67,9 @@ class QEDMathEnv(MCPToolClient):
         provider: Optional[Any] = None,
         mode: Optional[str] = None,
     ):
+        # [FUNCTION DOC]
+        # Passes connection settings (base_url, connect/message timeouts, websocket ping settings,
+        # provider, mode) to MCPToolClient unchanged.
         super().__init__(
             base_url=base_url,
             connect_timeout_s=connect_timeout_s,
@@ -72,6 +82,9 @@ class QEDMathEnv(MCPToolClient):
 
     @staticmethod
     def _as_problem_observation(value: Any) -> ProblemObservation:
+        # [FUNCTION DOC]
+        # HELPER: Returns value as a ProblemObservation: as-is if already one, built from a mapping or from
+        # a model's dumped fields. Raises TypeError for other types (and pydantic errors for bad fields).
         """Normalize tool/reset outputs into a ProblemObservation instance."""
         if isinstance(value, ProblemObservation):
             return value
@@ -85,6 +98,8 @@ class QEDMathEnv(MCPToolClient):
 
     @staticmethod
     def _as_proof_submission_observation(value: Any) -> ProofSubmissionObservation:
+        # [FUNCTION DOC]
+        # HELPER: Same as the problem normaliser but for ProofSubmissionObservation.
         """Normalize tool outputs into a ProofSubmissionObservation instance."""
         if isinstance(value, ProofSubmissionObservation):
             return value
@@ -97,6 +112,9 @@ class QEDMathEnv(MCPToolClient):
         )
 
     def reset(self, problem_id: Optional[str] = None, **kwargs: Any) -> Any:
+        # [FUNCTION DOC]
+        # Resets the remote environment, adding problem_id to the reset kwargs when given. Returns the
+        # dispatched result: a StepResult whose observation is a ProblemObservation.
         """
         Reset the environment, optionally selecting a specific problem.
 
@@ -113,6 +131,9 @@ class QEDMathEnv(MCPToolClient):
         return self._dispatch(lambda: self._reset_async(**kwargs))
 
     async def _reset_async(self, **kwargs: Any) -> StepResult[Observation]:
+        # [FUNCTION DOC]
+        # HELPER: Awaits the base async reset, normalises its observation to ProblemObservation and returns
+        # a new StepResult with the same reward, done and metadata.
         result = await super()._reset_async(**kwargs)
         observation = result.observation if isinstance(result, StepResult) else result
         normalized_observation = self._as_problem_observation(observation)
@@ -124,6 +145,8 @@ class QEDMathEnv(MCPToolClient):
         )
 
     def submit_proof(self, proof: str) -> Any:
+        # [FUNCTION DOC]
+        # Calls the submit_proof tool with the proof text and returns a ProofSubmissionObservation (via dispatch).
         """
         Submit a proof attempt for the current problem.
 
@@ -136,10 +159,14 @@ class QEDMathEnv(MCPToolClient):
         return self._dispatch(lambda: self._submit_proof_async(proof))
 
     async def _submit_proof_async(self, proof: str) -> ProofSubmissionObservation:
+        # [FUNCTION DOC]
+        # HELPER: Async body of submit_proof: calls the tool and normalises the result.
         result = await self.call_tool("submit_proof", proof=proof)
         return self._as_proof_submission_observation(result)
 
     def get_current_problem(self) -> Any:
+        # [FUNCTION DOC]
+        # Calls the get_problem tool and returns a ProblemObservation for the active problem (via dispatch).
         """
         Retrieve the current problem statement without resetting.
 
@@ -149,14 +176,20 @@ class QEDMathEnv(MCPToolClient):
         return self._dispatch(self._get_current_problem_async)
 
     async def _get_current_problem_async(self) -> ProblemObservation:
+        # [FUNCTION DOC]
+        # HELPER: Async body of get_current_problem.
         result = await self.call_tool("get_problem")
         return self._as_problem_observation(result)
 
     def get_problem(self) -> Any:
+        # [FUNCTION DOC]
+        # Alias for get_current_problem.
         """Compatibility alias for get_current_problem()."""
         return self.get_current_problem()
 
     def get_grading_feedback(self) -> Any:
+        # [FUNCTION DOC]
+        # Calls the get_grading_guidelines tool and returns its payload as a plain mapping (via dispatch).
         """
         Retrieve the grading guidelines/rubric for the current problem.
 
@@ -166,6 +199,8 @@ class QEDMathEnv(MCPToolClient):
         return self._dispatch(self._get_grading_feedback_async)
 
     async def _get_grading_feedback_async(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Async body: converts a mapping or model result to a plain mapping. Raises TypeError otherwise.
         result = await self.call_tool("get_grading_guidelines")
         if isinstance(result, Mapping):
             return dict(result)
@@ -176,9 +211,13 @@ class QEDMathEnv(MCPToolClient):
         )
 
     def get_state(self) -> Any:
+        # [FUNCTION DOC]
+        # Returns the result of the base client's state call.
         """Return current environment state (episode_id, step_count)."""
         return self.state()
 
     def get_state_sync(self) -> State:
+        # [FUNCTION DOC]
+        # Returns the result of the base client's state call (same as get_state).
         """Synchronous helper for code paths that do not use async/await."""
         return self.state()

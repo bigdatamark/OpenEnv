@@ -1,3 +1,10 @@
+# [PACKAGE DOC]
+# Package for the TorchTitan-RL (TitanRL) to OpenEnv integration example. Eagerly
+# re-exports the torch-free bridge (OpenEnvBridge, BridgeTurn, DEFAULT_ACT_TOOL,
+# render_observation) and task profiles; the torchtitan-dependent classes
+# (OpenEnvMessageEnv, OpenEnvSample, OpenEnvDataset, OpenEnvReward) are resolved
+# lazily through a module-level attribute hook using a name-to-(submodule, attribute)
+# table, so importing the package does not import torch.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -65,6 +72,9 @@ _LAZY = {
 
 
 def __getattr__(name: str) -> Any:
+    # [FUNCTION DOC]
+    # Module-level attribute hook: for a name in the lazy table, imports the submodule
+    # and returns the attribute. Raises: AttributeError for any other name.
     target = _LAZY.get(name)
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

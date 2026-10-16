@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests that BrowserGymEnvironment runs every gym call on a single dedicated
+# thread regardless of the calling thread (Playwright sync API requirement).
+# Uses a gymnasium stub when gymnasium is not installed.
 """Unit tests for BrowserGym thread affinity."""
 
 from __future__ import annotations
@@ -32,26 +36,40 @@ if _INSERTED_GYMNASIUM_STUB:
 
 
 class _ThreadRecordingGymEnv:
+    # [CLASS DOC]
+    # HELPER: fake gym env appending the current thread id to a shared list on
+    # every reset/step/close.
     """Records the thread of every call, like Playwright's sync API cares about."""
 
     def __init__(self, threads: list[int]) -> None:
+        # [FUNCTION DOC]
+        # Stores the shared thread-id list.
         self.threads = threads
 
     def reset(self, **_kwargs: Any):
+        # [FUNCTION DOC]
+        # Records thread id; returns a fixed obs and empty info.
         self.threads.append(threading.get_ident())
         return {"goal": "goal", "url": "http://example.test"}, {}
 
     def step(self, _action: str):
+        # [FUNCTION DOC]
+        # Records thread id; returns obs, reward 0.0, not terminated/truncated, empty info.
         self.threads.append(threading.get_ident())
         return {"goal": "goal", "url": "http://example.test"}, 0.0, False, False, {}
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Records thread id.
         self.threads.append(threading.get_ident())
 
 
 def test_browsergym_calls_run_on_one_thread_whatever_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # Two environments driven from a 4-worker thread pool (4 episodes) then closed
+    # produce 10 recorded calls all on one thread id.
     """The HTTP API, WebSocket sessions and /web call the env from different threads."""
     threads: list[int] = []
     monkeypatch.setattr(
@@ -66,6 +84,8 @@ def test_browsergym_calls_run_on_one_thread_whatever_the_caller(
     envs = [BrowserGymEnvironment(task_name="click-test") for _ in range(2)]
 
     def episode(env: BrowserGymEnvironment) -> None:
+        # [FUNCTION DOC]
+        # Resets the env and takes one noop step.
         env.reset()
         env.step(BrowserGymAction(action_str="noop()"))
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for openenv.harbor.runner.run_batch lifecycle: the capture server must be stopped when the
+# tunnel forwarder fails to start or stop, and every batch must build CaptureServer with an admin
+# key (fresh random per batch, or explicit argument, or OPENENV_CAPTURE_ADMIN_KEY). All external
+# dependencies are stubbed.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,12 +35,19 @@ runner = pytest.importorskip("openenv.harbor.runner")
 
 
 class FakeCaps:
+    # [CLASS DOC]
+    # HELPER: Stand-in for the startup capabilities object (llm info and sandbox lists).
     llm = {"model": "m", "capture_level": "tokens"}
     available_sandboxes = ("e2b",)
     sandboxes: tuple = ()
 
 
 def wire(monkeypatch, tmp_path, forwarder):
+    # [FUNCTION DOC]
+    # HELPER: Monkeypatches runner.resolve_task_dirs to return [tmp_path], harbor startup.prepare to
+    # return FakeCaps, runner.CaptureServer to a fake that records constructor kwargs and logs "capture"
+    # on stop, and make_forwarder to build the given forwarder class with the stop log.
+    # Returns (stop log list, list of CaptureServer kwargs).
     """Replace startup, the capture server and the dataset with local stubs.
 
     Returns the teardown log and the list of kwargs each `CaptureServer` was built with.
@@ -49,17 +61,25 @@ def wire(monkeypatch, tmp_path, forwarder):
     )
 
     class FakeCapture:
+        # [CLASS DOC]
+        # HELPER: Fake CaptureServer recording kwargs and logging stops.
         registry = None
         inference = None
 
         def __init__(self, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Records kwargs and sets port (default 8100).
             built.append(kwargs)
             self.port = kwargs.get("port", 8100)
 
         def start(self):
+            # [FUNCTION DOC]
+            # HELPER: No-op.
             pass
 
         def stop(self):
+            # [FUNCTION DOC]
+            # HELPER: Appends "capture" to the stop log.
             stopped.append("capture")
 
     monkeypatch.setattr(runner, "CaptureServer", FakeCapture)
@@ -72,28 +92,44 @@ def wire(monkeypatch, tmp_path, forwarder):
 
 
 class Quiet:
+    # [CLASS DOC]
+    # HELPER: Forwarder fake that starts (returning a dummy URL) and stops cleanly.
     """A forwarder that starts and stops without incident."""
 
     name = "gradio"
 
     def __init__(self, _stopped):
+        # [FUNCTION DOC]
+        # HELPER: Ignores the stop log.
         pass
 
     def start(self, _port):
+        # [FUNCTION DOC]
+        # HELPER: Returns "https://tunnel.invalid".
         return "https://tunnel.invalid"
 
     def stop(self):
+        # [FUNCTION DOC]
+        # HELPER: No-op.
         pass
 
 
 def test_a_forwarder_that_cannot_start_releases_the_port(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # A forwarder whose start raises propagates the RuntimeError and the capture server is stopped.
     class Exploding:
+        # [CLASS DOC]
+        # HELPER: Forwarder whose start raises RuntimeError.
         name = "cloudflare"
 
         def __init__(self, _stopped):
+            # [FUNCTION DOC]
+            # HELPER: Ignores the stop log.
             pass
 
         def start(self, _port):
+            # [FUNCTION DOC]
+            # HELPER: Raises RuntimeError("cloudflared is not installed").
             raise RuntimeError("cloudflared is not installed")
 
     stopped, _ = wire(monkeypatch, tmp_path, Exploding)
@@ -109,16 +145,27 @@ def test_a_forwarder_that_cannot_start_releases_the_port(monkeypatch, tmp_path):
 
 
 def test_a_forwarder_that_cannot_stop_still_lets_the_port_go(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # A forwarder whose stop raises still lets capture.stop run afterwards; the error propagates and the
+    # stop log is ["forwarder", "capture"]. run_rollout is replaced with None since no index is in range.
     class BadTeardown:
+        # [CLASS DOC]
+        # HELPER: Forwarder that starts fine but logs and raises on stop.
         name = "gradio"
 
         def __init__(self, stopped):
+            # [FUNCTION DOC]
+            # HELPER: Keeps the stop log.
             self._stopped = stopped
 
         def start(self, _port):
+            # [FUNCTION DOC]
+            # HELPER: Returns a dummy tunnel URL.
             return "https://tunnel.invalid"
 
         def stop(self):
+            # [FUNCTION DOC]
+            # HELPER: Appends "forwarder" then raises RuntimeError("tunnel already gone").
             self._stopped.append("forwarder")
             raise RuntimeError("tunnel already gone")
 
@@ -138,6 +185,9 @@ def test_a_forwarder_that_cannot_stop_still_lets_the_port_go(monkeypatch, tmp_pa
 
 
 def run_empty_batch(**kwargs) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Runs run_batch with an out-of-range task index (99) so only setup/teardown happen; extra
+    # kwargs are forwarded.
     """Drive `run_batch` through capture + forwarder setup with no rollout in range."""
     asyncio.run(
         runner.run_batch(
@@ -147,6 +197,8 @@ def run_empty_batch(**kwargs) -> None:
 
 
 def test_run_batch_always_gates_the_control_plane(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # With no env key, CaptureServer receives a generated admin key of at least 32 characters.
     """The regression: the proxy went out on a public tunnel with `admin_key` unset.
 
     `_admin_ok` returns True for every caller while the key is unset, so `POST /sessions` minted keys
@@ -164,6 +216,8 @@ def test_run_batch_always_gates_the_control_plane(monkeypatch, tmp_path):
 
 
 def test_run_batch_mints_a_fresh_key_per_batch(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Two batches get different generated admin keys.
     monkeypatch.delenv("OPENENV_CAPTURE_ADMIN_KEY", raising=False)
     _, built = wire(monkeypatch, tmp_path, Quiet)
 
@@ -175,6 +229,8 @@ def test_run_batch_mints_a_fresh_key_per_batch(monkeypatch, tmp_path):
 
 
 def test_run_batch_forwards_an_explicit_admin_key(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # An explicit admin_key argument wins over the environment variable.
     monkeypatch.setenv("OPENENV_CAPTURE_ADMIN_KEY", "from-env")
     _, built = wire(monkeypatch, tmp_path, Quiet)
 
@@ -184,6 +240,8 @@ def test_run_batch_forwards_an_explicit_admin_key(monkeypatch, tmp_path):
 
 
 def test_run_batch_honours_the_admin_key_env_var(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Without an argument, OPENENV_CAPTURE_ADMIN_KEY is used.
     """Same variable `HarborService` reads, so one setting covers `serve` and `rollout`."""
     monkeypatch.setenv("OPENENV_CAPTURE_ADMIN_KEY", "from-env")
     _, built = wire(monkeypatch, tmp_path, Quiet)

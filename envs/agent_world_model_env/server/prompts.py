@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Holds DEFAULT_SYSTEM_PROMPT, the default system prompt string for agents interacting with AWM: it describes the
+# list_tools and call_tool functions, the <tool_call> JSON format, and instructs the agent to answer directly
+# without tool tags when done.
 DEFAULT_SYSTEM_PROMPT = """\
 You are at a MCP environment. You need to call MCP tools to assist with the user query. \
 At each step, you can only call one function. You have already logged in, and your user id is 1 if required.

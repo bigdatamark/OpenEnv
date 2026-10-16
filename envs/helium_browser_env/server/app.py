@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI entry point for the browser environment: builds the app via create_app
+# with the environment class as factory and at most one concurrent session.
 """FastAPI application for the Helium browser environment."""
 
 import os
@@ -18,6 +21,10 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn on port SBX_SERVICE_PORT (default 8000). If SBX_PROXY_DIR is set,
+    # creates that directory, removes any stale "<port>.sock" there and serves on
+    # that Unix domain socket; otherwise serves TCP on 0.0.0.0. Blocking.
     """Run the server over TCP or the Unix socket requested by HF Sandbox."""
     import uvicorn
 

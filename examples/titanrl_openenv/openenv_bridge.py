@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Framework-agnostic bridge (depends only on openenv, not torchtitan) that drives any
+# OpenEnv server through GenericEnvClient (or an injected client) and translates
+# between OpenEnv observations/actions and chat-message primitives. Defines the default
+# "openenv_act" tool schema used in tool mode and the ordered tuple of observation keys
+# tried when rendering observations to text.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -78,6 +84,9 @@ DEFAULT_OBSERVATION_KEYS: tuple[str, ...] = (
 
 @dataclass
 class BridgeTurn:
+    # [CLASS DOC]
+    # Dataclass for one translated env turn: rendered text, done flag, optional float reward
+    # and the raw observation.
     """One environment turn, translated out of OpenEnv into message primitives.
 
     Attributes:
@@ -96,6 +105,8 @@ class BridgeTurn:
     raw_observation: Any = field(default=None)
 
     def as_message(self, role: str) -> dict[str, str]:
+        # [FUNCTION DOC]
+        # Returns a chat message dict with the given role and the turn text as content.
         """Return this turn as a chat message ``{"role": role, "content": text}``."""
         return {"role": role, "content": self.text}
 
@@ -105,6 +116,11 @@ def render_observation(
     *,
     observation_keys: Sequence[str] = DEFAULT_OBSERVATION_KEYS,
 ) -> str:
+    # [FUNCTION DOC]
+    # Renders an observation to text. None gives an empty string; a string is returned as
+    # is; for a dict, the first non-empty string value among observation_keys, then among
+    # metadata keys message/text/status/output, else a sorted-key JSON dump (non-JSON
+    # values stringified) without reward/done. Other types use str().
     """Best-effort rendering of an OpenEnv observation into a text string.
 
     Prefers the first non-empty string among ``observation_keys``, then a message
@@ -132,6 +148,11 @@ def render_observation(
 
 
 def normalize_tool_call(tool_call: Any) -> tuple[str, dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Normalizes a tool call to a (name, arguments dict) tuple. Accepts objects with
+    # name/arguments attributes, OpenAI-style dicts with a nested function dict, or flat
+    # dicts. JSON-string arguments are decoded; undecodable or non-dict arguments become an
+    # empty dict; a non-string name becomes the empty string. Never raises.
     """Normalize a tool call into ``(name, arguments_dict)``.
 
     Accepts several shapes so the bridge stays decoupled from any particular
@@ -171,6 +192,11 @@ def normalize_tool_call(tool_call: Any) -> tuple[str, dict[str, Any]]:
 
 
 class OpenEnvBridge:
+    # [CLASS DOC]
+    # Stateful driver around one OpenEnv client: lazily creates the client (explicit
+    # client, then factory, then GenericEnvClient from base_url), resets/steps it
+    # asynchronously and returns BridgeTurn results. In "tool" mode actions come from tool
+    # call arguments; in "text" mode assistant text is placed under action_key.
     """Drive an OpenEnv environment and translate its turns to/from message space.
 
     Args:
@@ -208,6 +234,9 @@ class OpenEnvBridge:
         observation_keys: Sequence[str] = DEFAULT_OBSERVATION_KEYS,
         observation_renderer: Optional[Callable[[Any], str]] = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Validates and stores configuration. action_mode is lowercased.
+        # Raises: ValueError if action_mode is not "tool" or "text". No network I/O.
         action_mode = action_mode.lower()
         if action_mode not in ("tool", "text"):
             raise ValueError(
@@ -228,6 +257,9 @@ class OpenEnvBridge:
     # -- lifecycle -----------------------------------------------------------
 
     def _ensure_client(self) -> EnvClient:
+        # [FUNCTION DOC]
+        # HELPER: returns the client, creating and caching it on first use (factory if given,
+        # else GenericEnvClient for base_url).
         if self._client is None:
             if self._client_factory is not None:
                 self._client = self._client_factory()
@@ -236,6 +268,9 @@ class OpenEnvBridge:
         return self._client
 
     async def start(self, **reset_kwargs: Any) -> BridgeTurn:
+        # [FUNCTION DOC]
+        # Ensures a client, awaits reset with the given kwargs, marks started and returns the
+        # translated first turn. Side effects: network I/O.
         """Connect (if needed) and reset the environment; return the first turn."""
         client = self._ensure_client()
         result = await client.reset(**reset_kwargs)
@@ -243,6 +278,9 @@ class OpenEnvBridge:
         return self._to_turn(result)
 
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the client if one exists and marks not started (even if close raises; the
+        # exception propagates). The client reference is kept.
         """Close the underlying client and release its resources. Idempotent."""
         if self._client is not None:
             try:
@@ -253,16 +291,22 @@ class OpenEnvBridge:
     # -- stepping ------------------------------------------------------------
 
     async def act(self, action: dict[str, Any]) -> BridgeTurn:
+        # [FUNCTION DOC]
+        # Ensures a client, awaits step with the raw action dict and returns the translated turn.
         """Send a raw OpenEnv action dict and return the resulting turn."""
         client = self._ensure_client()
         result = await client.step(action)
         return self._to_turn(result)
 
     async def act_from_text(self, text: str) -> BridgeTurn:
+        # [FUNCTION DOC]
+        # Steps with a dict mapping action_key to the given text.
         """Wrap assistant text into an action (``text`` mode) and step."""
         return await self.act({self.action_key: text})
 
     async def act_from_tool_calls(self, tool_calls: Sequence[Any]) -> BridgeTurn:
+        # [FUNCTION DOC]
+        # Converts tool calls to an action (only the first call is used) and steps.
         """Convert the first tool call into an OpenEnv action and step.
 
         A single OpenEnv step consumes one action, so only the first tool call is
@@ -275,6 +319,10 @@ class OpenEnvBridge:
     # -- translation helpers -------------------------------------------------
 
     def action_from_tool_calls(self, tool_calls: Sequence[Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns an empty dict if there are no tool calls; otherwise normalizes the first
+        # call and returns a copy of arguments[tool_action_key] if that is a dict, else the
+        # whole arguments dict. The tool name is ignored.
         """Translate parsed tool calls into a single OpenEnv action dict."""
         if not tool_calls:
             return {}
@@ -286,12 +334,20 @@ class OpenEnvBridge:
         return arguments
 
     def render(self, observation: Any) -> str:
+        # [FUNCTION DOC]
+        # Renders an observation with the custom observation_renderer if set, else with the
+        # module-level renderer using this bridge's observation keys.
         """Render an observation to text using this bridge's renderer."""
         if self.observation_renderer is not None:
             return self.observation_renderer(observation)
         return render_observation(observation, observation_keys=self.observation_keys)
 
     def _to_turn(self, result: StepResult) -> BridgeTurn:
+        # [FUNCTION DOC]
+        # HELPER: converts a StepResult to a BridgeTurn. Reward and done come from the result,
+        # falling back to (or OR-ing with) reward/done in a dict observation; reward is cast to
+        # float when present. The renderer receives the observation with reward and done
+        # re-added; raw_observation is the untouched observation.
         observation = result.observation
         reward = result.reward
         done = bool(result.done)

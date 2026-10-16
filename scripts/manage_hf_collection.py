@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Maintenance script managing OpenEnv Hugging Face Hub collections: a per-release
+# "versioned" collection of deployed Spaces and a global collection of canonical (or all
+# tagged) OpenEnv Spaces. Adds missing Spaces, optionally removes stale ones (--reconcile),
+# creates collections and syncs their metadata/visibility, with a --dry-run mode. Configures
+# root logging at import and computes DEFAULT_VERSION from the repo pyproject.toml.
 """
 Hugging Face Collection Manager for OpenEnv.
 
@@ -57,6 +63,9 @@ logger = logging.getLogger(__name__)
 
 
 def load_default_version() -> str:
+    # [FUNCTION DOC]
+    # Reads project.version from the repo's pyproject.toml (via tomllib). Returns the trimmed
+    # version, or the fallback "0.2.0" if the file is missing, unparsable or has no version.
     """Load default version from repository pyproject.toml."""
     pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     if not pyproject_path.exists():
@@ -78,6 +87,9 @@ DEFAULT_VERSION = load_default_version()
 
 
 def setup_api() -> HfApi:
+    # [FUNCTION DOC]
+    # Creates an HfApi client (using HF_TOKEN if set) and verifies auth with whoami.
+    # Returns: the HfApi. Side effects: network; calls sys.exit(1) on authentication failure.
     """Initialize and authenticate the Hugging Face API client."""
     hf_token = os.environ.get("HF_TOKEN")
     logger.info("Authenticating with Hugging Face...")
@@ -95,23 +107,33 @@ def setup_api() -> HfApi:
 
 
 def normalize_version(version: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: strips whitespace and a leading "v" from a version string.
     """Normalize version text for display."""
     normalized = version.strip()
     return normalized[1:] if normalized.startswith("v") else normalized
 
 
 def build_versioned_collection_title(prefix: str, version: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns "<prefix> <normalized version>".
     """Build predictable versioned collection title."""
     return f"{prefix} {normalize_version(version)}"
 
 
 def synthetic_slug(namespace: str, title: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns "<namespace>/dry-run-<slugified title>" (lowercase, non-alphanumerics
+    # collapsed to hyphens); used only for dry-run output.
     """Build synthetic slug used only for dry-run output."""
     slug_base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     return f"{namespace}/dry-run-{slug_base}"
 
 
 def find_collection_by_title(api: HfApi, namespace: str, title: str):
+    # [FUNCTION DOC]
+    # Lists collections owned by namespace and returns the first whose title equals title, or
+    # None (also None on listing errors or a non-iterable response, which are logged).
     """Find collection object by exact title within a namespace."""
     try:
         collections = api.list_collections(owner=namespace)
@@ -142,6 +164,10 @@ def ensure_collection_metadata(
     private: bool,
     dry_run: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Updates a collection's title, description and visibility. In dry run only logs. On
+    # TypeError (older hub client) retries with visibility only. All failures are logged as
+    # warnings, never raised.
     """Ensure collection metadata matches the desired state."""
     state = "private" if private else "public"
     if dry_run:
@@ -172,6 +198,9 @@ def ensure_collection_metadata(
 
 
 def resolve_explicit_collection_slug(api: HfApi, explicit_slug: str) -> str:
+    # [FUNCTION DOC]
+    # Fetches the collection for an explicit slug and returns its canonical slug (or the input
+    # slug if lookup fails or the collection has no slug).
     """Resolve a user-facing collection slug alias to the canonical Hub slug."""
     try:
         collection = api.get_collection(explicit_slug)
@@ -196,6 +225,11 @@ def resolve_collection_slug(
     private: bool,
     dry_run: bool,
 ) -> str:
+    # [FUNCTION DOC]
+    # Returns a collection slug: with explicit_slug, resolves it and syncs metadata; else
+    # reuses an existing collection with that title (syncing metadata); else in dry run returns
+    # a synthetic slug; else creates the collection (retrying without private on TypeError,
+    # then syncing metadata). Side effects: network, may create collections.
     """Resolve, create, and/or enforce visibility for a collection."""
     if explicit_slug:
         resolved_slug = resolve_explicit_collection_slug(api, explicit_slug)
@@ -258,6 +292,9 @@ def resolve_collection_slug(
 
 
 def get_collection_items(api: HfApi, collection_slug: str = DEFAULT_COLLECTION_SLUG):
+    # [FUNCTION DOC]
+    # Fetches the collection and returns its Space items.
+    # Side effects: network; calls sys.exit(1) on HTTP or other errors (logging 404 specially).
     """Retrieve collection items currently present for Spaces."""
     logger.info(f"Fetching current collection contents: {collection_slug}")
 
@@ -280,6 +317,8 @@ def get_collection_items(api: HfApi, collection_slug: str = DEFAULT_COLLECTION_S
 def get_collection_spaces(
     api: HfApi, collection_slug: str = DEFAULT_COLLECTION_SLUG
 ) -> Set[str]:
+    # [FUNCTION DOC]
+    # Returns the set of Space ids currently in the collection (via get_collection_items).
     """Retrieve space IDs currently in collection."""
     return {
         item.item_id for item in get_collection_items(api, collection_slug=collection_slug)
@@ -289,6 +328,11 @@ def get_collection_spaces(
 def discover_openenv_spaces(
     api: HfApi, tag_filter: str = DEFAULT_TAG_FILTER
 ) -> List[str]:
+    # [FUNCTION DOC]
+    # Searches Hub Spaces for tag_filter (sorted by trending), then inspects each and keeps
+    # Docker-SDK Spaces whose tags include the filter and are not in RUNTIME_ERROR.
+    # Returns: de-duplicated list of Space ids. sys.exit(1) if the search fails; per-Space
+    # inspection errors are logged and skipped.
     """Discover Docker spaces that include the requested tag."""
     logger.info(f"Searching for Docker Spaces with tag '{tag_filter}'...")
 
@@ -327,6 +371,9 @@ def discover_openenv_spaces(
 
 
 def is_version_suffixed_space(space_id: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the Space name (after the owner) ends with a version suffix like
+    # -1.2.3 or -v1-2-3.
     """Detect whether a space name ends with a version suffix."""
     name = space_id.split("/", 1)[-1]
     return bool(VERSION_SUFFIX_PATTERN.search(name))
@@ -335,6 +382,10 @@ def is_version_suffixed_space(space_id: str) -> bool:
 def discover_canonical_openenv_spaces(
     api: HfApi, namespace: str, tag_filter: str
 ) -> List[str]:
+    # [FUNCTION DOC]
+    # Lists up to 1000 Spaces authored by namespace, skips version-suffixed ones and keeps
+    # those whose tags include tag_filter. Returns: de-duplicated id list. sys.exit(1) if
+    # listing fails; per-Space errors are logged.
     """Discover canonical OpenEnv spaces owned by a namespace."""
     logger.info(
         f"Discovering canonical spaces for namespace '{namespace}' tagged '{tag_filter}'..."
@@ -378,6 +429,9 @@ def discover_global_target_spaces(
     tag_filter: str,
     scope: str,
 ) -> List[str]:
+    # [FUNCTION DOC]
+    # Dispatches discovery: canonical scope uses namespace-owned canonical discovery; any
+    # other scope uses tag-based discovery across the Hub.
     """Resolve global collection targets for the requested discovery scope."""
     if scope == "canonical":
         return discover_canonical_openenv_spaces(api, namespace, tag_filter)
@@ -385,6 +439,8 @@ def discover_global_target_spaces(
 
 
 def dedupe_preserve_order(values: Iterable[str]) -> List[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the values de-duplicated in first-seen order.
     """Deduplicate while preserving insertion order."""
     seen = set()
     result = []
@@ -403,6 +459,10 @@ def add_spaces_to_collection(
     dry_run: bool = False,
     note: Optional[str] = None,
 ) -> int:
+    # [FUNCTION DOC]
+    # Adds each Space to the collection with a note (default "OpenEnv release <version>"),
+    # treating 409 as already-present. In dry run only logs.
+    # Returns: number added (or would-add); failures are logged, not raised.
     """Add spaces to collection, returning count of added/would-add."""
     if not space_ids:
         logger.info("No new spaces to add")
@@ -451,6 +511,9 @@ def remove_spaces_from_collection(
     target_space_ids: List[str],
     dry_run: bool = False,
 ) -> int:
+    # [FUNCTION DOC]
+    # Deletes collection items whose ids are not in the target set (or logs in dry run).
+    # Returns: number removed (or would-remove); failures are logged.
     """Remove spaces that are not part of the target set."""
     target_ids = set(target_space_ids)
     items_to_remove = [item for item in current_items if item.item_id not in target_ids]
@@ -485,16 +548,30 @@ def remove_spaces_from_collection(
 
 
 def should_skip_fetch(collection_slug: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the slug is a dry-run synthetic slug (contains "/dry-run-").
     """Skip fetch for dry-run synthetic slugs."""
     return "/dry-run-" in collection_slug
 
 
 def should_use_dual_mode(argv: List[str]) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if any dual-mode flag appears verbatim in argv.
+    # KNOWN ISSUE: flags passed in "--flag=value" form (e.g. --global-scope=tagged) are not
+    # detected, so dual mode is not enabled for them.
     """Enable dual-collection behavior only when dual-mode flags are explicitly passed."""
     return any(flag in argv for flag in DUAL_MODE_FLAGS)
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point. Parses options; exits 1 if both flows are skipped. Authenticates.
+    # Without dual-mode flags: single-collection flow that resolves the versioned collection,
+    # targets explicit --space-id values or discovered Spaces, adds missing ones and (with
+    # --reconcile) removes stale ones. With dual-mode flags: discovers Spaces when needed, then
+    # independently updates the versioned collection (explicit or discovered targets) and the
+    # global collection (discovered targets, scope-specific description/note), each with
+    # summary logs, adds and optional reconcile. Side effects: Hub API writes unless dry run.
     parser = argparse.ArgumentParser(
         description="Manage OpenEnv Hugging Face collections",
         formatter_class=argparse.RawDescriptionHelpFormatter,

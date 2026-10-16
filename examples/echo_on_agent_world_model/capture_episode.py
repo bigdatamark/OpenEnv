@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Script that captures a real AWM episode for the offline ECHO demo: runs a scripted correct solution of the
+# e_commerce_33 task (search, choose product under budget, cheapest active offer, add to cart, list cart, verify) against
+# a live server, recording every action and observation, and writes it as JSON under fixtures/.
 """Capture a *real* AWM episode and write it to ``fixtures/`` for the offline demo.
 
 This is how ``fixtures/awm_ecommerce_episode.json`` was produced: it runs a short,
@@ -24,6 +28,8 @@ HERE = pathlib.Path(__file__).parent
 
 
 def _as_obj(tool_result):
+    # [FUNCTION DOC]
+    # HELPER: Parses a JSON string into an object when possible; returns non-strings or unparseable strings unchanged.
     """AWM tool_result is often a JSON string; parse it when possible."""
     if isinstance(tool_result, str):
         try:
@@ -36,12 +42,21 @@ def _as_obj(tool_result):
 async def capture(
     base_url: str, scenario: str, task_idx: int, max_price: float
 ) -> dict:
+    # [FUNCTION DOC]
+    # Runs the scripted episode: resets, lists tools, searches products sorted by rating, picks the first product whose
+    # lowest active offer price is below max_price (falling back to the first product), lists its offers and picks the
+    # cheapest active one, creates/gets the cart, adds the offer, lists cart items, runs the code verifier, then calls done.
+    # Returns: an episode dict with scenario, task, task_idx, tools, recorded steps and the verify reward (0.0 if None).
+    # Side effects: network I/O.
     from agent_world_model_env import AWMEnv  # lazy
     from openenv.core.env_server.mcp_types import CallToolAction  # lazy
 
     steps: list[dict] = []
 
     async def call(env, tool_name: str, **arguments):
+        # [FUNCTION DOC]
+        # HELPER: Steps a CallToolAction with the keyword arguments, appends the action and observation dump to the step list
+        # (mutating it), and returns a tuple of (observation dict, reward or None).
         result = await env.step(
             CallToolAction(tool_name=tool_name, arguments=arguments)
         )
@@ -111,6 +126,9 @@ async def capture(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry: parses base url, scenario, task index, max price and output path; captures the episode; writes it as
+    # indented JSON (creating directories) and prints step count, task and reward.
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--base-url", default="http://localhost:8899")
     ap.add_argument("--scenario", default="e_commerce_33")

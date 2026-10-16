@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic data models for the maze environment: the action (an integer direction index),
+# the observation (legal actions plus current and previous agent positions) and the state
+# (position, exit cell, game status).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -17,12 +21,19 @@ from pydantic import Field
 
 
 class MazeAction(Action):
+    # [CLASS DOC]
+    # Agent action: a single integer field "action" selecting a move (0 up, 1 down, 2 left, 3 right).
     """Action for the Maze environment."""
 
     action: int
 
 
 class MazeObservation(Observation):
+    # [CLASS DOC]
+    # Observation returned after reset/step: legal_actions (list of allowed action indices),
+    # current_position and previous_position (each a two-element [col, row] list). Inherits done,
+    # reward and metadata from Observation.
+    # KNOWN ISSUE: the docstring lists maze, position and total_reward attributes that do not exist on this model.
     """
     Observation from the Maze environment.
 
@@ -39,6 +50,9 @@ class MazeObservation(Observation):
 
 
 class MazeState(State):
+    # [CLASS DOC]
+    # Server-side episode state: episode_id, step_count (required), done, current_position, exit_cell
+    # and status (free text such as "playing", "win", "lose").
     """State for Maze environment."""
 
     episode_id: Optional[str] = None

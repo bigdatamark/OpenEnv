@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Jupyter environment package: an MCP-tool environment where agents run Python
+# cells and shell commands in a remote E2B sandbox notebook. Re-exports the
+# client (JupyterEnv), state models, and the core MCP action types.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

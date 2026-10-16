@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# FreeBusy API package; re-exports its FastAPI router.
 """
 FreeBusy API module
 """

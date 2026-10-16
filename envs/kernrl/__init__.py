@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# kernrl package: a GPU kernel optimization environment where agents submit
+# CUDA/Triton kernel code for a reference PyTorch problem and get compile,
+# correctness and speedup feedback. Re-exports the client (kernrl_env) and the
+# action/observation/state models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

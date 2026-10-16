@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Fake Claude Code CLI used by the Claude Code harness example tests: reads stream-json
+# user messages on stdin and emits Claude-style JSON-line events on stdout, calling the
+# environment's real MCP tool over HTTP. Records its argv to $FAKE_CLAUDE_ARGV.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """A stand-in for `claude -p --input-format/--output-format stream-json`.
@@ -27,10 +31,18 @@ from fastmcp import Client
 
 
 def emit(payload: dict) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Prints the payload as one JSON line to stdout, flushed.
     print(json.dumps(payload), flush=True)
 
 
 async def run_turn(message: str, url: str) -> None:
+    # [FUNCTION DOC]
+    # Emits a system init event, then: "crash" in message exits with code 3; "stall" sleeps
+    # 60 s; "api error" emits an error result and returns. Otherwise emits an assistant
+    # tool_use for mcp__env__get_user_details (fixed user id), calls that tool via a fastmcp
+    # client at url, emits the tool_result, an assistant text reply and a success result.
+    # Side effects: stdout, network, may terminate the process.
     emit({"type": "system", "subtype": "init", "tools": []})
     if "crash" in message:
         sys.exit(3)
@@ -84,6 +96,10 @@ async def run_turn(message: str, url: str) -> None:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Writes argv as JSON to the $FAKE_CLAUDE_ARGV file, reads the MCP server url from the
+    # --mcp-config JSON argument (mcpServers.env.url), then runs one turn per JSON line on
+    # stdin. Raises KeyError/ValueError if the env var or flag is missing.
     argv = sys.argv[1:]
     with open(os.environ["FAKE_CLAUDE_ARGV"], "w") as f:
         json.dump(argv, f)

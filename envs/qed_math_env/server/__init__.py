@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for QED Math; re-exports QEDMathEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

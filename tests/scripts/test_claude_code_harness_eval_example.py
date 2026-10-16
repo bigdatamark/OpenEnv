@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Offline end-to-end tests of the Claude Code harness example with a real tau2-bench
+# airline task: fake_claude_code.py plays the CLI and litellm mock responses script the
+# simulated customer. Skipped without tau2. Adds src/, envs/ and the example dir to sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Offline tests for the Claude Code harness evaluation example (RFC 005).
@@ -39,10 +43,16 @@ FAKE_CLAUDE = Path(__file__).parent / "fake_claude_code.py"
 
 @pytest.fixture
 def customer(monkeypatch):
+    # [FUNCTION DOC]
+    # Fixture: patches tau2's llm completion so each customer turn pops the next string from
+    # a list (via litellm mock_response) and sets HF_TOKEN. Returns: the mutable reply list
+    # that tests extend. Popping an empty list raises IndexError.
     """Make the simulated customer say each of `replies` in turn."""
     replies: list[str] = []
 
     def completion(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Replacement completion returning the next scripted reply for the given messages.
         return litellm.completion(
             model="openai/scripted",
             messages=kwargs["messages"],
@@ -55,6 +65,10 @@ def customer(monkeypatch):
 
 
 def start(tmp_path: Path, session_timeout_s: float = 30.0):
+    # [FUNCTION DOC]
+    # HELPER: Builds a Tau2Environment (airline, test split) and a Tau2Harness on task "2"
+    # whose command runs fake_claude_code.py in tmp_path, recording argv to argv.json.
+    # Returns: (tau2 env, harness).
     tau2 = Tau2Environment(domain="airline", split="test")
     config = HarnessConfig(
         name="claude-code",
@@ -68,6 +82,10 @@ def start(tmp_path: Path, session_timeout_s: float = 30.0):
 
 
 def test_conversation_runs_through_the_adapter(tmp_path, customer):
+    # [FUNCTION DOC]
+    # Full turn: only domain tools are injected, the fake CLI's get_user_details call and
+    # result appear in turn events, the customer stops the conversation, reward is 1.0 with
+    # DB/COMMUNICATE basis, and the CLI received the expected restrictive flags.
     customer += [
         "Hi, my user id is noah_muller_9847.",
         "That's all, thanks. ###STOP###",
@@ -108,6 +126,8 @@ def test_conversation_runs_through_the_adapter(tmp_path, customer):
 
 
 def test_each_reset_starts_the_task_again(tmp_path, customer):
+    # [FUNCTION DOC]
+    # A reset after a finished conversation starts a fresh, not-done tau2 conversation.
     customer += [
         "Hi, my user id is noah_muller_9847.",
         "That's all, thanks. ###STOP###",
@@ -127,6 +147,9 @@ def test_each_reset_starts_the_task_again(tmp_path, customer):
 
 
 def test_production_mode_talks_to_claude_code(tmp_path, customer):
+    # [FUNCTION DOC]
+    # Over WS /harness in production mode, a user message yields a turn_complete whose
+    # response comes from the tool call, and the customer is used only for the opening.
     """`WS /harness`, as `serve.py` serves it: a person is the customer, nothing is scored."""
     customer += ["Hi, my user id is noah_muller_9847."]  # tau2's reset() opens with it
     app = create_fastapi_app(
@@ -143,6 +166,9 @@ def test_production_mode_talks_to_claude_code(tmp_path, customer):
 
 
 def test_an_api_error_ends_the_turn_as_a_harness_failure(tmp_path, customer):
+    # [FUNCTION DOC]
+    # An API error result from the CLI ends the turn as harness_crashed (ECONNRESET) without
+    # finishing the tau2 conversation.
     customer += ["api error"]
     tau2, harness = start(tmp_path)
     try:
@@ -159,12 +185,17 @@ def test_an_api_error_ends_the_turn_as_a_harness_failure(tmp_path, customer):
 def test_a_failed_customer_ends_the_conversation_as_an_error(
     tmp_path, customer, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # When tau2.act raises for non-JSON (customer) replies, the turn ends with error_type
+    # customer_failed.
     customer += ["Hi, my user id is noah_muller_9847."]
     tau2, harness = start(tmp_path)
 
     act = tau2.act
 
     def customer_fails(action):  # tool calls are JSON, replies to the customer are not
+        # [FUNCTION DOC]
+        # HELPER: Passes JSON tool calls to the real act; raises RuntimeError for customer replies.
         if action.startswith("{"):
             return act(action)
         raise RuntimeError("The simulated user failed")
@@ -182,6 +213,9 @@ def test_a_failed_customer_ends_the_conversation_as_an_error(
 
 
 def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
+    # [FUNCTION DOC]
+    # CLI exiting mid-turn yields harness_crashed "exited mid-turn"; after close, the
+    # tau2 conversation thread ends (polls thread count up to 5 s).
     customer += ["crash"]
     tau2, harness = start(tmp_path)
     try:
@@ -203,6 +237,8 @@ def test_claude_code_exiting_mid_turn_ends_the_conversation(tmp_path, customer):
 
 
 def test_claude_code_going_quiet_is_a_timeout(tmp_path, customer):
+    # [FUNCTION DOC]
+    # A stalled CLI with a 1 s session timeout ends the turn with error_type turn_timeout.
     customer += ["Hi, my user id is noah_muller_9847."]
     _, harness = start(tmp_path, session_timeout_s=1.0)
     try:

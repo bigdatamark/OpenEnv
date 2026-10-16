@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Environment validation package (RFC 008): signature detection, manifest parsers that
+# produce one NormalizedManifest, a grader protocol/registry, validation providers
+# (e.g. Docker), report schema, versioned severity policy and the local runner behind
+# `openenv validate`. Re-exports the public API; graders depend only on the manifest.
 """RFC 008 environment validation: contracts and the local `openenv validate` pipeline.
 
 Ships signature detection, parsers, one normalized manifest, a grader registry,

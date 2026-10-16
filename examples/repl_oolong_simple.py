@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: answers one Oolong benchmark question (oolongbench/oolong-real,
+# subset toy_dnd) with the REPL environment's LocalRLMRunner, i.e. a recursive LLM
+# loop where the model writes code over the long context and may call sub-LLMs.
+# Uses HF InferenceClient with a Qwen3-Coder model; HF_TOKEN read from env.
 """
 Simple REPL + Oolong example with recursive LLM calls (RLM paradigm).
 
@@ -30,10 +35,18 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 
 def create_chat_fn():
+    # [FUNCTION DOC]
+    # Builds the chat callable used by the RLM runner for both outer and inner calls.
+    # Returns: a function chat_fn(messages, model=None) -> str.
+    # Side effects: creates an InferenceClient (300 s timeout).
     """Create the chat function with Qwen3-Coder recommended params."""
     client = InferenceClient(model=MODEL_NAME, token=HF_TOKEN, timeout=300)
 
     def chat_fn(messages: list[dict], model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Sends the messages to the HF chat completions API with fixed Qwen3-Coder sampling
+        # params (max_tokens 1024, temperature 0.7, top_p 0.8, top_k 20, repetition penalty
+        # 1.05) using model or MODEL_NAME; returns the first choice's message content.
         response = client.chat.completions.create(
             model=model or MODEL_NAME,
             messages=messages,
@@ -52,6 +65,11 @@ def create_chat_fn():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Entry point: downloads the dataset example, runs LocalRLMRunner (max depth 2,
+    # MAX_ITERATIONS) over context and question, prints the result and iteration count,
+    # and prints CORRECT if the answer matches the expected one case-insensitively after
+    # trimming, else INCORRECT. Side effects: network (dataset, inference), stdout.
     print("=" * 60)
     print("REPL + Oolong with Recursive LLM Calls (RLM)")
     print("=" * 60)

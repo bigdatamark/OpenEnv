@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pytest suite for the TitanRL recipes and reward functions; skipped unless torchtitan.rl
+# is importable. Puts examples/ on sys.path so the example imports as the
+# titanrl_openenv package, then builds configs on CPU through torchtitan's ConfigManager
+# and checks settings whose absence fails silently or late in a GPU run.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -63,12 +68,19 @@ RECIPES = [
 
 
 def _load(name: str) -> Controller.Config:
+    # [FUNCTION DOC]
+    # HELPER: loads a recipe by name through ConfigManager CLI parsing with the
+    # titanrl_openenv module. Returns: Controller.Config.
     # The same path ``python -m torchtitan.rl.train --module ... --config ...``
     # takes, CLI parsing included.
     return ConfigManager().parse_args(["--module", "titanrl_openenv", "--config", name])
 
 
 def _serve_chess_default_max_sessions() -> int:
+    # [FUNCTION DOC]
+    # HELPER: parses serve_chess.py's source (without importing it) and returns the default
+    # literal of DEFAULT_MAX_SESSIONS from its env-var lookup. Raises: AssertionError if
+    # the assignment is not found. Side effects: reads the file.
     # Read from source rather than imported: ``serve_chess`` imports the chess
     # environment at module level, and the training venv needs no chess packages.
     path = os.path.join(_PKG_DIR, "serve_chess.py")
@@ -86,6 +98,8 @@ def _serve_chess_default_max_sessions() -> int:
 
 
 def test_registry_exposes_only_the_recipes():
+    # [FUNCTION DOC]
+    # Checks that the module's public callables starting with "rl_" are exactly the recipes.
     public = sorted(
         name
         for name in vars(config_registry)
@@ -96,12 +110,16 @@ def test_registry_exposes_only_the_recipes():
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_recipe_loads_through_config_manager(name):
+    # [FUNCTION DOC]
+    # Checks that every recipe loads through ConfigManager into a Controller.Config.
     config = _load(name)
     assert isinstance(config, Controller.Config)
 
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_recipe_loads_pretrained_weights(name):
+    # [FUNCTION DOC]
+    # Checks that every recipe has a trainer checkpointer with initial HF load enabled.
     # Without a checkpointer the trainer skips the HF load and starts from random
     # weights -- only a warning marks it.
     checkpointer = _load(name).trainer.checkpointer
@@ -111,6 +129,8 @@ def test_recipe_loads_pretrained_weights(name):
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_recipe_sets_vocab_size_for_vocab_parallel_loss(name):
+    # [FUNCTION DOC]
+    # Checks that the loss's global vocab size equals the model's decoder vocab size.
     config = _load(name)
     loss_fn = config.trainer.loss.loss_fn
     assert loss_fn.global_vocab_size == decoder_vocab_size(config.model)
@@ -118,6 +138,8 @@ def test_recipe_sets_vocab_size_for_vocab_parallel_loss(name):
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_recipe_disables_trainer_cuda_graphs(name):
+    # [FUNCTION DOC]
+    # Checks that every recipe disables trainer CUDA graphs.
     # Every upstream TitanRL recipe does; varlen attention cannot be graphed
     # without fixed-shape document metadata.
     assert _load(name).trainer.training.disable_cuda_graphs
@@ -125,6 +147,9 @@ def test_recipe_disables_trainer_cuda_graphs(name):
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_rollout_budget_matches_trainer_context(name):
+    # [FUNCTION DOC]
+    # Checks that rollout token budget equals trainer context, the microbatch token count is a
+    # multiple of the context, and max turns times max tokens leaves at least 2048 tokens.
     config = _load(name)
     training = config.trainer.training
     token_env = config.rollouter.worker.token_env
@@ -143,6 +168,9 @@ def test_rollout_budget_matches_trainer_context(name):
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_recipe_targets_the_chess_server(name):
+    # [FUNCTION DOC]
+    # Checks that the rollouter targets the chess task at 127.0.0.1:8000, has no truncation
+    # reward and uses the OpenEnvReward and OpenEnvShapingReward configs in order.
     worker = _load(name).rollouter.worker
     assert worker.message_env.task == "chess"
     assert worker.message_env.base_url == "http://127.0.0.1:8000"
@@ -157,6 +185,9 @@ def test_recipe_targets_the_chess_server(name):
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_chess_server_default_capacity_covers_the_recipe(name):
+    # [FUNCTION DOC]
+    # Checks that serve_chess's default max sessions covers the recipe's in-flight demand
+    # (active groups times samples, or validation samples if larger).
     # The async loop keeps up to ``target_offpolicy_steps + 1`` batches of groups
     # in flight; validation runs only before and after training, so it counts
     # only if larger (TitanRL sizes vLLM's concurrency the same way). An
@@ -178,6 +209,8 @@ def test_chess_server_default_capacity_covers_the_recipe(name):
     ],
 )
 def test_30b_recipe_keeps_adam_moments_in_bf16(name):
+    # [FUNCTION DOC]
+    # Checks that the 30B recipes use a single AdamW optimizer with bf16 moments.
     # At 30B on 95 GiB cards, fp32 moments leave too little headroom for the
     # weight push's bf16 copy when it overlaps the next forward/backward (it
     # does right after a mid-run checkpoint save): the run OOMed at step 51.
@@ -186,11 +219,16 @@ def test_30b_recipe_keeps_adam_moments_in_bf16(name):
 
 
 def test_smoke_recipe_skips_the_mid_run_checkpoint():
+    # [FUNCTION DOC]
+    # Checks that the smoke recipe's checkpoint interval exceeds its training step count.
     config = _load("rl_grpo_muse_glimmer_30b_openenv_chess_smoke")
     assert config.trainer.checkpointer.interval > config.async_loop.num_training_steps
 
 
 def test_cli_override_reaches_the_openenv_env_config():
+    # [FUNCTION DOC]
+    # Checks that a CLI override of the message env base URL reaches the
+    # OpenEnvMessageEnv config.
     # ``worker.message_env`` is typed as the base ``MessageEnv.Config``; the CLI
     # must still narrow to ``OpenEnvMessageEnv.Config`` and accept its fields.
     config = ConfigManager().parse_args(
@@ -212,6 +250,8 @@ def test_cli_override_reaches_the_openenv_env_config():
 
 
 def _turn(turn_id: int, env_rewards: dict[str, float]) -> RolloutTurn:
+    # [FUNCTION DOC]
+    # HELPER: builds a RolloutTurn with the given turn id and env rewards and dummy token data.
     return RolloutTurn(
         rollout_id=RolloutTurnID(group_id=0, rollout_id=0, turn_id=turn_id),
         prompt_token_ids=[1],
@@ -222,6 +262,8 @@ def _turn(turn_id: int, env_rewards: dict[str, float]) -> RolloutTurn:
 
 
 def _rollout(*env_rewards: dict[str, float]) -> Rollout:
+    # [FUNCTION DOC]
+    # HELPER: builds a Rollout (truncated by max turns) with one turn per given rewards dict.
     return Rollout(
         group_id=0,
         rollout_id=0,
@@ -231,6 +273,10 @@ def _rollout(*env_rewards: dict[str, float]) -> Rollout:
 
 
 def test_recipe_rubric_scores_a_partial_game():
+    # [FUNCTION DOC]
+    # Checks that the recipe rubric scores a partial game: the env reward sums to 0, shaping
+    # takes the last reported position value (0.30, ignoring a reward-less final turn), and
+    # the total is weighted and normalized to 0.30/3.
     rubric = config_registry._openenv_chess_rollouter_config().worker.rubric.build()
     rollout = _rollout(
         {"openenv": 0.0, CHESS_POSITION_REWARD: 0.10},
@@ -249,6 +295,9 @@ def test_recipe_rubric_scores_a_partial_game():
 
 
 def test_shaping_reward_builds_its_own_class():
+    # [FUNCTION DOC]
+    # Checks that building the shaping config yields OpenEnvShapingReward and the base config
+    # yields OpenEnvReward.
     # Redeclaring ``Config`` is what makes ``build()`` return the subclass; the
     # rubric rejects two reward fns with the same class name.
     shaping = OpenEnvShapingReward.Config(reward_name=CHESS_POSITION_REWARD).build()
@@ -257,6 +306,10 @@ def test_shaping_reward_builds_its_own_class():
 
 
 def test_env_passes_the_game_outcome_to_shaping():
+    # [FUNCTION DOC]
+    # Checks that OpenEnvMessageEnv re-adds reward/done before shaping: with the bridge's
+    # tool-call stepping replaced by a stub returning a won game, the step output is done with
+    # env reward 1.0 and position reward 1.0 (not the static evaluation).
     # The wire format strips reward/done from the observation; the env must put
     # them back before shaping, or a finished game is scored by a static
     # evaluation taken from the wrong side of the board.
@@ -277,6 +330,8 @@ def test_env_passes_the_game_outcome_to_shaping():
     )
 
     async def act(_tool_calls):
+        # [FUNCTION DOC]
+        # Stub that ignores the tool calls and returns the prebuilt won turn.
         return won
 
     env._bridge.act_from_tool_calls = act
@@ -293,6 +348,8 @@ def test_env_passes_the_game_outcome_to_shaping():
     ("aggregate", "expected"), [("sum", -0.2), ("last", 0.0), ("mean", -0.2 / 3)]
 )
 def test_openenv_reward_aggregates(aggregate, expected):
+    # [FUNCTION DOC]
+    # Checks sum, last and mean aggregation over rewards -0.1, -0.1, 0.0.
     # Two illegal moves (-0.1 each), then a legal one.
     reward = OpenEnvReward.Config(aggregate=aggregate).build()
     rollout = _rollout({"openenv": -0.1}, {"openenv": -0.1}, {"openenv": 0.0})

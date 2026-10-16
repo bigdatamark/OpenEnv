@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Auxiliary reward-signal providers for TextArena games. Defines the RewardProvider protocol, a factory
+# choosing providers by env id (currently only Wordle-v0 has one), Wordle text-parsing helpers and the
+# Wordle provider that mirrors GRPO Wordle heuristics.
 """Reward provider utilities for TextArena environments."""
 
 from __future__ import annotations
@@ -9,18 +13,26 @@ from .models import TextArenaAction, TextArenaObservation
 
 
 class RewardProvider(Protocol):
+    # [CLASS DOC]
+    # Protocol for per-episode reward-signal computers with reset() and compute(action, observation).
     """Interface for computing auxiliary reward signals."""
 
     def reset(self) -> None:
+        # [FUNCTION DOC]
+        # Clears per-episode state. Protocol stub (no implementation).
         """Clear any internal state before a new episode."""
 
     def compute(
         self, *, action: TextArenaAction, observation: TextArenaObservation
     ) -> Dict[str, float]:
+        # [FUNCTION DOC]
+        # Returns a mapping from signal name to float for one step. Protocol stub (no implementation).
         """Return a mapping of reward names to float values for the step."""
 
 
 def build_reward_providers(env_id: str) -> List[RewardProvider]:
+    # [FUNCTION DOC]
+    # Returns a list of providers for env_id: one Wordle provider for "Wordle-v0", else empty.
     """Instantiate reward providers appropriate for the given environment."""
 
     providers: List[RewardProvider] = []
@@ -33,6 +45,9 @@ _WORDLE_GUESS_PATTERN = re.compile(r"\[[A-Za-z]{5}\]")
 
 
 def extract_guess(text: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the first bracketed 5-letter guess in text, lowercased; else the first 5 letters of text's
+    # lowercase letters wrapped in brackets; else "[dunno]" when fewer than 5 letters.
     """Normalize a Wordle guess string from arbitrary text."""
 
     match = _WORDLE_GUESS_PATTERN.search(text)
@@ -46,6 +61,8 @@ def extract_guess(text: str) -> str:
 
 
 def extract_wordle_feedback(observation: TextArenaObservation) -> str:
+    # [FUNCTION DOC]
+    # Returns the text after "Feedback:" in the most recent message containing it (stripped), or "".
     """Pull the latest feedback text from a Wordle observation."""
 
     for message in reversed(observation.messages):
@@ -56,6 +73,9 @@ def extract_wordle_feedback(observation: TextArenaObservation) -> str:
 
 
 def extract_feedback_counts(feedback: str) -> Tuple[int, int]:
+    # [FUNCTION DOC]
+    # Returns (greens, yellows): from the last non-blank line consisting only of G/Y/X (spaces ignored) in the
+    # feedback; (0, 0) if feedback is empty, has fewer than two non-blank lines or has no such line.
     """Return counts of green (G) and yellow (Y) markers from feedback."""
 
     if not feedback:
@@ -76,6 +96,10 @@ def extract_feedback_counts(feedback: str) -> Tuple[int, int]:
 
 
 class _WordleRewardProvider:
+    # [CLASS DOC]
+    # HELPER: Wordle signal provider tracking how often each guess was made this episode. Emits
+    # wordle.greens, wordle.yellows (counts divided by 5), wordle.repetitions (1 minus prior occurrences of the
+    # guess, so it goes negative on repeats) and wordle.correct (the observation's reward or 0).
     """Reward provider that mirrors the GRPO Wordle heuristics."""
 
     SIGNAL_MAP = {
@@ -86,14 +110,21 @@ class _WordleRewardProvider:
     }
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Creates an empty guess-count mapping.
         self._guess_history: Dict[str, int] = {}
 
     def reset(self) -> None:
+        # [FUNCTION DOC]
+        # Clears the guess history.
         self._guess_history.clear()
 
     def compute(
         self, *, action: TextArenaAction, observation: TextArenaObservation
     ) -> Dict[str, float]:
+        # [FUNCTION DOC]
+        # Extracts the guess and latest feedback, computes the four signals described on the class, then records
+        # the guess (unless it is "[dunno]"). Returns the signal mapping. Side effect: mutates guess history.
         guess = extract_guess(action.message)
         feedback = extract_wordle_feedback(observation)
 

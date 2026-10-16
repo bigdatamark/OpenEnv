@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for the "openenv fork" CLI command with whoami/login/HfApi patched: argument
+# validation and the arguments passed to HfApi.duplicate_space.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the openenv fork command."""
@@ -12,6 +15,8 @@ runner = CliRunner()
 
 
 def test_fork_requires_source_space() -> None:
+    # [FUNCTION DOC]
+    # Missing SOURCE_SPACE fails.
     """Test that fork requires SOURCE_SPACE argument."""
     result = runner.invoke(app, ["fork"])
     assert result.exit_code != 0
@@ -19,6 +24,8 @@ def test_fork_requires_source_space() -> None:
 
 
 def test_fork_validates_source_space_format() -> None:
+    # [FUNCTION DOC]
+    # A source without owner/name form fails.
     """Test that fork validates source space format (owner/name)."""
     result = runner.invoke(app, ["fork", "invalid-no-slash"])
     assert result.exit_code != 0
@@ -26,6 +33,8 @@ def test_fork_validates_source_space_format() -> None:
 
 
 def test_fork_calls_duplicate_space_with_from_id() -> None:
+    # [FUNCTION DOC]
+    # duplicate_space gets from_id, private False and default hardware cpu-basic.
     """Test that fork calls HfApi.duplicate_space with correct from_id."""
     with (
         patch("openenv.cli.commands.fork.whoami") as mock_whoami,
@@ -50,6 +59,8 @@ def test_fork_calls_duplicate_space_with_from_id() -> None:
 
 
 def test_fork_authenticates_object_whoami_response() -> None:
+    # [FUNCTION DOC]
+    # An object-shaped whoami response (username attribute) is accepted without login.
     """Test that fork accepts object-shaped whoami responses."""
     with (
         patch("openenv.cli.commands.fork.whoami") as mock_whoami,
@@ -71,6 +82,8 @@ def test_fork_authenticates_object_whoami_response() -> None:
 
 
 def test_fork_passes_private_and_to_id() -> None:
+    # [FUNCTION DOC]
+    # --private and --repo-id map to private True and to_id.
     """Test that fork passes --private and --repo-id to duplicate_space."""
     with (
         patch("openenv.cli.commands.fork.whoami") as mock_whoami,
@@ -95,6 +108,8 @@ def test_fork_passes_private_and_to_id() -> None:
 
 
 def test_fork_passes_variables_and_secrets() -> None:
+    # [FUNCTION DOC]
+    # --set-env / --set-secret map to key/value lists for variables and secrets.
     """Test that fork passes --set-env and --set-secret to duplicate_space."""
     with (
         patch("openenv.cli.commands.fork.whoami") as mock_whoami,
@@ -126,6 +141,8 @@ def test_fork_passes_variables_and_secrets() -> None:
 
 
 def test_fork_validates_set_env_format() -> None:
+    # [FUNCTION DOC]
+    # --set-env without "=" fails with a KEY=VALUE/format message.
     """Test that fork validates KEY=VALUE format for --set-env."""
     with patch("openenv.cli.commands.fork.whoami") as mock_whoami:
         mock_whoami.return_value = {"name": "testuser"}
@@ -140,6 +157,8 @@ def test_fork_validates_set_env_format() -> None:
 
 
 def test_fork_handles_duplicate_space_error() -> None:
+    # [FUNCTION DOC]
+    # A duplicate_space exception makes the command fail with a fork/failed message.
     """Test that fork handles duplicate_space API errors."""
     with (
         patch("openenv.cli.commands.fork.whoami") as mock_whoami,

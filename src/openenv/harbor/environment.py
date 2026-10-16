@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# The harbor_env OpenEnv environment: an MCPEnvironment exposing Task API discovery
+# methods (duck-typed) and MCP tools run_rollout, capabilities and list_tasks. A rollout
+# is one long async tool call that runs a Harbor trial through the process-wide
+# HarborService capture proxy. Step timeouts default to 1800s.
 """The OpenEnv environment: Task API for discovery, one MCP tool for execution.
 
 `run_rollout` is a single long tool call rather than `reset`/`step`, because OpenEnv's HTTP handlers
@@ -24,6 +29,9 @@ _ROLLOUT_TIMEOUT_S = 1800.0
 
 
 def _trials_dir() -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns the trial artifacts directory from OPENENV_HARBOR_TRIALS_DIR, else
+    # /tmp/openenv-harbor-trials (not created here).
     """Where per-rollout artifacts are written.
 
     Overridable because the default lives on `/tmp`, which is node-local, shared between users, and
@@ -41,6 +49,10 @@ def _trials_dir() -> Path:
 
 
 class HarborEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # Per-session environment supporting concurrent sessions. Server-wide configuration
+    # (datasets, default LLM URL/model, startup LLM report) is stored on the class.
+    # Holds a HarborTaskProvider and a HarborState for the session.
     """Per-session environment exposing `run_rollout` and `capabilities` over MCP."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
@@ -64,12 +76,20 @@ class HarborEnvironment(MCPEnvironment):
         model: str = "",
         llm: dict[str, Any] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Class method: sets the class-level datasets (copied), LLM URL, model and LLM report
+        # (copied). Affects all instances created afterwards (and existing ones reading class attrs).
         cls._datasets = list(datasets)
         cls._llm_url = llm_url
         cls._model = model
         cls._llm = dict(llm or {})
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Creates the task provider for the configured datasets and a fresh state with a random
+        # episode id, builds a FastMCP server "harbor_env" registering the run_rollout,
+        # capabilities and list_tasks tools, and initializes the MCP environment with it.
+        # Imports fastmcp lazily; does no network or credential work.
         from fastmcp import FastMCP
 
         from .capabilities import capabilities as _capabilities
@@ -100,6 +120,8 @@ class HarborEnvironment(MCPEnvironment):
             purpose: str = "auto",
             eval_sampling: dict[str, Any] | None = None,
         ) -> str:
+            # [FUNCTION DOC]
+            # MCP tool (async): forwards all arguments to _run_rollout and returns its JSON string.
             """Run one Harbor rollout and return a JSON `HarborRolloutResult`.
 
             `harness`, `sandbox` AND the engine are all per-call, so consecutive rollouts can use
@@ -138,6 +160,9 @@ class HarborEnvironment(MCPEnvironment):
 
         @mcp.tool
         def capabilities() -> str:
+            # [FUNCTION DOC]
+            # MCP tool: computes capabilities for the configured datasets with the startup LLM report
+            # (or url/model only) and returns it as JSON. Runs sandbox credential checks each call.
             """Harnesses, sandboxes, datasets and LLM status for this server."""
             caps = _capabilities(
                 datasets=self._datasets,
@@ -147,6 +172,8 @@ class HarborEnvironment(MCPEnvironment):
 
         @mcp.tool
         def list_tasks(split: str = "", start: int = 0, stop: int = 20) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: returns JSON of the provider's task range [start, stop) for split.
             """A window of tasks in a split, for browsing without pulling all of them."""
             return json.dumps(self._provider.get_task_range(split, start, stop))
 
@@ -154,26 +181,40 @@ class HarborEnvironment(MCPEnvironment):
 
     # --- Task API (OpenEnv discovers these by duck typing) ----------------
     def list_splits(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Task API: delegates to the provider's split list.
         return self._provider.list_splits()
 
     def num_tasks(self, split: str) -> int:
+        # [FUNCTION DOC]
+        # Task API: delegates to provider.num_tasks(split).
         return self._provider.num_tasks(split)
 
     def list_tasks(self, split: str) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Task API: delegates to provider.list_tasks(split).
         return self._provider.list_tasks(split)
 
     def get_task(self, split: str, index: int) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Task API: delegates to provider.get_task(split, index).
         return self._provider.get_task(split, index)
 
     def get_task_range(
         self, split: str, start: int | None = None, stop: int | None = None
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Task API: delegates to provider.get_task_range(split, start, stop).
         return self._provider.get_task_range(split, start, stop)
 
     # --- Environment ------------------------------------------------------
     def reset(
         self, seed: int | None = None, episode_id: str | None = None, **_: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Replaces the state with a new episode (given or random id), the configured LLM URL and
+        # the running service's public URL (if any). Returns a non-done Observation whose metadata
+        # says ready, how to call run_rollout, and the datasets. Seed is ignored; no sandbox started.
         """New episode. Boots nothing — a sandbox is created per `run_rollout`, not per reset."""
         service = self._service()
         self._state = HarborState(
@@ -194,6 +235,9 @@ class HarborEnvironment(MCPEnvironment):
     def _step_impl(
         self, action: Any, timeout_s: float | None = None, **_: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: handles non-MCP actions by returning a non-done Observation with an error
+        # message naming the unexpected action type.
         return Observation(
             done=False,
             reward=None,
@@ -206,22 +250,30 @@ class HarborEnvironment(MCPEnvironment):
     def step(
         self, action: Any, timeout_s: float | None = None, **kwargs: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Delegates to MCPEnvironment.step with timeout_s defaulting to 1800s.
         return super().step(action, timeout_s=timeout_s or _ROLLOUT_TIMEOUT_S, **kwargs)
 
     async def step_async(
         self, action: Any, timeout_s: float | None = None, **kwargs: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async variant of step with the same 1800s default timeout.
         return await super().step_async(
             action, timeout_s=timeout_s or _ROLLOUT_TIMEOUT_S, **kwargs
         )
 
     @property
     def state(self) -> HarborState:
+        # [FUNCTION DOC]
+        # Property returning the session's HarborState.
         return self._state
 
     # --- internals --------------------------------------------------------
     @staticmethod
     def _service() -> Any:
+        # [FUNCTION DOC]
+        # HELPER: returns the current process-wide HarborService (lazy import), or None.
         from .serving import HarborService
 
         return HarborService.current()
@@ -246,6 +298,16 @@ class HarborEnvironment(MCPEnvironment):
         purpose: str = "auto",
         eval_sampling: dict[str, Any] | None = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # HELPER: async rollout implementation. Returns a failed HarborRolloutResult JSON if no
+        # service is running or the task cannot be resolved (error truncated to 400 chars).
+        # Defaults split to the first dataset. Resolves the engine: with llm_url, builds an
+        # Upstream and resolves it through the capture app's upstream pool (probe cached per
+        # engine) to get a client and capture level; otherwise uses the pool default client with
+        # the service's capture level and model. Awaits rollout.run_rollout with the capture
+        # registry, public URL, trials dir and all options (0 timeouts/limits become None).
+        # Updates state counters (rollouts completed, last reward/task/trial) and returns the
+        # result JSON. Exceptions from engine resolution or the rollout propagate.
         from .models import HarborRolloutResult
         from .rollout import run_rollout as _run
 
@@ -278,6 +340,8 @@ class HarborEnvironment(MCPEnvironment):
         # `agent_environment.stop(...)`, and the old `asyncio.run`-per-rollout closed the loop as
         # soon as the coroutine returned, cancelling that shielded task and leaking the sandbox.
         async def _resolve_and_run():
+            # [FUNCTION DOC]
+            # HELPER: inner coroutine selecting upstream/client/capture level and model, then running the rollout.
             """Settle which engine serves this rollout, then run it.
 
             The probe is async and cached per engine, so it has to happen inside the coroutine rather

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for models.turns_from_document over real exported capture sessions: per-turn exact prompts,
+# monotonic prompt growth, correct turn boundaries when logprobs are missing or turns are adjacent,
+# auxiliary exclusion, logprob alignment and deduplication of forked shared nodes.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -24,6 +28,8 @@ turns_from_document = models.turns_from_document
 
 
 class FakeSession:
+    # [CLASS DOC]
+    # HELPER: Minimal session exposing what export_session reads, with a fresh RolloutGraph.
     """The surface `export_session` needs."""
 
     session_id = "sess"
@@ -31,10 +37,16 @@ class FakeSession:
     findings: list = []
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Creates an empty RolloutGraph.
         self.graph = RolloutGraph()
 
 
 def build(turns, *, context_between=2):
+    # [FUNCTION DOC]
+    # HELPER: Builds a linear conversation: for each (n_sampled, has_logprobs) adds a TurnNode with
+    # distinct sampled ids and logprobs (or None), then extends the prompt with the node's end ids plus
+    # context_between tool tokens. Returns (session, list of (prompt, sampled) ground truths).
     """A linear agent conversation. `turns` is [(n_sampled, has_logprobs), ...].
 
     Returns the session and the ground truth each turn should round-trip to.
@@ -60,6 +72,8 @@ def build(turns, *, context_between=2):
 
 
 def test_every_turn_carries_its_own_prompt():
+    # [FUNCTION DOC]
+    # Each exported row has its exact prompt, completion ids and matching logprob count.
     """`prompt_token_ids` used to be populated only for turn 0, leaving the rest empty.
 
     On-policy training needs the engine's tokenisation of everything the model saw before it
@@ -81,6 +95,8 @@ def test_every_turn_carries_its_own_prompt():
 
 
 def test_prompts_grow_monotonically_down_a_conversation():
+    # [FUNCTION DOC]
+    # Prompt lengths strictly grow and each prompt prefixes the next.
     """Turn k+1 saw everything turn k did, plus the tool result in between."""
     session, _ = build([(4, True), (4, True), (4, True)])
     rows = turns_from_document(
@@ -97,6 +113,9 @@ def test_prompts_grow_monotonically_down_a_conversation():
 
 
 def test_a_turn_without_usable_logprobs_does_not_drop_the_turns_after_it():
+    # [FUNCTION DOC]
+    # With a middle turn lacking logprobs (fewer turn_lengths than nodes), all three turns still export
+    # with their own tokens.
     """The regression, and it corrupted rather than merely truncated.
 
     Turn boundaries came from `turn_lengths`, which counts runs of mask-1. A turn whose logprobs
@@ -121,6 +140,8 @@ def test_a_turn_without_usable_logprobs_does_not_drop_the_turns_after_it():
 
 
 def test_adjacent_turns_with_no_context_between_them_stay_separate():
+    # [FUNCTION DOC]
+    # Turns with nothing between them export as two rows of lengths 3 and 4.
     """Two turns with nothing inserted between them formed one mask-run and merged into one."""
     session, truth = build([(3, True), (4, True)], context_between=0)
     rows = turns_from_document(
@@ -131,6 +152,8 @@ def test_adjacent_turns_with_no_context_between_them_stay_separate():
 
 
 def test_auxiliary_sequences_produce_no_turns():
+    # [FUNCTION DOC]
+    # Auxiliary-only documents export no turns.
     """An auxiliary call must never be credited with the reward the agent earned."""
     session, _ = build([(3, True)])
     document = export_mod.export_session(session, include_messages=True)
@@ -140,6 +163,8 @@ def test_auxiliary_sequences_produce_no_turns():
 
 
 def test_logprobs_line_up_with_the_tokens_they_score():
+    # [FUNCTION DOC]
+    # Every row has one negative logprob per completion token.
     """A logprob against the wrong token makes GRPO's ratio a ratio against an invented number."""
     session, _ = build([(4, True), (6, True)])
     rows = turns_from_document(
@@ -153,6 +178,8 @@ def test_logprobs_line_up_with_the_tokens_they_score():
 
 
 def test_a_node_shared_by_two_live_paths_is_exported_once():
+    # [FUNCTION DOC]
+    # A shared root with two two-turn branches exports 5 unique rows, not duplicating the shared node.
     """Forked paths share their prefix, and each live path is its own exported sequence.
 
     Without dedup the shared turns appear once per path, so a trainer credits the same model call

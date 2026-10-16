@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Scoring pipeline for Pelican SVG: extraction, deterministic gate, structural analysis, and the
+# optional vision judge, run cheapest first. Defines the weights (structure 0.35, semantic 0.65,
+# or structure 1.0 without a judge), the not-riding penalty factor (0.25), and the Evaluation record
+# whose properties compute scores, reward and feedback.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Run every scoring layer over one submission and assemble the verdict.
@@ -30,6 +35,8 @@ NOT_RIDING_PENALTY = 0.25
 
 
 def component_weights(judge_enabled: bool) -> tuple[float, float]:
+    # [FUNCTION DOC]
+    # Returns (structure weight, semantic weight): (1.0, 0.0) when no judge is configured, else (0.35, 0.65).
     """Return the `(structure, semantic)` weights for a run.
 
     Keyed on whether a judge is *configured*, deliberately not on whether one
@@ -56,6 +63,9 @@ def component_weights(judge_enabled: bool) -> tuple[float, float]:
 
 @dataclass(frozen=True)
 class Evaluation:
+    # [CLASS DOC]
+    # Immutable record of one submission's analysis: task, extracted svg, gate result, optional
+    # structure report, optional judge report and whether a judge was configured.
     """Everything known about one submission.
 
     Attributes:
@@ -84,16 +94,23 @@ class Evaluation:
 
     @property
     def gate_passed(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: whether the gate passed.
         """`bool`: Whether the submission cleared the deterministic checks."""
         return self.gate.passed
 
     @property
     def structure_score(self) -> float:
+        # [FUNCTION DOC]
+        # Property: structure report score, or 0.0 without a report.
         """`float`: Fraction of structural checks passed, in [0, 1]."""
         return self.structure.score if self.structure else 0.0
 
     @property
     def semantic_score(self) -> float:
+        # [FUNCTION DOC]
+        # Property: judge score; 0.0 without a judge report or when it has an error; multiplied by 0.25
+        # when the checklist's riding_posture item is false or missing.
         """`float`: Judge score, heavily penalised when nothing is shown riding.
 
         A bicycle with nothing on it does not answer "draw an animal riding a
@@ -110,11 +127,16 @@ class Evaluation:
 
     @property
     def judged(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True when a judge report exists without an error.
         """`bool`: Whether a judge actually produced a verdict."""
         return self.judge is not None and self.judge.error is None
 
     @property
     def reward(self) -> float:
+        # [FUNCTION DOC]
+        # Property: 0.0 if the gate failed, else weighted sum of structure and semantic scores using
+        # component_weights(judge_enabled).
         """`float`: Overall reward in [0, 1].
 
         Zero if the gate rejected the submission. Otherwise the weighted sum
@@ -131,6 +153,9 @@ class Evaluation:
 
     @property
     def feedback(self) -> str:
+        # [FUNCTION DOC]
+        # Property: human-readable summary. Gate failure lists violation details; otherwise structure score,
+        # names of failed structural checks, and the judge caption or the judge error.
         """`str`: A short human-readable explanation of the score."""
         if not self.gate_passed:
             reasons = "; ".join(v.detail for v in self.gate.violations)
@@ -147,6 +172,9 @@ class Evaluation:
         return "; ".join(parts)
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a JSON-safe breakdown mapping: task, rounded reward, gate, structure and judge mappings
+        # (or None), rounded component scores, judged flag and feedback.
         """Return a JSON-serialisable breakdown of the whole evaluation."""
         return {
             "task": self.task.to_dict(),
@@ -162,6 +190,11 @@ class Evaluation:
 
 
 def evaluate_deterministic(response: str, task: Task) -> Evaluation:
+    # [FUNCTION DOC]
+    # Runs the free layers. Extracts the SVG from response (TruncatedSvgError gives a failed gate with
+    # "truncated_svg"; other SvgParseError gives "no_svg_in_response"), runs the gate with the task's
+    # forbidden terms, and if it passes parses the SVG, extracts shapes and analyses structure with the
+    # vehicle's expected wheel count. Returns an Evaluation without a judge report.
     """Score a submission using only the free layers.
 
     Runs extraction, the gate and the structural analysis. Useful on its own
@@ -220,6 +253,10 @@ def evaluate_deterministic(response: str, task: Task) -> Evaluation:
 async def evaluate_submission(
     response: str, task: Task, judge: VisionJudge | None = None
 ) -> Evaluation:
+    # [FUNCTION DOC]
+    # Async full evaluation: runs evaluate_deterministic in a worker thread; if a judge is given and the
+    # gate passed with a raster, awaits the judge on the PNG. Returns the Evaluation with judge_enabled
+    # set to whether a judge was given and the judge report if obtained.
     """Score a submission through every configured layer.
 
     Args:

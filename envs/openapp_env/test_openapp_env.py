@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Standalone smoke-test script for the OpenApp environment (also collectable by pytest). Checks
+# model construction, environment instantiation and a simulated client/server payload contract.
+# At import time prepends the envs directory to sys.path and imports models and the server environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +35,8 @@ from openapp_env.server.openapp_environment import OpenAppEnvironment
 
 
 def test_models():
+    # [FUNCTION DOC]
+    # Test: constructs noop, click and fill actions and asserts their fields. Prints progress.
     """Test that models are properly defined."""
     print("Testing models...")
 
@@ -50,6 +56,9 @@ def test_models():
 
 
 def test_environment_basic():
+    # [FUNCTION DOC]
+    # Test: constructs OpenAppEnvironment with max_steps 10 and asserts it has reset/step/state/close
+    # attributes. Tolerates ValueError/ImportError mentioning OpenApps; re-raises others.
     """Test basic environment functionality."""
     print("\nTesting environment...")
 
@@ -78,6 +87,9 @@ def test_environment_basic():
 
 
 def test_client_server_contract():
+    # [FUNCTION DOC]
+    # Test: builds a click action with metadata, mimics a step payload mapping and asserts fields, then
+    # builds an observation and asserts url and done.
     """Test that client and server follow the contract."""
     print("\nTesting client-server contract...")
 
@@ -112,6 +124,9 @@ def test_client_server_contract():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the three tests, prints a summary and integration prerequisites; on any exception prints
+    # the traceback and exits the process with status 1.
     """Run all tests."""
     print("=" * 60)
     print("OpenApp Environment - Structure Tests")

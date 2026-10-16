@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Container runtime providers package. Re-exports the abstract provider bases,
+# the local Docker, Docker Swarm and Kubernetes providers, and the uv-based
+# provider. Cloud providers requiring extra SDKs (ACA, Daytona, Modal, Novita,
+# HF sandbox) must be imported from their own modules.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Container runtime providers."""

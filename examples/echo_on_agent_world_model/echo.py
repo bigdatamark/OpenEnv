@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Self-contained ECHO core (RFC 010): per-token role constants (context, action, env_output, warning), Segment and
+# Trajectory data types, tokenisation of a trajectory into ids plus aligned boolean role masks, and the hybrid loss
+# combining a REINFORCE/GRPO-style term on action tokens with a weighted cross-entropy on environment-output tokens.
 """ECHO core — role-masked trajectories + the env-token world-model loss.
 
 A compact, self-contained distillation of **RFC 010** (ECHO for OpenEnv),
@@ -33,6 +37,8 @@ ROLES = (CONTEXT, ACTION, ENV_OUTPUT, WARNING)
 
 @dataclass
 class Segment:
+    # [CLASS DOC]
+    # Dataclass: a contiguous piece of text with one role string.
     """A contiguous run of text with a single role."""
 
     role: str
@@ -41,6 +47,8 @@ class Segment:
 
 @dataclass
 class Trajectory:
+    # [CLASS DOC]
+    # Dataclass: an ordered list of Segments plus terminal reward (default 0.0), task prompt text and a free-form meta dict.
     """One rollout, segmented by role, plus its terminal reward."""
 
     segments: list[Segment]
@@ -55,6 +63,10 @@ def tokenize_trajectory(
     *,
     world_loss_target: str = "env_only",
 ) -> dict[str, torch.Tensor]:
+    # [FUNCTION DOC]
+    # Tokenises each segment separately (no special tokens) with a callable tokenizer returning input_ids, concatenates
+    # them, and returns 1-D tensors: input_ids (long) and boolean action_mask, warning_mask and obs_mask. obs_mask covers
+    # env_output tokens only, or env_output plus warning tokens when world_loss_target is "all" (any other value behaves as env_only).
     """Render a trajectory to token ids + aligned per-token role masks.
 
     Each segment is tokenized independently (``add_special_tokens=False``) and
@@ -107,6 +119,12 @@ def echo_loss(
     world_model_coeff: float = 0.05,  # λ. 0.0 == vanilla GRPO. Keep small.
     use_rl: bool = True,  # False == verifier-free (env-token loss only)
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    # [FUNCTION DOC]
+    # Computes the loss on a batch with next-token alignment (position t predicts t+1; masks taken from targets). The RL term
+    # is the negative sum of target log-probs on action tokens weighted by the per-sequence advantage, divided by the
+    # action-token count (min 1); zero when use_rl is false. The env term is the mean negative log-prob over observation
+    # tokens (count min 1). Returns: tuple of (rl term + world_model_coeff * env term as a tensor, dict of float values for
+    # loss, l_grpo and l_env).
     """The hybrid ECHO loss over a batch of rollouts.
 
     Next-token convention: position ``t`` predicts token ``t+1``; a token's role

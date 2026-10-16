@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Vendored CARLA BasicAgent: follows a route from the GlobalRoutePlanner via a LocalPlanner,
+# emergency-braking for vehicles ahead and red traffic lights (stop signs ignored). Requires
+# the carla and shapely packages.
 # Copyright (c) 2018-2020 CVC.
 #
 # This work is licensed under the terms of the MIT license.
@@ -28,6 +32,10 @@ from carla_env.server.carla_agents.tools.misc import (
 
 
 class BasicAgent(object):
+    # [CLASS DOC]
+    # Navigation agent wrapping a vehicle actor. Holds the world/map, a LocalPlanner (PID control
+    # along a waypoint queue), a GlobalRoutePlanner, detection thresholds and cached traffic
+    # light trigger waypoints.
     """
     BasicAgent implements an agent that navigates the scene.
     This agent respects traffic lights and other vehicles, but ignores stop signs.
@@ -38,6 +46,12 @@ class BasicAgent(object):
     def __init__(
         self, vehicle, target_speed=20, opt_dict=None, map_inst=None, grp_inst=None
     ):
+        # [FUNCTION DOC]
+        # Inputs: vehicle actor; target_speed km/h (default 20); opt_dict overrides (ignore_* flags,
+        # use_bbs_detection, sampling_resolution, base thresholds, detection_speed_ratio, max_brake,
+        # offset; also forwarded to LocalPlanner); optional map_inst / grp_inst to reuse.
+        # Invalid map_inst/grp_inst types are ignored with a printed warning and rebuilt.
+        # Side effects: mutates opt_dict (sets target_speed); queries world actors for traffic lights.
         """
         Initialization the agent paramters, the local and the global planner.
 
@@ -121,6 +135,8 @@ class BasicAgent(object):
         self._lights_map = {}  # Dictionary mapping a traffic light to a wp corrspoing to its trigger volume location
 
     def add_emergency_stop(self, control):
+        # [FUNCTION DOC]
+        # Sets throttle 0, brake to max_brake and hand_brake False on the control; returns it (steer kept).
         """
         Overwrites the throttle a brake values of a control to perform an emergency stop.
         The steering is kept the same to avoid going out of the lane when stopping during turns
@@ -133,6 +149,8 @@ class BasicAgent(object):
         return control
 
     def set_target_speed(self, speed):
+        # [FUNCTION DOC]
+        # Sets the agent and local-planner target speed (km/h).
         """
         Changes the target speed of the agent
             :param speed (float): target speed in Km/h
@@ -141,6 +159,8 @@ class BasicAgent(object):
         self._local_planner.set_speed(speed)
 
     def follow_speed_limits(self, value=True):
+        # [FUNCTION DOC]
+        # Enables/disables following road speed limits in the local planner.
         """
         If active, the agent will dynamically change the target speed according to the speed limits
 
@@ -149,14 +169,22 @@ class BasicAgent(object):
         self._local_planner.follow_speed_limits(value)
 
     def get_local_planner(self):
+        # [FUNCTION DOC]
+        # Returns the LocalPlanner.
         """Get method for protected member local planner"""
         return self._local_planner
 
     def get_global_planner(self):
+        # [FUNCTION DOC]
+        # Returns the GlobalRoutePlanner.
+        # KNOWN ISSUE: docstring says it returns the local planner.
         """Get method for protected member local planner"""
         return self._global_planner
 
     def set_destination(self, end_location, start_location=None):
+        # [FUNCTION DOC]
+        # Traces a route from start_location (default: the vehicle location, clearing the existing
+        # queue) to end_location and loads it into the local planner (queue kept when a start is given).
         """
         This method creates a list of waypoints between a starting and ending location,
         based on the route returned by the global router, and adds it to the local planner.
@@ -180,6 +208,8 @@ class BasicAgent(object):
         self._local_planner.set_global_plan(route_trace, clean_queue=clean_queue)
 
     def set_global_plan(self, plan, stop_waypoint_creation=True, clean_queue=True):
+        # [FUNCTION DOC]
+        # Passes a list of (waypoint, RoadOption) to the local planner with the given flags.
         """
         Adds a specific plan to the agent.
 
@@ -192,6 +222,8 @@ class BasicAgent(object):
         )
 
     def trace_route(self, start_waypoint, end_waypoint):
+        # [FUNCTION DOC]
+        # Returns the global planner route between two waypoints' locations as (waypoint, RoadOption) pairs.
         """
         Calculates the shortest route between a starting and ending waypoint.
 
@@ -203,6 +235,10 @@ class BasicAgent(object):
         return self._global_planner.trace_route(start_location, end_location)
 
     def run_step(self):
+        # [FUNCTION DOC]
+        # Runs one control step: checks vehicles ahead and red lights within thresholds scaled by speed
+        # (m/s * detection ratio), gets the local planner control, and applies an emergency stop if a
+        # hazard was detected. Returns a carla.VehicleControl.
         """Execute one step of navigation."""
         hazard_detected = False
 
@@ -238,28 +274,43 @@ class BasicAgent(object):
         return control
 
     def done(self):
+        # [FUNCTION DOC]
+        # True when the local planner's route is finished.
         """Check whether the agent has reached its destination."""
         return self._local_planner.done()
 
     def ignore_traffic_lights(self, active=True):
+        # [FUNCTION DOC]
+        # Sets whether traffic lights are ignored.
         """(De)activates the checks for traffic lights"""
         self._ignore_traffic_lights = active
 
     def ignore_stop_signs(self, active=True):
+        # [FUNCTION DOC]
+        # Sets whether stop signs are ignored (stored only; this agent never checks stop signs).
         """(De)activates the checks for stop signs"""
         self._ignore_stop_signs = active
 
     def ignore_vehicles(self, active=True):
+        # [FUNCTION DOC]
+        # Sets whether vehicles are ignored.
+        # KNOWN ISSUE: docstring mentions stop signs instead of vehicles.
         """(De)activates the checks for stop signs"""
         self._ignore_vehicles = active
 
     def set_offset(self, offset):
+        # [FUNCTION DOC]
+        # Sets the lateral offset in the local planner.
         """Sets an offset for the vehicle"""
         self._local_planner.set_offset(offset)
 
     def lane_change(
         self, direction, same_lane_time=0, other_lane_time=0, lane_change_time=2
     ):
+        # [FUNCTION DOC]
+        # Builds a lane-change path from the current waypoint using distances = given times x current
+        # speed (m/s) without lane-marking checks, and sets it as the global plan.
+        # KNOWN ISSUE: when no path is found it prints a warning but still sets the empty plan.
         """
         Changes the path so that the vehicle performs a lane change.
         Use 'direction' to specify either a 'left' or 'right' lane change,
@@ -282,6 +333,12 @@ class BasicAgent(object):
         self.set_global_plan(path)
 
     def _affected_by_traffic_light(self, lights_list=None, max_distance=None):
+        # [FUNCTION DOC]
+        # HELPER: Returns (True, light) if a red light whose trigger waypoint is on the ego road, faces the
+        # same direction and is within max_distance ahead (0-90 deg cone) affects the ego; remembers it
+        # until it turns non-red. Returns (False, None) otherwise or when lights are ignored. Defaults to
+        # all scene lights and the base threshold.
+        # Side effects: caches trigger waypoints in _lights_map, updates _last_traffic_light.
         """
         Method to check if there is a red light affecting the vehicle.
 
@@ -354,6 +411,14 @@ class BasicAgent(object):
         low_angle_th=0,
         lane_offset=0,
     ):
+        # [FUNCTION DOC]
+        # HELPER: Looks for a vehicle blocking the path within max_distance. Uses polygon intersection of
+        # the route corridor with target bounding boxes when bbs detection is on, the ego invades the
+        # opposite lane, or in junctions; otherwise checks lane/road match (current or 3 steps ahead,
+        # with lane_offset) and whether the target's rear is within the distance/angle cone of the ego
+        # front. Returns (detected, vehicle or None, distance or -1).
+        # KNOWN ISSUE: the ego front transform and target rear transform are computed by mutating aliased
+        # transform objects, so the "original" transforms are shifted too.
         """
         Method to check if there is a vehicle in front of the agent blocking its path.
 
@@ -364,6 +429,9 @@ class BasicAgent(object):
         """
 
         def get_route_polygon():
+            # [FUNCTION DOC]
+            # HELPER: Builds a shapely Polygon from points offset left/right of the ego and of upcoming plan
+            # waypoints within max_distance; returns None if fewer than 3 points.
             route_bb = []
             extent_y = self._vehicle.bounding_box.extent.y
             r_ext = extent_y + self._offset
@@ -504,6 +572,11 @@ class BasicAgent(object):
         lane_changes=1,
         step_distance=2,
     ):
+        # [FUNCTION DOC]
+        # HELPER: Returns a list of (waypoint, RoadOption): distance_same_lane of lane following, then
+        # lane_changes side-lane steps (optionally checking lane-change markings) in direction, then
+        # distance_other_lane of following. Returns an empty list if direction is invalid or any
+        # waypoint/side driving lane is unavailable.
         """
         This methods generates a path that results in a lane change.
         Use the different distances to fine-tune the maneuver.

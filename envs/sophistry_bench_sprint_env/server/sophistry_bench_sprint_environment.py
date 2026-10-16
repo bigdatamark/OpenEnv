@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Server-side Sophistry-Bench Sprint environment. Builds an advocacy dataset from the bundled QuALITY
+# split using the external sophistry_bench_sprint package, serves one row per reset, and scores the
+# single submitted argument with that package's canonical reward functions (aggregate reward, claim and
+# citation counts, four canary detectors, plus hidden correctness). Final reward is a weighted sum over
+# eight components in fixed key order; weights come from the constructor or the SPRINT_WEIGHTS env var.
+# Module globals: component key order, default weights (aggregate only), and a lazily cached canonical
+# aggregate function.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -58,6 +66,12 @@ _CANONICAL_AGGREGATE_FN = None
 
 
 def _canonical_aggregate_fn():
+    # [FUNCTION DOC]
+    # HELPER: lazily loads the canonical sprint environment once and returns its aggregate reward function
+    # (the first function of the rubric, descending into the first sub-rubric if the top-level rubric has no
+    # funcs). Caches it in a module global.
+    # Raises RuntimeError if that function is not named "aggregate_reward".
+    # Side effects: calls load_environment() on first use; mutates the module-level cache.
     global _CANONICAL_AGGREGATE_FN
     if _CANONICAL_AGGREGATE_FN is None:
         env = load_environment()
@@ -77,6 +91,12 @@ def _canonical_aggregate_fn():
 def _aggregate_reward(
     text: str, claims: list[str], cites: list[str], passage: str
 ) -> float:
+    # [FUNCTION DOC]
+    # HELPER: computes the aggregate reward as a float. Uses the package's directly exported
+    # aggregate_reward(claims, cites, passage) when available; otherwise calls the canonical rubric function
+    # with a single assistant message containing text and a state holding the passage, run via asyncio.run.
+    # KNOWN ISSUE: the asyncio.run fallback raises RuntimeError if called from a thread that already has a
+    # running event loop.
     if _direct_aggregate_reward is not None:
         return float(_direct_aggregate_reward(claims, cites, passage))
 
@@ -95,6 +115,9 @@ def _aggregate_reward(
 
 
 def _int_env(name: str, default: str) -> int:
+    # [FUNCTION DOC]
+    # HELPER: reads env var name (default string given) and returns it as int. Raises ValueError with the
+    # var name if it is not an integer.
     raw = os.getenv(name, default)
     try:
         return int(raw)
@@ -103,6 +126,9 @@ def _int_env(name: str, default: str) -> int:
 
 
 def _weights_from_env() -> list[float]:
+    # [FUNCTION DOC]
+    # HELPER: parses SPRINT_WEIGHTS as comma-separated floats (blank entries ignored). Returns a copy of the
+    # default weights when unset/empty. Raises ValueError if any value is not a float or the count is not 8.
     raw = os.getenv("SPRINT_WEIGHTS")
     if not raw:
         return list(_DEFAULT_WEIGHTS)
@@ -121,6 +147,10 @@ def _weights_from_env() -> list[float]:
 class SophistryBenchSprintEnvironment(
     Environment[AdvocacyAction, AdvocacyObservation, State]
 ):
+    # [CLASS DOC]
+    # Single-step OpenEnv environment. Holds the built dataset (2 rows per source article: defend gold and
+    # defend distractor), a round-robin cursor, the current passage and gold flag, a has-task flag and State.
+    # Not concurrency-safe per instance (relies on one instance per session).
     """Single-step QuALITY advocacy environment (OpenEnv port).
 
     The dataset is built once at construction from the bundled QuALITY split,
@@ -137,6 +167,12 @@ class SophistryBenchSprintEnvironment(
         weights: Optional[list[float]] = None,
         expose_correctness: Optional[bool] = None,
     ):
+        # [FUNCTION DOC]
+        # Inputs (each falls back to an env var when None): n_items (SPRINT_N_ITEMS, default 50 source
+        # articles), passage_chars (SPRINT_PASSAGE_CHARS, default 2000), seed (SPRINT_SEED, default 0, used for
+        # dataset building), weights (SPRINT_WEIGHTS), expose_correctness (SPRINT_EXPOSE_CORRECTNESS in 1/true/yes).
+        # Raises ValueError if weights length is not 8, RuntimeError if the built dataset is empty.
+        # Side effects: reads the packaged QuALITY JSON from disk and builds the dataset.
         super().__init__()
         # ``correctness_reward`` is the hidden ground truth (is the assigned answer
         # gold?). It is withheld from the wire observation by default so a naive
@@ -197,6 +233,9 @@ class SophistryBenchSprintEnvironment(
 
     @staticmethod
     def _system_text(row_prompt: list[dict]) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns the content of the first system-role message in a chat prompt list, else the first
+        # message's content, else empty string.
         for msg in row_prompt:
             if msg.get("role") == "system":
                 return msg.get("content", "")
@@ -208,6 +247,12 @@ class SophistryBenchSprintEnvironment(
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> AdvocacyObservation:
+        # [FUNCTION DOC]
+        # Picks a row: seed modulo dataset size if seed given, else the cursor (which then advances, wrapping).
+        # Stores the row's passage and gold flag, marks a task as active, and creates a new State with the given
+        # episode_id or a fresh UUID. Extra kwargs are ignored.
+        # Returns: AdvocacyObservation with the system prompt text, assigned answer, article id, done False,
+        # reward left as None.
         if seed is not None:
             idx = seed % self._n
         else:
@@ -231,6 +276,14 @@ class SophistryBenchSprintEnvironment(
         )
 
     def step(self, action: AdvocacyAction, **kwargs: Any) -> AdvocacyObservation:
+        # [FUNCTION DOC]
+        # If no task is active, returns a terminal observation with reward 0.0 and an error message
+        # ("call reset() before step()") in both error and metadata, without counting a step.
+        # Otherwise increments step_count, parses claims and citations from action.text, computes the eight
+        # component scores (aggregate, correctness 1/0 from the gold flag, claim/citation counts, four canaries)
+        # and the weighted reward. Clears the active-task flag (one step per episode).
+        # Returns: terminal AdvocacyObservation with reward, metadata and components set to the scores, with
+        # correctness_reward removed unless expose_correctness is on.
         if not self._has_task:
             msg = "call reset() before step()"
             return AdvocacyObservation(
@@ -292,10 +345,15 @@ class SophistryBenchSprintEnvironment(
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State.
         return self._state
 
     @property
     def current_passage(self) -> str:
+        # [FUNCTION DOC]
+        # Property returning the passage of the most recently reset episode (empty string before any reset;
+        # still populated after the episode's step).
         """Passage of the active episode (the reading-comprehension text already
         embedded in the reset prompt — not hidden ground truth). Empty before the
         first ``reset``."""

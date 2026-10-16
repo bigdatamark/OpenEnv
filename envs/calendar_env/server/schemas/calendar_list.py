@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pydantic models for the CalendarList resource (Google Calendar API v3): enums for
+# access role, reminder/notification methods and notification types; reminder,
+# notification and conference sub-models (strict versions and lenient "Patch" versions
+# that accept empty strings); entry, insert/update/patch requests, list response, and
+# watch channel request/response models.
 """
 CalendarList models following Google Calendar API v3 CalendarList structure
 """
@@ -11,6 +17,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class AccessRole(str, Enum):
+    # [CLASS DOC]
+    # String enum of calendar-list access roles: freeBusyReader, reader, writer, owner.
     """Access roles for calendar list entries"""
 
     FREE_BUSY_READER = "freeBusyReader"
@@ -20,6 +28,8 @@ class AccessRole(str, Enum):
 
 
 class ReminderMethod(str, Enum):
+    # [CLASS DOC]
+    # String enum of reminder methods: email, popup.
     """Allowed reminder delivery methods per Google Calendar API v3"""
 
     EMAIL = "email"
@@ -27,12 +37,16 @@ class ReminderMethod(str, Enum):
 
 
 class NotificationMethod(str, Enum):
+    # [CLASS DOC]
+    # String enum of notification methods: only email.
     """Allowed notification delivery methods (CalendarList notifications)"""
 
     EMAIL = "email"
 
 
 class NotificationType(str, Enum):
+    # [CLASS DOC]
+    # String enum of notification types: eventCreation, eventChange, eventCancellation, eventResponse, agenda.
     """Allowed CalendarList notification types per Google Calendar API v3"""
 
     EVENT_CREATION = "eventCreation"
@@ -43,6 +57,8 @@ class NotificationType(str, Enum):
 
 
 class EventReminder(BaseModel):
+    # [CLASS DOC]
+    # Strict default reminder: method (ReminderMethod) and non-negative minutes.
     """Event reminder settings"""
 
     method: ReminderMethod = Field(
@@ -55,6 +71,8 @@ class EventReminder(BaseModel):
     @field_validator("minutes")
     @classmethod
     def _validate_minutes_non_negative(cls, v: int) -> int:
+        # [FUNCTION DOC]
+        # HELPER validator: raises ValueError if minutes is None or negative; returns it otherwise.
         if v is None:
             raise ValueError("minutes is required for defaultReminders items")
         if int(v) < 0:
@@ -63,6 +81,8 @@ class EventReminder(BaseModel):
 
 
 class PatchCalendarListEventReminder(BaseModel):
+    # [CLASS DOC]
+    # Lenient reminder for PATCH: method may be "" (default) or a ReminderMethod; minutes required.
     """Event reminder settings"""
 
     method: Union[ReminderMethod, str] = ""
@@ -73,6 +93,9 @@ class PatchCalendarListEventReminder(BaseModel):
     @field_validator("minutes")
     @classmethod
     def _validate_minutes_non_negative(cls, v: int) -> int:
+        # [FUNCTION DOC]
+        # HELPER validator: intended to enforce 0..40320 minutes; returns v.
+        # KNOWN ISSUE: the condition "v < 0 and v >= 40320" can never be true, so no range check happens (negative or very large values pass).
         if v is None:
             raise ValueError("minutes is required for defaultReminders items")
         if int(v) < 0 and int(v) >= 40320:
@@ -82,6 +105,8 @@ class PatchCalendarListEventReminder(BaseModel):
     @field_validator("method")
     @classmethod
     def _validate_method(cls, v):
+        # [FUNCTION DOC]
+        # HELPER validator: "" passes through; otherwise converts to ReminderMethod or raises ValueError listing allowed values.
         if v == "":
             return v
         try:
@@ -93,6 +118,8 @@ class PatchCalendarListEventReminder(BaseModel):
 
 
 class Notification(BaseModel):
+    # [CLASS DOC]
+    # Strict notification setting: method (email) and type (NotificationType).
     """Notification setting item for CalendarList notificationSettings.notifications[]"""
 
     method: NotificationMethod = Field(
@@ -107,6 +134,8 @@ class Notification(BaseModel):
 
 
 class PatchCalendarListNotification(BaseModel):
+    # [CLASS DOC]
+    # Lenient notification for PATCH: method and type may each be "" (default) or a valid enum value.
     """Notification setting item for CalendarList notificationSettings.notifications[]"""
 
     method: Union[NotificationMethod, str] = ""
@@ -115,6 +144,8 @@ class PatchCalendarListNotification(BaseModel):
     @field_validator("method")
     @classmethod
     def _validate_method(cls, v):
+        # [FUNCTION DOC]
+        # HELPER validator: "" passes; otherwise converts to NotificationMethod or raises ValueError.
         if v == "":
             return v
         try:
@@ -127,6 +158,8 @@ class PatchCalendarListNotification(BaseModel):
     @field_validator("type")
     @classmethod
     def _validate_type(cls, v):
+        # [FUNCTION DOC]
+        # HELPER validator: "" passes; otherwise converts to NotificationType or raises ValueError.
         if v == "":
             return v
         try:
@@ -138,6 +171,8 @@ class PatchCalendarListNotification(BaseModel):
 
 
 class NotificationSettings(BaseModel):
+    # [CLASS DOC]
+    # Wrapper holding an optional list of strict Notification items.
     """Notification settings for calendar"""
 
     notifications: Optional[List[Notification]] = Field(
@@ -147,6 +182,8 @@ class NotificationSettings(BaseModel):
 
 
 class PatchCalendarListNotificationSettings(BaseModel):
+    # [CLASS DOC]
+    # Wrapper holding an optional list of lenient PatchCalendarListNotification items.
     """Notification settings for calendar"""
 
     notifications: Optional[List[PatchCalendarListNotification]] = Field(
@@ -156,6 +193,8 @@ class PatchCalendarListNotificationSettings(BaseModel):
 
 
 class ConferenceProperties(BaseModel):
+    # [CLASS DOC]
+    # Conference properties with allowedConferenceSolutionTypes (defaults to empty list).
     """Conference properties for calendar"""
 
     allowedConferenceSolutionTypes: Optional[List[str]] = Field(
@@ -167,6 +206,9 @@ class ConferenceProperties(BaseModel):
     def _validate_conference_solution_types(
         cls, v: Optional[List[str]]
     ) -> Optional[List[str]]:
+        # [FUNCTION DOC]
+        # HELPER validator: None passes; otherwise every entry must be eventHangout,
+        # eventNamedHangout or hangoutsMeet, else ValueError.
         if v is None:
             return v
 
@@ -181,6 +223,11 @@ class ConferenceProperties(BaseModel):
 
 
 class CalendarListEntry(BaseModel):
+    # [CLASS DOC]
+    # Calendar list entry resource: kind "calendar#calendarListEntry", etag, id, summary,
+    # description, location, timeZone, summaryOverride, colorId, background/foreground colors,
+    # hidden (False), selected (True), required accessRole, defaultReminders,
+    # notificationSettings, primary (False), deleted (False), conferenceProperties.
     """CalendarListEntry following Google Calendar API v3 structure"""
 
     kind: str = Field(default="calendar#calendarListEntry", description="Resource type")
@@ -225,6 +272,10 @@ class CalendarListEntry(BaseModel):
 
 
 class CalendarListInsertRequest(BaseModel):
+    # [CLASS DOC]
+    # Body for adding a calendar to the user's list: required id plus optional display
+    # fields (summaryOverride, colors, hidden default False, selected default True,
+    # defaultReminders, notificationSettings).
     """Request model for inserting calendar into user's list"""
 
     id: str = Field(..., description="Calendar ID to add to user's list")
@@ -253,6 +304,8 @@ class CalendarListInsertRequest(BaseModel):
 
 
 class CalendarListUpdateRequest(BaseModel):
+    # [CLASS DOC]
+    # Body for full update (PUT): all display fields optional with None defaults, strict reminder/notification types.
     """Request model for updating calendar list entry"""
 
     summaryOverride: Optional[str] = Field(
@@ -280,6 +333,8 @@ class CalendarListUpdateRequest(BaseModel):
 
 
 class CalendarListPatchRequest(BaseModel):
+    # [CLASS DOC]
+    # Body for PATCH: like the update request but uses the lenient Patch reminder/notification models and also accepts conferenceProperties.
     """Request model for updating calendar list entry"""
 
     summaryOverride: Optional[str] = Field(
@@ -310,6 +365,8 @@ class CalendarListPatchRequest(BaseModel):
 
 
 class CalendarListResponse(BaseModel):
+    # [CLASS DOC]
+    # List response: kind "calendar#calendarList", etag, nextPageToken, nextSyncToken and items.
     """Response model for calendar list collection"""
 
     kind: str = Field(
@@ -326,6 +383,9 @@ class CalendarListResponse(BaseModel):
 
 
 class Channel(BaseModel):
+    # [CLASS DOC]
+    # Watch channel resource: kind "api#channel", id, resourceId, resourceUri, token,
+    # expiration (integer), type (default "web_hook") and required address.
     """Channel resource for watch notifications"""
 
     kind: str = Field(default="api#channel", description="Resource type identifier")
@@ -339,6 +399,8 @@ class Channel(BaseModel):
 
 
 class WatchParams(BaseModel):
+    # [CLASS DOC]
+    # Watch params with optional ttl string of positive integer seconds.
     """Watch parameters"""
 
     ttl: Optional[str] = Field(None, description="Time to live (seconds)")
@@ -346,6 +408,8 @@ class WatchParams(BaseModel):
     @field_validator("ttl")
     @classmethod
     def _validate_ttl(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER validator: None passes; otherwise stripped value must be digits and > 0; returns stripped string; else ValueError.
         if v is None:
             return v
         s = str(v).strip()
@@ -359,6 +423,8 @@ class WatchParams(BaseModel):
 
 
 class WatchRequest(BaseModel):
+    # [CLASS DOC]
+    # Watch request body: non-empty id, type, non-empty https address, optional token and params.
     """Request model for setting up watch notifications"""
 
     id: str = Field(..., min_length=1, description="Channel identifier (non-empty)")
@@ -377,6 +443,8 @@ class WatchRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def _validate_type(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: accepts "web_hook"/"webhook" (case-insensitive) and returns "web_hook"; else ValueError.
         if v is None:
             raise ValueError("type is required")
         s = str(v).strip().lower()
@@ -388,6 +456,8 @@ class WatchRequest(BaseModel):
     @field_validator("address")
     @classmethod
     def _validate_address(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: requires an https URL with a host; returns trimmed string; else ValueError.
         if v is None:
             raise ValueError("address is required")
         s = str(v).strip()

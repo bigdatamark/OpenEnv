@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Unit tests for BrowserGym action, observation and state Pydantic models
+# (construction and defaults). Prepends repo root to sys.path.
 """Unit tests for BrowserGym models."""
 
 import os
@@ -14,6 +17,8 @@ from envs.browsergym_env.models import (
 
 
 def test_browser_gym_action_creation():
+    # [FUNCTION DOC]
+    # Action keeps action_str and has a dict metadata.
     """Test creating a BrowserGymAction."""
     action = BrowserGymAction(action_str="click('button')")
     assert action.action_str == "click('button')"
@@ -21,6 +26,8 @@ def test_browser_gym_action_creation():
 
 
 def test_browser_gym_action_with_metadata():
+    # [FUNCTION DOC]
+    # Custom metadata is preserved.
     """Test creating a BrowserGymAction with metadata."""
     action = BrowserGymAction(
         action_str="fill('username', 'john')",
@@ -32,6 +39,8 @@ def test_browser_gym_action_with_metadata():
 
 
 def test_browser_gym_observation_creation():
+    # [FUNCTION DOC]
+    # Fields are set; error defaults to "" and last_action_error to False.
     """Test creating a BrowserGymObservation."""
     obs = BrowserGymObservation(
         text="Sample page text",
@@ -50,6 +59,8 @@ def test_browser_gym_observation_creation():
 
 
 def test_browser_gym_observation_defaults():
+    # [FUNCTION DOC]
+    # Defaults: empty strings, screenshot None, no error.
     """Test BrowserGymObservation default values."""
     obs = BrowserGymObservation()
     assert obs.text == ""
@@ -63,6 +74,8 @@ def test_browser_gym_observation_defaults():
 
 
 def test_browser_gym_observation_with_error():
+    # [FUNCTION DOC]
+    # Error fields are stored.
     """Test BrowserGymObservation with error."""
     obs = BrowserGymObservation(
         text="Error state",
@@ -76,6 +89,8 @@ def test_browser_gym_observation_with_error():
 
 
 def test_browser_gym_state_creation():
+    # [FUNCTION DOC]
+    # State fields are stored.
     """Test creating a BrowserGymState."""
     state = BrowserGymState(
         episode_id="test-episode-123",
@@ -94,6 +109,8 @@ def test_browser_gym_state_creation():
 
 
 def test_browser_gym_state_defaults():
+    # [FUNCTION DOC]
+    # Defaults: no episode id, zero counters, empty strings, None task id/max steps.
     """Test BrowserGymState default values."""
     state = BrowserGymState()
     assert state.episode_id is None
@@ -108,6 +125,8 @@ def test_browser_gym_state_defaults():
 
 
 def test_browser_gym_state_with_webarena():
+    # [FUNCTION DOC]
+    # WebArena-style fields (task_id, max_steps, cum_reward) are stored.
     """Test BrowserGymState for WebArena tasks."""
     state = BrowserGymState(
         episode_id="webarena-123",
@@ -128,6 +147,8 @@ def test_browser_gym_state_with_webarena():
 
 
 def test_observation_with_all_modalities():
+    # [FUNCTION DOC]
+    # Screenshot, axtree and pruned HTML are stored.
     """Test BrowserGymObservation with all observation types."""
     obs = BrowserGymObservation(
         text="Main text",

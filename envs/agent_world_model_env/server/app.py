@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# FastAPI/ASGI application for the AWM environment. At import time it: creates one shared AWMDataLoader; builds
+# the app via openenv's create_app with a factory producing AWMEnvironment instances (up to MAX_CONCURRENT_ENVS
+# WebSocket sessions); optionally replaces the default Gradio web UI with the AWM console (when
+# ENABLE_WEB_INTERFACE is true/1/yes); replaces HTTP POST /reset and /step with handlers that return 400 (AWM needs
+# stateful WebSocket sessions); adds GET /stats; adds HTTPS-aware redirects from / and /web to /web/ if absent; and
+# installs middleware rewriting http:// Location headers to https:// for *.hf.space hosts.
 """
 Each environment in Agent World Model is a self-contained FastAPI application
 with SQLAlchemy/SQLite backend and MCP tool interface.
@@ -32,6 +39,8 @@ _shared_data_loader = AWMDataLoader()
 
 
 def _env_factory():
+    # [FUNCTION DOC]
+    # HELPER: Returns a new AWMEnvironment sharing the module-level data loader.
     return AWMEnvironment(data_loader=_shared_data_loader)
 
 
@@ -45,6 +54,11 @@ app = create_app(
 
 
 def _swap_in_custom_gradio_ui() -> None:
+    # [FUNCTION DOC]
+    # HELPER: If the web interface is enabled via environment variable, finds the framework's WebInterfaceManager and
+    # EnvironmentMetadata objects by scanning closures of existing route endpoints (matched by class name), removes the
+    # default /web mount and legacy /web/* and /ws/ui routes, then mounts the AWM Gradio app at /web.
+    # Returns early (no change) if disabled or no WebInterfaceManager is found. Side effects: mutates app.routes.
     """Replace openenv's default web UI with the AWM Web Console.
 
     The framework's ``gradio_builder`` parameter wraps our blocks inside a
@@ -129,24 +143,36 @@ app.routes[:] = [
 
 @app.post("/reset", tags=["disabled"])
 async def reset_not_supported():
+    # [FUNCTION DOC]
+    # HTTP POST /reset handler: always returns a 400 JSON response explaining HTTP mode is unsupported.
     return JSONResponse(status_code=400, content=_HTTP_NOT_SUPPORTED_RESPONSE)
 
 
 @app.post("/step", tags=["disabled"])
 async def step_not_supported():
+    # [FUNCTION DOC]
+    # HTTP POST /step handler: always returns a 400 JSON response explaining HTTP mode is unsupported.
     return JSONResponse(status_code=400, content=_HTTP_NOT_SUPPORTED_RESPONSE)
 
 
 @app.get("/stats", tags=["monitoring"])
 async def stats():
+    # [FUNCTION DOC]
+    # GET /stats: returns the session registry statistics as JSON.
     return JSONResponse(content=_registry.get_stats())
 
 
 def _has_route(path: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if any app route has exactly the given path.
     return any(getattr(r, "path", None) == path for r in app.routes)
 
 
 def _https_aware_redirect(request: Request, path: str) -> RedirectResponse:
+    # [FUNCTION DOC]
+    # HELPER: Builds an absolute redirect to the given path. Host comes from X-Forwarded-Host, else Host, else the URL
+    # netloc; scheme from X-Forwarded-Proto, else "https" for *.hf.space hosts, else the request scheme.
+    # Returns: a RedirectResponse (default 307).
     # HF's reverse proxy rewrites relative redirects into absolute URLs and
     # picks the scheme from the upstream request — which is HTTP. Build an
     # explicit absolute URL with the original scheme so the iframe doesn't
@@ -165,6 +191,8 @@ if not _has_route("/"):
 
     @app.get("/", include_in_schema=False)
     async def _root_redirect(request: Request):
+        # [FUNCTION DOC]
+        # GET / (registered only if no "/" route exists): redirects to /web/.
         return _https_aware_redirect(request, "/web/")
 
 
@@ -172,11 +200,16 @@ if not _has_route("/web"):
 
     @app.get("/web", include_in_schema=False)
     async def _web_redirect(request: Request):
+        # [FUNCTION DOC]
+        # GET /web (registered only if no "/web" route exists): redirects to /web/.
         return _https_aware_redirect(request, "/web/")
 
 
 @app.middleware("http")
 async def _force_https_redirects(request: Request, call_next):
+    # [FUNCTION DOC]
+    # HTTP middleware: after the downstream handler runs, rewrites a Location header beginning with http:// and
+    # containing ".hf.space" to use https://. Returns the (possibly modified) response.
     # HF Spaces' reverse proxy strips the original https scheme; any
     # absolute Location header we emit goes out as http:// which gets
     # blocked as mixed content inside the HF iframe. Force https for
@@ -189,6 +222,8 @@ async def _force_https_redirects(request: Request, call_next):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn on 0.0.0.0:8000 with proxy headers trusted from any IP. Blocks.
     uvicorn.run(
         app,
         host="0.0.0.0",

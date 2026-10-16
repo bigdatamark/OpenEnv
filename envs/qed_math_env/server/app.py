@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI server entry for QED Math. Creates "app" with the environment class as per-session
+# factory and the generic MCP CallToolAction/CallToolObservation types, and adds a /healthz route.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -46,11 +49,15 @@ app = create_app(
 
 @app.get("/healthz")
 async def health() -> dict[str, str]:
+    # [FUNCTION DOC]
+    # GET /healthz handler: returns a mapping with status "ok".
     """Lightweight service health endpoint for basic orchestration checks."""
     return {"status": "ok"}
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: runs the app with uvicorn on 0.0.0.0:8000.
     """Entry point for direct execution via uv run or python -m."""
     import uvicorn
 

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Abstract base for CARLA benchmark scenarios plus the common ScenarioConfig dataclass.
+# Scenarios operate on a mutable state dict owned by CarlaEnvironment (holding the CARLA
+# runtime under "carla", tool_calls, env_step, info, scenario outcome, etc.).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -20,6 +24,10 @@ from typing import Any, Dict, Generic, TypeVar
 
 @dataclass
 class ScenarioConfig:
+    # [CLASS DOC]
+    # Dataclass of common scenario settings: name, description, max_steps (50), weather
+    # (ClearNoon), ego vehicle blueprint, initial ego speed, auto_observe flag, idle_ticks (10)
+    # for inaction, and camera width/height/fov/JPEG quality. Fields can be overridden at reset.
     name: str
     description: str
     max_steps: int = 50
@@ -42,10 +50,18 @@ C = TypeVar("C", bound=ScenarioConfig)
 
 
 class BaseScenario(ABC, Generic[C]):
+    # [CLASS DOC]
+    # Generic abstract scenario parameterized by its config type. Subclasses implement reset,
+    # setup, is_done and compute_outcome and may override prompts, spawn requirements and the
+    # tick policy.
     def __init__(self, config: C):
+        # [FUNCTION DOC]
+        # Stores the config.
         self.config: C = config
 
     def build_system_prompt(self, state: Any) -> str:
+        # [FUNCTION DOC]
+        # Returns "Scenario: <name>" and the description on two lines. state is unused.
         """
         Build system prompt for LLM (optional, not used in OpenEnv HTTP/WS API).
 
@@ -54,6 +70,8 @@ class BaseScenario(ABC, Generic[C]):
         return f"Scenario: {self.config.name}\n{self.config.description}"
 
     def spawn_requirements(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns default spawn constraints: no required left/right lanes, 35 m forward space.
         """Return spawn-point constraints for CarlaEnvironment.
 
         Subclasses override to request adjacent lanes or minimum forward space.
@@ -61,6 +79,8 @@ class BaseScenario(ABC, Generic[C]):
         return {"require_left": False, "require_right": False, "min_forward_m": 35.0}
 
     def get_scene_description(self, state: Any) -> str:
+        # [FUNCTION DOC]
+        # Returns build_system_prompt(state) by default.
         """Return a human-readable scene description for the current state.
 
         Defaults to ``build_system_prompt``; subclasses may override.
@@ -69,20 +89,28 @@ class BaseScenario(ABC, Generic[C]):
 
     @abstractmethod
     def reset(self, state: Any) -> None:
+        # [FUNCTION DOC]
+        # Abstract: reset per-episode scenario state before actors are spawned.
         """Reset per-episode scenario state before spawning actors."""
         pass
 
     @abstractmethod
     def setup(self, state: Any) -> None:
+        # [FUNCTION DOC]
+        # Abstract: spawn scenario actors after the ego vehicle and sensors exist.
         """Spawn/initialize scenario actors. Called after ego + sensors exist."""
         pass
 
     @abstractmethod
     def is_done(self, state: Any) -> bool:
+        # [FUNCTION DOC]
+        # Abstract: return True when the scenario episode should end.
         pass
 
     @abstractmethod
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Abstract: return a serializable outcome dict for scoring while actors are still alive.
         """
         Compute a serializable outcome dict for scoring.
 
@@ -92,6 +120,9 @@ class BaseScenario(ABC, Generic[C]):
         pass
 
     def ticks_after_tool(self, tool_name: str, tool_args: dict, state: Any) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of world ticks to advance after a tool call: 0 if
+        # state["_tool_did_tick"] is truthy (tool already advanced time), else 1.
         """
         Scenario-specific time advancement policy.
 

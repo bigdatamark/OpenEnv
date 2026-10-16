@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for create_web_interface_app (Gradio web wrapper): /web/reset with
+# environments whose reset takes no kwargs, root redirects to /web/,
+# functools.partial env factories, and the REPL environment's web flow
+# (conflict before reset, reset kwargs, hf_token never echoed).
+# Skipped when gradio or smolagents are not installed.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the OpenEnv Gradio web interface helpers."""
@@ -21,12 +27,16 @@ from repl_env.server.repl_environment import REPLEnvironment
 
 
 class NoKwargAction(Action):
+    # [CLASS DOC]
+    # Action with an optional message (default "noop").
     """Minimal action for exercising the web wrapper."""
 
     message: str = "noop"
 
 
 class NoKwargObservation(Observation):
+    # [CLASS DOC]
+    # Observation with a required response string.
     """Minimal observation for exercising the web wrapper."""
 
     response: str
@@ -35,6 +45,8 @@ class NoKwargObservation(Observation):
 
 
 class NoKwargState(State):
+    # [CLASS DOC]
+    # State with step_count and a last_reset_marker string (default "default").
     """Minimal state for exercising the web wrapper."""
 
     step_count: int = 0
@@ -42,29 +54,44 @@ class NoKwargState(State):
 
 
 class NoKwargEnvironment(Environment):
+    # [CLASS DOC]
+    # Environment whose reset accepts no keyword arguments.
     """Environment whose reset signature intentionally accepts no kwargs."""
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes a default NoKwargState.
         super().__init__()
         self._state = NoKwargState()
 
     def reset(self) -> NoKwargObservation:
+        # [FUNCTION DOC]
+        # Replaces the state with a fresh one and returns response "reset".
         self._state = NoKwargState(step_count=0, last_reset_marker="default")
         return NoKwargObservation(response="reset")
 
     def step(self, action: NoKwargAction) -> NoKwargObservation:
+        # [FUNCTION DOC]
+        # Increments step_count and echoes the action message with reward 0.0.
         self._state.step_count += 1
         return NoKwargObservation(response=action.message, reward=0.0, done=False)
 
     @property
     def state(self) -> NoKwargState:
+        # [FUNCTION DOC]
+        # Property returning the current state.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # No-op.
         pass
 
 
 def test_web_reset_accepts_no_body_and_ignores_unsupported_kwargs() -> None:
+    # [FUNCTION DOC]
+    # POST /web/reset works with no body and with an unknown key (dropped);
+    # /web/state still shows the default marker.
     """POST /web/reset should preserve old behavior and ignore unsupported kwargs."""
     app = create_web_interface_app(
         NoKwargEnvironment,
@@ -87,6 +114,8 @@ def test_web_reset_accepts_no_body_and_ignores_unsupported_kwargs() -> None:
 
 
 def test_web_root_redirects_to_gradio_interface() -> None:
+    # [FUNCTION DOC]
+    # GET / and GET /web return 307 redirects to /web/.
     """GET / should redirect to /web/ so HF Space embeds have a live root page."""
     app = create_web_interface_app(
         NoKwargEnvironment,
@@ -105,6 +134,9 @@ def test_web_root_redirects_to_gradio_interface() -> None:
 
 
 def test_web_interface_instantiates_partial_factory() -> None:
+    # [FUNCTION DOC]
+    # A partial factory is instantiated; reset works and /web/metadata names the
+    # underlying class.
     """A `functools.partial` factory should be instantiated, like a class or function."""
     app = create_web_interface_app(
         partial(NoKwargEnvironment),
@@ -122,6 +154,9 @@ def test_web_interface_instantiates_partial_factory() -> None:
 
 
 def test_repl_web_state_before_reset_returns_conflict() -> None:
+    # [FUNCTION DOC]
+    # For REPLEnvironment, /web/state before reset returns 409 mentioning
+    # "Call reset() first".
     """GET /web/state should fail cleanly before reset instead of crashing."""
     app = create_web_interface_app(
         REPLEnvironment,
@@ -139,6 +174,10 @@ def test_repl_web_state_before_reset_returns_conflict() -> None:
 def test_repl_web_reset_passes_context_and_task_prompt_without_echoing_hf_token() -> (
     None
 ):
+    # [FUNCTION DOC]
+    # Resets the REPL env with context, task_prompt and hf_token, runs a code step
+    # counting words (expects "3"), checks state fields, and asserts the token
+    # appears nowhere in the combined reset/step/state JSON.
     """The REPL web flow should accept reset kwargs and keep the token out of state."""
     app = create_web_interface_app(
         REPLEnvironment,

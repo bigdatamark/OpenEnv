@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Observation transforms for the Julia environment: a regex-based safety check
+# that penalizes executed code containing dangerous Julia calls, plus a factory.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -29,9 +32,18 @@ except ImportError:
 # Safety Transform
 # -------------------------
 class JuliaSafetyTransform(Transform):
+    # [CLASS DOC]
+    # Transform that adds a penalty (default -3.0) to the reward of a
+    # JuliaObservation whose executed code (from metadata core_code and test_code)
+    # matches any dangerous pattern: run(, read(, write(, unsafe_, ccall(,
+    # Base.exit, Base.kill, rm(, download(.
+    # KNOWN ISSUE: patterns are unanchored substrings, so e.g. "thread(" or
+    # "rerun(" also match and are penalized.
     """Detects dangerous Julia operations and penalizes them with a negative reward."""
 
     def __init__(self, penalty: float = -3.0):
+        # [FUNCTION DOC]
+        # Stores the penalty and the list of dangerous regex patterns.
         self.penalty = penalty
         self.dangerous_patterns = [
             r"run\(",
@@ -46,6 +58,12 @@ class JuliaSafetyTransform(Transform):
         ]
 
     def __call__(self, observation):
+        # [FUNCTION DOC]
+        # Returns non-JuliaObservation inputs unchanged. Otherwise builds the code text
+        # from metadata; on the first matching pattern adds the penalty to the reward
+        # (None treated as 0.0) and records the pattern under
+        # metadata["safety_violation"]; otherwise coerces a None reward to 0.0.
+        # Mutates and returns the same observation.
         # Only act on JuliaObservation objects
         if not isinstance(observation, JuliaObservation):
             return observation
@@ -77,5 +95,7 @@ class JuliaSafetyTransform(Transform):
 # Factory
 # -------------------------
 def create_safe_julia_transform():
+    # [FUNCTION DOC]
+    # Returns a new JuliaSafetyTransform with the default penalty.
     """Creates safety transform for Julia code."""
     return JuliaSafetyTransform()

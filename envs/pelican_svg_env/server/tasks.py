@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Task catalogue for Pelican SVG: six animals (Subject) and five vehicles (Vehicle) with synonyms,
+# family words, judge features and visible wheel counts; the canonical pelican/bicycle pair; and
+# functions to build, enumerate, sample and look up tasks. A task is held out unless it is the
+# canonical pair.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """The task catalogue: which animal, on which vehicle.
@@ -35,6 +40,9 @@ from typing import Any, Sequence
 
 @dataclass(frozen=True)
 class Subject:
+    # [CLASS DOC]
+    # Immutable animal description: prompt name, exact synonyms, broader family words, and
+    # distinguishing features asked of the judge.
     """An animal that can be asked for.
 
     Attributes:
@@ -58,6 +66,8 @@ class Subject:
 
 @dataclass(frozen=True)
 class Vehicle:
+    # [CLASS DOC]
+    # Immutable vehicle description: prompt name, synonyms, side-view wheel count and features.
     """A vehicle that can be asked for.
 
     Attributes:
@@ -157,6 +167,8 @@ CANONICAL_PAIR = ("pelican", "bicycle")
 
 @dataclass(frozen=True)
 class Task:
+    # [CLASS DOC]
+    # Immutable drawing request: task_id, subject, vehicle and held_out flag.
     """One drawing request.
 
     Attributes:
@@ -179,6 +191,9 @@ class Task:
 
     @property
     def prompt(self) -> str:
+        # [FUNCTION DOC]
+        # Property: the instruction text asking for an SVG of the subject riding the vehicle, using vector
+        # primitives only, without rasters or written answers.
         """`str`: The instruction shown to the model under test."""
         return (
             f"Generate an SVG of a {self.subject.name} riding a "
@@ -191,6 +206,8 @@ class Task:
 
     @property
     def forbidden_terms(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: sorted unique list of subject synonyms, subject family words, vehicle synonyms and "riding".
         """`list[str]`: Words that must not be written into the drawing."""
         return sorted(
             {
@@ -202,6 +219,8 @@ class Task:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a mapping with task_id, subject and vehicle names, expected_wheels, held_out and prompt.
         """Return a JSON-serialisable summary of the task."""
         return {
             "task_id": self.task_id,
@@ -214,6 +233,9 @@ class Task:
 
 
 def make_task(subject: str, vehicle: str) -> Task:
+    # [FUNCTION DOC]
+    # Builds the Task for catalogue keys subject and vehicle; task_id is "subject_vehicle" with spaces
+    # replaced by hyphens. Raises KeyError for unknown names.
     """Build a task from a subject and vehicle name.
 
     Args:
@@ -249,6 +271,8 @@ def make_task(subject: str, vehicle: str) -> Task:
 
 
 def all_tasks(held_out_only: bool = False) -> list[Task]:
+    # [FUNCTION DOC]
+    # Returns all subject x vehicle tasks in catalogue order, optionally excluding the canonical pair.
     """Return every subject-by-vehicle combination in the catalogue.
 
     Args:
@@ -265,6 +289,9 @@ def all_tasks(held_out_only: bool = False) -> list[Task]:
 
 
 def sample_task(seed: int | None = None, held_out_only: bool = False) -> Task:
+    # [FUNCTION DOC]
+    # Returns one task chosen with a local Random seeded by seed (unseeded is nondeterministic),
+    # optionally excluding the canonical pair.
     """Draw one task from the grid.
 
     Args:
@@ -282,6 +309,8 @@ def sample_task(seed: int | None = None, held_out_only: bool = False) -> Task:
 
 
 def task_from_ids(task_ids: Sequence[str]) -> list[Task]:
+    # [FUNCTION DOC]
+    # Maps task ids to tasks preserving order. Raises ValueError listing unknown ids.
     """Resolve task identifiers back into tasks, preserving order."""
     index = {task.task_id: task for task in all_tasks()}
     unknown = [task_id for task_id in task_ids if task_id not in index]

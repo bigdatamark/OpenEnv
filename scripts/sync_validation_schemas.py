@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Maintenance/CI script keeping the committed JSON Schemas in
+# src/openenv/validation/schemas/ in sync with their pydantic models (manifest, report, their
+# v2 variants and the runtime plan). Adds src/ to sys.path at import.
 """Sync committed validation JSON Schemas with their pydantic models.
 
 The pydantic models in src/openenv/validation/ are the source of truth;
@@ -24,6 +28,9 @@ SCHEMAS_DIR = os.path.join(ROOT, "src", "openenv", "validation", "schemas")
 
 
 def rendered_schemas():
+    # [FUNCTION DOC]
+    # Imports the validation models lazily and renders each model's JSON schema as indented,
+    # key-sorted JSON with a trailing newline. Returns: mapping from schema file name to text.
     """Return {filename: rendered JSON text} for every exported schema."""
     from openenv.validation.manifest import NormalizedManifest, NormalizedManifestV2
     from openenv.validation.report import ValidationReport, ValidationReportV2
@@ -43,6 +50,11 @@ def rendered_schemas():
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point (requires --check or --fix): compares each rendered schema with the
+    # committed file; with --fix writes differing files, otherwise collects them as stale.
+    # Returns: 1 if any stale files were found (printing them and a fix hint), else 0.
+    # Side effects: always creates the schemas directory if missing (even in check mode).
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument(

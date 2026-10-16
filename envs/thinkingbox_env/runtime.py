@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Shared (client/server/evaluator) helpers for ThinkingBox: loading and fingerprinting native YAML
+# configuration files, and computing provenance of the installed thinkingbox package (VCS commit or source
+# tree hash) and whether it matches the git pin declared by the thinkingbox-env distribution.
 """Load shared native configuration and installed ThinkingBox provenance."""
 
 from __future__ import annotations
@@ -19,6 +23,11 @@ from thinkingbox.common.config_types import ConfigFile
 
 @dataclass(frozen=True)
 class ThinkingBoxRuntimeProvenance:
+    # [CLASS DOC]
+    # Frozen dataclass describing the installed ThinkingBox runtime: identity (commit id or
+    # "source-sha256:<hash>"), version, source type (vcs, editable, local or installed), source tree SHA-256,
+    # optional commit id, requested revision and normalised source URL, editable flag, and whether it is the
+    # canonical pinned build.
     """Describe the installed ThinkingBox package without exposing local paths."""
 
     identity: str
@@ -33,6 +42,9 @@ class ThinkingBoxRuntimeProvenance:
 
 
 def _normalized_vcs_url(value: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: strips a "git+" prefix and returns the URL with lowercased scheme and host (port kept), path
+    # without trailing slash, and no query or fragment.
     raw = value.removeprefix("git+")
     parsed = urlsplit(raw)
     host = parsed.hostname or ""
@@ -50,6 +62,9 @@ def _normalized_vcs_url(value: str) -> str:
 
 
 def _parse_thinkingbox_requirement(requirement: str) -> tuple[str, str] | None:
+    # [FUNCTION DOC]
+    # HELPER: parses a requirement string of the form "thinkingbox @ git+<url>@<40-hex sha>" (optional
+    # environment marker). Returns (normalised URL, lowercase sha) or None if it does not match.
     match = re.match(
         r"^\s*thinkingbox\s*@\s*git\+(.+)@([0-9a-fA-F]{40})(?:\s*;.*)?\s*$",
         requirement,
@@ -60,6 +75,9 @@ def _parse_thinkingbox_requirement(requirement: str) -> tuple[str, str] | None:
 
 
 def _expected_thinkingbox_vcs_pin() -> tuple[str, str] | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the first parsed thinkingbox git pin among the thinkingbox-env distribution's
+    # requirements, or None if not installed or not found.
     try:
         requirements = metadata.distribution("thinkingbox-env").requires or []
     except metadata.PackageNotFoundError:
@@ -72,6 +90,9 @@ def _expected_thinkingbox_vcs_pin() -> tuple[str, str] | None:
 
 
 def _thinkingbox_source_root() -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns the resolved directory of the installed thinkingbox package. Raises RuntimeError if it
+    # cannot be located.
     spec = importlib.util.find_spec("thinkingbox")
     locations = spec.submodule_search_locations if spec is not None else None
     if not locations:
@@ -80,6 +101,10 @@ def _thinkingbox_source_root() -> Path:
 
 
 def _source_tree_sha256(root: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: deterministic SHA-256 over all files under root (sorted by relative POSIX path; skips .git, cache
+    # dirs, __pycache__ and .pyc/.pyo), hashing each relative path and its bytes with NUL separators. Raises
+    # RuntimeError if no files are found.
     ignored = {".git", ".mypy_cache", ".pytest_cache", "__pycache__"}
     files = sorted(
         (
@@ -105,6 +130,12 @@ def _source_tree_sha256(root: Path) -> str:
 
 @lru_cache(maxsize=1)
 def load_thinkingbox_runtime_provenance() -> ThinkingBoxRuntimeProvenance:
+    # [FUNCTION DOC]
+    # Returns provenance of the installed thinkingbox distribution (cached after first call). Always hashes the
+    # source tree. If PEP 610 direct_url.json has git vcs_info, validates url and 40-hex commit (RuntimeError on
+    # invalid metadata), and marks canonical when (normalised URL, commit) equals the expected pin. Otherwise
+    # returns a non-canonical record typed editable/local/installed from dir_info.
+    # Raises RuntimeError if thinkingbox is not installed or metadata is malformed.
     """Load deterministic provenance for the installed ThinkingBox runtime."""
     try:
         distribution = metadata.distribution("thinkingbox")
@@ -170,6 +201,8 @@ def load_thinkingbox_runtime_provenance() -> ThinkingBoxRuntimeProvenance:
 
 
 def require_canonical_thinkingbox_runtime() -> ThinkingBoxRuntimeProvenance:
+    # [FUNCTION DOC]
+    # Returns the runtime provenance; raises RuntimeError if it is not the canonical pinned build.
     """Return installed runtime provenance only when it matches the VCS pin."""
     provenance = load_thinkingbox_runtime_provenance()
     if not provenance.canonical:
@@ -180,18 +213,25 @@ def require_canonical_thinkingbox_runtime() -> ThinkingBoxRuntimeProvenance:
 
 
 def _parse_thinkingbox_config(payload: bytes) -> ConfigFile:
+    # [FUNCTION DOC]
+    # HELPER: decodes UTF-8 YAML bytes and validates them into a ThinkingBox ConfigFile.
     return ConfigFile.model_validate(yaml.safe_load(payload.decode("utf-8")))
 
 
 def load_thinkingbox_config_with_sha256(
     config_path: str | Path,
 ) -> tuple[ConfigFile, str]:
+    # [FUNCTION DOC]
+    # Reads the config file bytes once (user-expanded path) and returns (parsed ConfigFile, SHA-256 hex of the
+    # bytes). Propagates I/O, YAML and validation errors.
     """Load one immutable config payload and its content fingerprint."""
     payload = Path(config_path).expanduser().read_bytes()
     return _parse_thinkingbox_config(payload), hashlib.sha256(payload).hexdigest()
 
 
 def load_thinkingbox_config(config_path: str | Path) -> ConfigFile:
+    # [FUNCTION DOC]
+    # Returns only the parsed ConfigFile for config_path.
     """Load and validate a native ThinkingBox configuration."""
     parsed, _ = load_thinkingbox_config_with_sha256(config_path)
     return parsed

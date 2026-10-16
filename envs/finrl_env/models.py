@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic data models (action and observation) for the FinRL stock trading
+# environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -16,6 +19,9 @@ from pydantic import Field
 
 
 class FinRLAction(Action):
+    # [CLASS DOC]
+    # Trading action: a list of floats, one per stock; positive means buy, negative
+    # means sell, magnitude is relative trade size (the server scales it).
     """
     Action for the FinRL environment.
 
@@ -35,6 +41,12 @@ class FinRLAction(Action):
 
 
 class FinRLObservation(Observation):
+    # [CLASS DOC]
+    # Trading observation: flattened state vector (balance, prices, holdings,
+    # indicators), current portfolio value (default 0.0) and trading date string
+    # (default ""). done/reward/metadata are inherited from Observation.
+    # KNOWN ISSUE: the docstring mentions a "terminal" attribute that does not
+    # exist; termination is conveyed by the inherited done field.
     """
     Observation from the FinRL environment.
 

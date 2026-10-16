@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Server-side browser environment that runs only inside an HF Sandbox VM:
+# launches Chromium in kiosk mode on a virtual display through Selenium, drives
+# it with Helium and xdotool, and returns screenshot observations. Reward is
+# always 0; episodes end on "finish", the step limit, a renderer timeout, or a
+# detected bot-verification page.
 """The Helium browser environment that runs only inside the sandbox."""
 
 import os
@@ -18,6 +24,11 @@ from .desktop import VirtualDesktop
 
 
 def action_delay(operation):
+    # [FUNCTION DOC]
+    # HELPER: Returns the post-action wait in seconds for an operation: 0 for
+    # "finish"; BROWSER_EXPLICIT_WAIT_SECONDS (default 3) for "wait";
+    # BROWSER_ACTION_WAIT_SECONDS (default 1.5) otherwise.
+    # Raises: ValueError if the configured value is outside [0, 10] (or unparsable).
     if operation == "finish":
         return 0.0
     name, default = (
@@ -32,6 +43,10 @@ def action_delay(operation):
 
 
 def verification_block(text):
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the page text (whitespace-normalized, lowercased)
+    # looks like a Cloudflare "verify you are human" or Vercel security checkpoint
+    # interstitial; False otherwise (None treated as "").
     normalized = " ".join((text or "").lower().split())
     return (
         "cloudflare" in normalized
@@ -43,10 +58,19 @@ def verification_block(text):
 
 
 class BrowserEnvironment(Environment):
+    # [CLASS DOC]
+    # Single-session browser environment. Requires a single-threaded executor
+    # (Selenium driver is not thread-safe). Holds the driver, the virtual desktop,
+    # a temporary Chrome profile, a BrowserState, a done flag and max_steps.
+    # Expected viewport geometry is 800x600 at device pixel ratio 1 at (0, 0).
     REQUIRES_SINGLE_THREAD_EXECUTOR = True
     VIEWPORT_GEOMETRY = [800, 600, 1, 0, 0]
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Validates that BROWSER_SANDBOX is "hf" and BROWSER_MAX_STEPS (default 20) is
+        # in [1, 200]; initializes empty driver/desktop/profile and state.
+        # Raises: RuntimeError when not in the HF sandbox; ValueError on bad max steps.
         super().__init__()
         if os.getenv("BROWSER_SANDBOX") != "hf":
             raise RuntimeError("start this environment through the HF Sandbox launcher")
@@ -60,6 +84,11 @@ class BrowserEnvironment(Environment):
             raise ValueError("BROWSER_MAX_STEPS must be between 1 and 200")
 
     def wait_for_viewport(self, process_id):
+        # [FUNCTION DOC]
+        # Polls the page's inner size, device pixel ratio and screen position up to 30
+        # times (0.5 s apart), refocusing the browser window between attempts (errors
+        # ignored), until it matches the expected viewport.
+        # Raises: RuntimeError if it never aligns.
         for _ in range(30):
             geometry = self.driver.execute_script(
                 "return [innerWidth, innerHeight, devicePixelRatio, screenX, screenY]"
@@ -74,6 +103,16 @@ class BrowserEnvironment(Environment):
         raise RuntimeError("browser viewport did not align to 800x600")
 
     def reset(self, seed=None, episode_id=None, start_url=None, **kwargs):
+        # [FUNCTION DOC]
+        # Closes any previous session, validates start_url (http/https with a host and
+        # no credentials), creates a temp profile, starts a virtual desktop and a
+        # Chromium driver (kiosk 800x600, downloads and password manager disabled,
+        # automation switch hidden), sets 30 s page-load and 10 s script timeouts, waits
+        # for viewport alignment, binds Helium to the driver, starts a new state
+        # (given episode_id or a new UUID), navigates to start_url (a load timeout is
+        # reported as error "page_load_timeout" rather than raised), sleeps the action
+        # delay and returns the observation. seed and extra kwargs are ignored.
+        # Raises: ValueError for a bad URL; any startup exception after cleanup.
         self.close()
         parsed = urlsplit(start_url or "")
         if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
@@ -128,6 +167,14 @@ class BrowserEnvironment(Environment):
             raise
 
     def step(self, action: BrowserAction, **kwargs):
+        # [FUNCTION DOC]
+        # Increments step_count and performs the action: click via xdotool at pixel
+        # coordinates, type via Helium write, key via Helium press of the mapped key,
+        # scroll down/up by abs(dy), back via driver history, finish sets done. Switches
+        # to the newest tab if several exist, then sleeps the action delay. Any
+        # exception is captured as error = exception class name. done also becomes true
+        # when step_count reaches max_steps. Returns the observation.
+        # Raises: ValueError if not reset or already done.
         if not self.driver or self.done:
             raise ValueError("reset before stepping")
         self._state.step_count += 1
@@ -165,6 +212,13 @@ class BrowserEnvironment(Environment):
         return self.observe(error)
 
     def observe(self, error=""):
+        # [FUNCTION DOC]
+        # Builds an observation: reads the page's innerText and, if it is a bot
+        # verification page, sets done with error "blocked_by_bot_verification"; a
+        # script timeout sets error "renderer_timeout" if no error yet. Takes a base64
+        # screenshot; a timeout yields an empty screenshot, done True and error
+        # "renderer_timeout". Returns the observation with current URL, error, done and
+        # reward 0.
         try:
             text = self.driver.execute_script("return document.body ? document.body.innerText : ''")
             if verification_block(text):
@@ -188,9 +242,14 @@ class BrowserEnvironment(Environment):
 
     @property
     def state(self):
+        # [FUNCTION DOC]
+        # Property returning the current BrowserState.
         return self._state
 
     def close(self):
+        # [FUNCTION DOC]
+        # Quits the driver and, regardless of errors, closes the virtual desktop and
+        # removes the temp profile; resets those references to None. Idempotent.
         try:
             if self.driver:
                 self.driver.quit()

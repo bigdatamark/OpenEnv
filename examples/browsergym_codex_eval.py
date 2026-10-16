@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Eval-only example running BrowserGym tasks with the Codex CLI as a black-box agent harness. For each episode it
+# starts (or reuses) a BrowserGym server, exposes the session through a local HTTP MCP bridge, registers it with Codex
+# in an isolated CODEX_HOME, runs "codex exec" with a prompt built from the initial observation, saves artifacts,
+# and prints per-episode and aggregate results. Side effects: sys.path changes, Docker/subprocesses, temp dirs, file writes.
 """Experimental BrowserGym evaluation example using Codex CLI as the harness.
 
 This example is eval-only. Codex runs as a black-box CLI agent and connects to
@@ -44,6 +49,9 @@ from openenv.core.harness import (
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Defines and parses CLI options (base url, image, benchmark, task name, episodes, max steps, codex binary, artifact
+    # dir, timeout). Returns the argparse namespace.
     parser = argparse.ArgumentParser(
         description="Experimental BrowserGym evaluation through Codex CLI + MCP.",
     )
@@ -101,6 +109,9 @@ def parse_args() -> argparse.Namespace:
 def build_codex_prompt(
     initial_messages: list[dict[str, object]], max_steps: int
 ) -> str:
+    # [FUNCTION DOC]
+    # Joins the non-empty stripped contents of the initial messages and prepends fixed instructions (use only browsergym
+    # MCP tools, at most max_steps actions, stop when done). Returns the prompt string.
     initial_context = "\n\n".join(
         str(message.get("content", "")).strip()
         for message in initial_messages
@@ -123,7 +134,15 @@ def build_codex_runner(
     artifact_root: Path,
     timeout_seconds: int,
 ):
+    # [FUNCTION DOC]
+    # Returns a runner callable for CLIHarnessAdapter, closed over the Codex binary path, artifact directory and timeout.
     def runner(bridge, session, limits):
+        # [FUNCTION DOC]
+        # Runner invoked with (bridge, session, limits). Verifies the Codex binary exists (RuntimeError otherwise), writes the
+        # prompt file, then in temporary CODEX_HOME and working directories starts the MCP HTTP server, runs "codex mcp add"
+        # (RuntimeError on failure) and "codex exec --json" in read-only sandbox, writing stdout/stderr and reading the last message.
+        # Returns: HarnessRolloutResult with the prompt/last-message transcript, a codex_exec event listing artifact paths,
+        # done true iff exit code 0, and metrics. Raises subprocess.TimeoutExpired if a command exceeds the timeout.
         if shutil.which(codex_bin) is None:
             raise RuntimeError(f"Codex binary not found: {codex_bin}")
 
@@ -227,6 +246,9 @@ def build_codex_runner(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: parses args, resolves the artifact root (temp dir if not given), starts the runtime, builds the session
+    # factory, runs each episode with a fresh adapter and per-episode artifact dir, prints summaries and aggregate stats.
     args = parse_args()
     artifact_root = Path(
         args.artifact_dir or tempfile.mkdtemp(prefix="browsergym-codex-artifacts-")

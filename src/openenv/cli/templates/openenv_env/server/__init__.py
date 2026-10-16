@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Template server subpackage for a generated environment; re-exports the
+# environment class.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """__ENV_TITLE_NAME__ environment server components."""

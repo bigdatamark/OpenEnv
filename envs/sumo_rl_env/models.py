@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic Action, Observation and State models for SUMO traffic signal control.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -18,6 +20,9 @@ from pydantic import Field
 
 
 class SumoAction(Action):
+    # [CLASS DOC]
+    # Action selecting the green phase index to activate (phase_id) for traffic signal ts_id (default "0").
+    # KNOWN ISSUE: the server ignores ts_id; it always controls the single agent.
     """
     Action for SUMO traffic signal control environment.
 
@@ -33,6 +38,10 @@ class SumoAction(Action):
 
 
 class SumoObservation(Observation):
+    # [CLASS DOC]
+    # Observation with the flattened feature vector (one-hot phase, min-green flag, lane densities, lane
+    # queues), its shape, the list of valid action indices, and simulation time. Redeclares done, reward
+    # (optional float) and metadata.
     """
     Observation from SUMO traffic signal environment.
 
@@ -62,6 +71,10 @@ class SumoObservation(Observation):
 
 
 class SumoState(State):
+    # [CLASS DOC]
+    # State holding episode id/step count, the SUMO configuration (network and route files, durations,
+    # green limits, reward function name) and runtime metrics (sim time, vehicle count, total and mean
+    # waiting time, mean speed).
     """
     State of SUMO traffic signal environment.
 

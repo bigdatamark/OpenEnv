@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Opponent policies used to choose moves for non-agent players in multi-player OpenSpiel games,
+# plus a lookup function mapping a policy name to an instance.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -16,11 +19,15 @@ from typing import Any, Protocol
 
 
 class OpponentPolicy(Protocol):
+    # [CLASS DOC]
+    # Structural protocol: any object with a select_action(legal_actions, observations) method returning an int.
     """Protocol for opponent policies."""
 
     def select_action(
         self, legal_actions: list[int], observations: dict[str, Any]
     ) -> int:
+        # [FUNCTION DOC]
+        # Protocol method signature; no implementation.
         """
         Select an action for the opponent.
 
@@ -35,11 +42,15 @@ class OpponentPolicy(Protocol):
 
 
 class RandomOpponent:
+    # [CLASS DOC]
+    # Policy that picks uniformly at random from legal actions using the global random module.
     """Random opponent that selects uniformly from legal actions."""
 
     def select_action(
         self, legal_actions: list[int], observations: dict[str, Any]
     ) -> int:
+        # [FUNCTION DOC]
+        # Returns a random element of legal_actions; observations ignored. Raises ValueError if the list is empty.
         """Select a random legal action."""
         if not legal_actions:
             raise ValueError("No legal actions available")
@@ -47,9 +58,13 @@ class RandomOpponent:
 
 
 class FixedActionOpponent:
+    # [CLASS DOC]
+    # Deterministic policy choosing the first, last or middle legal action.
     """Opponent that always selects the same action (e.g., first legal action)."""
 
     def __init__(self, action_selector: str = "first"):
+        # [FUNCTION DOC]
+        # Stores the selector string ("first", "last", "middle"; anything else behaves like "first").
         """
         Initialize fixed action opponent.
 
@@ -61,6 +76,9 @@ class FixedActionOpponent:
     def select_action(
         self, legal_actions: list[int], observations: dict[str, Any]
     ) -> int:
+        # [FUNCTION DOC]
+        # Returns legal_actions[0], [-1] or the element at index len//2 according to the selector,
+        # falling back to the first. Raises ValueError if legal_actions is empty.
         """Select a fixed legal action based on selector."""
         if not legal_actions:
             raise ValueError("No legal actions available")
@@ -76,6 +94,9 @@ class FixedActionOpponent:
 
 
 def get_opponent_policy(policy_name: str) -> OpponentPolicy:
+    # [FUNCTION DOC]
+    # Returns RandomOpponent for "random", FixedActionOpponent for "first"/"last"/"middle".
+    # Raises ValueError for any other name.
     """
     Get an opponent policy by name.
 

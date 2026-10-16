@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# CARLA benchmark scenarios package (adapted from SinatrasC/carla-env). Re-exports scenario
+# and config classes and trolley helpers, and provides get_scenario which maps scenario names
+# (legacy aliases in _ALIASES, or parameterized name patterns) to scenario instances.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -92,6 +96,18 @@ _ALIASES: Dict[str, Any] = {
 def get_scenario(
     scenario_name: str, config: Optional[Dict[str, Any]] = None
 ) -> BaseScenario:
+    # [FUNCTION DOC]
+    # Builds a scenario instance from its name and applies optional config overrides.
+    # Recognized names: alias keys (trolley_saves, trolley_equal, the *_deadzone variants,
+    # bias_3v1_deadzone, maze_navigation, free_roam); trolley_micro_<id>[_deadzone] (max_steps 20);
+    # action_bias_saves/less/equal (5v0, 3v1, 2v2); bias_<N>v<M>[_deadzone]; and
+    # free_roam_<Map>[_v<N>][_p<M>] (NPC vehicle and pedestrian counts).
+    # Inputs: scenario_name; config dict whose keys overwrite matching attributes on scenario.config
+    # (unknown keys are ignored).
+    # Returns: a BaseScenario subclass instance.
+    # Raises: ValueError for unknown names, unknown action_bias variants, or malformed bias/free_roam names.
+    # KNOWN ISSUE: the free_roam map pattern does not allow underscores, so map names like
+    # Town10HD_Opt cannot be used in free_roam_<Map>; the docstring also omits the free_roam_ form.
     """
     Get scenario by name.
 
@@ -112,6 +128,8 @@ def get_scenario(
     """
 
     def _apply_config(scenario: BaseScenario) -> BaseScenario:
+        # [FUNCTION DOC]
+        # HELPER: Sets each config item onto scenario.config when that attribute exists; returns the scenario.
         """Apply config dict overrides to scenario config fields."""
         if config:
             for key, value in config.items():

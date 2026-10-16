@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# CLI script that runs a single AWM task verbosely with an OpenAI-compatible agent policy, optionally enabling the
+# verifier-informed expert, and prints the final TaskResult metrics.
 """Run a single AWM task with the agent, optionally with the verifier-informed expert.
 
 Useful for inspecting one episode step by step.
@@ -22,6 +25,10 @@ from run_benchmark import _build_client, DEFAULT_BASE_URL, DEFAULT_MODEL
 
 
 async def main() -> None:
+    # [FUNCTION DOC]
+    # Parses CLI args (scenario, task index, expert flag, base url, agent/expert models, max iterations), builds the chat
+    # client from Azure/OpenAI env vars (exits if none), runs run_task with verbose output and prints reward, steps,
+    # errors and expert calls. Side effects: network I/O, stdout; raises SystemExit if no credentials.
     parser = argparse.ArgumentParser(description="Run one AWM task (verbose)")
     parser.add_argument("scenario")
     parser.add_argument("--task-idx", type=int, default=0)

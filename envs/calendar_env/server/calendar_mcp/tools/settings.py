@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Static MCP tool definitions for user settings. Exposes SETTINGS_TOOLS, a list of
+# three tool descriptors (name, description text, JSON-Schema inputSchema):
+# get_settings (requires settingId), list_settings (no inputs) and watch_settings
+# (requires id, type="web_hook", address; optional token and params.ttl).
+# Data only; no logic or side effects.
 """
 Settings Tools Module
 

@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# ThinkingBox server subpackage. Re-exports ThinkingBoxEnvironment (server and shared wire code only).
 """Expose the trusted ThinkingBox server environment.
 
 Importing this package loads only server and shared wire code; the OpenEnv

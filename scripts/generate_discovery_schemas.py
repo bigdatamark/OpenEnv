@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Maintenance script: generates (or checks) the JSON Schema files for the discovery
+# profile models (environment card, catalog snapshot, declaration) under
+# src/openenv/discovery/schemas/<PROFILE_VERSION>/.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Generate or check the packaged discovery profile schemas."""
@@ -11,6 +15,11 @@ from openenv.discovery.models import CatalogSnapshot, EnvironmentCard, PROFILE_V
 
 
 def main() -> int:
+    # [FUNCTION DOC]
+    # Entry point: for each model, builds its JSON schema by alias, adds draft 2020-12 $schema
+    # and a GitHub raw $id, serializes it (indent 2, sorted keys, trailing newline). With
+    # --check, records files that are missing or differ; otherwise writes them (creating the
+    # directory). Returns: 1 (after printing the stale files) if any differ in check mode, else 0.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: plays the Snake environment with a random or simple automated
+# policy and visualizes the grid and scores with matplotlib. Connects either by
+# starting the snake-env:latest Docker image or to a local server URL. Defines cell
+# type constants (empty, wall, fruit, head, body, tail) used for coloring.
+# KNOWN ISSUE: inserts parent.parent.parent/src into sys.path, which points outside
+# the repo for a file in examples/; the docstring also refers to
+# examples/snake_rl/play_snake.py, which is not this file's path.
 """
 Interactive Snake Game Player.
 
@@ -41,9 +49,15 @@ CELL_TAIL = 5  # Snake tail
 
 
 class SnakeGamePlayer:
+    # [CLASS DOC]
+    # Holds a SnakeEnv client plus the last step result and session statistics
+    # (episode count, best score, best fruits) and implements automated play loops.
     """Interactive snake game player with visualization."""
 
     def __init__(self, client):
+        # [FUNCTION DOC]
+        # Stores the client and initializes state: no result, running, not paused, default
+        # action 0, auto-play off with 200 ms speed, and zeroed statistics.
         """Initialize the game player."""
         self.client = client
         self.result = None
@@ -61,6 +75,9 @@ class SnakeGamePlayer:
         self.best_fruits = 0
 
     def reset_game(self):
+        # [FUNCTION DOC]
+        # Resets the env, stores and returns the result, increments episode_count and prints
+        # an episode banner. Side effects: network call, stdout.
         """Reset the game to initial state."""
         self.result = self.client.reset()
         self.episode_count += 1
@@ -68,6 +85,10 @@ class SnakeGamePlayer:
         return self.result
 
     def step_game(self, action):
+        # [FUNCTION DOC]
+        # Steps the env with SnakeAction(action), stores the result, updates best score and
+        # best fruits from the observation, and prints a message when reward is positive
+        # (fruit) or the episode is done. Returns: the step result.
         """Take a step in the game."""
         self.result = self.client.step(SnakeAction(action=action))
 
@@ -94,6 +115,10 @@ class SnakeGamePlayer:
         return self.result
 
     def create_grid_colors(self, grid):
+        # [FUNCTION DOC]
+        # HELPER: maps a 2D grid of cell codes to an HxWx3 float RGB array; the cell type is
+        # the code modulo 10, colored by type (gray empty, dark wall, red fruit, greens for
+        # head/body/tail). Unknown types stay black.
         """Convert grid to colored array for visualization."""
         grid_array = np.array(grid)
         height, width = grid_array.shape
@@ -120,6 +145,12 @@ class SnakeGamePlayer:
         return colored_grid
 
     def play_automated(self, max_steps=500, policy="random"):
+        # [FUNCTION DOC]
+        # Plays one episode with the given policy ("random": uniform action 0..2; "simple":
+        # action 0 except every 20th step random; anything else: 0) for up to max_steps,
+        # redrawing the grid and a cumulative score plot every 5 steps in interactive mode,
+        # then shows the final figure (blocking) and prints episode stats.
+        # Side effects: network calls, matplotlib windows, stdout.
         """
         Play the game with an automated agent.
 
@@ -202,6 +233,10 @@ class SnakeGamePlayer:
         print(f"    Fruits: {self.result.observation.episode_fruits}")
 
     def play_multiple_episodes(self, num_episodes=5, max_steps_per_episode=200):
+        # [FUNCTION DOC]
+        # Plays num_episodes episodes with random actions (up to max_steps_per_episode each),
+        # collects score/fruits/steps per episode, prints mean/std/best statistics and shows
+        # three bar charts. Side effects: network, matplotlib windows, stdout.
         """Play multiple episodes and show statistics."""
         print("\n" + "=" * 70)
         print(f"  Playing {num_episodes} Episodes")
@@ -268,6 +303,13 @@ class SnakeGamePlayer:
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: parses --mode (docker|local), --url, --play-mode (auto|multi),
+    # --policy, --episodes and --steps; creates the client (Docker container or remote
+    # URL, testing the latter with a reset), runs the chosen play mode and closes the
+    # container in docker mode.
+    # Returns: True on success, False if any exception occurred (traceback printed).
+    # KNOWN ISSUE: if an exception occurs, the Docker container is not closed.
     """Main function."""
     print("=" * 70)
     print("  Snake Game - Interactive Player")

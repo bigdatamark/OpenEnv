@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Benchmark CLI comparing the no-expert baseline and the verifier-informed expert condition on AWM tasks. Tasks come
+# either from a pinned split manifest or from given scenarios (optionally filtered to usable non-trivial tasks).
+# Each task runs in a fresh AWMEnv connection; per-condition summaries exclude content-filtered and infrastructure
+# errors, and a side-by-side comparison is printed when both conditions run.
+# Module constants: default base URL, Azure API version and model name from environment variables.
 """Benchmark the AWM expert-in-the-loop recipe.
 
 Runs the no-expert baseline and the verifier-informed expert condition side by side
@@ -57,6 +63,10 @@ _EXCLUDED = frozenset({CONTENT_FILTER_MARKER, RESET_ERROR, SERVER_ERROR})
 
 
 def _build_client(endpoint_env: str, key_env: str, *, required: bool):
+    # [FUNCTION DOC]
+    # HELPER: Builds an async chat client from env vars: Azure OpenAI with API key if both endpoint and key are set;
+    # Azure with Entra ID token provider if only the endpoint is set; plain AsyncOpenAI if OPENAI_API_KEY is set.
+    # Returns None if nothing is configured and required is false; raises SystemExit if required is true.
     """Create an Async chat client from env vars.
 
     Resolution order: Azure OpenAI with an API key, then Azure OpenAI with Entra ID
@@ -98,6 +108,9 @@ def _build_client(endpoint_env: str, key_env: str, *, required: bool):
 
 
 def _summary(label: str, results: list[TaskResult]) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Summarises results excluding sentinel reward types: total, excluded and valid counts, average reward (None treated
+    # as 0), number with reward_type "complete", average steps and total expert calls. Returns the stats dict.
     valid = [r for r in results if r.reward_type not in _EXCLUDED]
     excluded = len(results) - len(valid)
     stats = {
@@ -118,6 +131,8 @@ def _summary(label: str, results: list[TaskResult]) -> dict:
 
 
 def _print_summary(stats: dict) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Prints a summary stats dict (counts, average reward, completion percent, average steps, expert calls if any).
     print(f"\n{'=' * 80}\nRESULTS: {stats['label']}\n{'=' * 80}")
     print(
         f"  tasks: {stats['total']}  valid: {stats['valid']}  excluded: {stats['excluded']}"
@@ -134,6 +149,10 @@ def _print_summary(stats: dict) -> None:
 
 
 async def _collect_tasks(base_url, scenarios, num_tasks, filter_trivial):
+    # [FUNCTION DOC]
+    # HELPER: Builds the (scenario, task_idx) list. Without filtering, takes indices 0..num_tasks-1 per scenario. With
+    # filtering, probes up to 4x num_tasks indices per scenario (new env connection each) and keeps the first num_tasks
+    # usable ones, printing warnings when fewer are found. Side effects: network I/O.
     """Build the `(scenario, task_idx)` list, optionally dropping trivial/unverified tasks."""
     tasks: list[tuple[str, int]] = []
     for scenario in scenarios:
@@ -158,6 +177,9 @@ async def _collect_tasks(base_url, scenarios, num_tasks, filter_trivial):
 
 
 def _load_split(path: str, section: str) -> list[tuple[str, int]]:
+    # [FUNCTION DOC]
+    # HELPER: Loads a split manifest JSON and returns the pairs from the given section as (str, int) tuples.
+    # Raises SystemExit if the section is missing.
     with open(path, encoding="utf-8") as f:
         manifest = json.load(f)
     if section not in manifest:
@@ -171,6 +193,10 @@ def _load_split(path: str, section: str) -> list[tuple[str, int]]:
 async def _run_suite(
     base_url, agent_policy, expert, tasks, max_iters, max_tool_response_chars, verbose
 ) -> list[TaskResult]:
+    # [FUNCTION DOC]
+    # HELPER: Runs run_task for each task in order with a fresh AWMEnv, labelled "expert" or "baseline". Connection errors
+    # become a server_error TaskResult. Prints scenario headers and a per-task PASS/FILT/ERR/FAIL line with reward, steps,
+    # expert calls and duration. Returns the list of TaskResults.
     results: list[TaskResult] = []
     label = "expert" if expert is not None else "baseline"
     last_scenario = None
@@ -216,6 +242,8 @@ async def _run_suite(
 
 
 def _print_comparison(baseline: dict, expert: dict) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Prints a table comparing baseline and expert stats (average reward, complete count, average steps with deltas, expert calls).
     print(f"\n{'=' * 80}\nCOMPARISON: baseline vs expert\n{'=' * 80}")
     print(f"  {'metric':<22}{'baseline':>12}{'expert':>12}{'delta':>12}")
     print(f"  {'-' * 56}")
@@ -233,6 +261,10 @@ def _print_comparison(baseline: dict, expert: dict) -> None:
 
 
 async def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry: parses arguments, builds the agent client (required) and policy, resolves the task list (split or
+    # scenarios; SystemExit if none), runs the selected conditions (expert client from separate EXPERT env vars, falling
+    # back to the agent client), prints summaries and the comparison.
     parser = argparse.ArgumentParser(description="AWM expert-in-the-loop benchmark")
     parser.add_argument("scenarios", nargs="*", help="One or more scenario names")
     parser.add_argument("--tasks", type=int, default=5, help="Tasks per scenario")

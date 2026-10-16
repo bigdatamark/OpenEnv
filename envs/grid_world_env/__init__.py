@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Grid World environment package: a minimal 5x5 navigation environment used to
+# exercise the OpenEnv server. Re-exports GridWorldEnv, GridWorldAction and
+# GridWorldObservation.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

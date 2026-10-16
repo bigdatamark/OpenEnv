@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Client for the tau2-bench environment; a plain MCP tool client.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -19,6 +21,9 @@ from openenv.core.mcp_client import MCPToolClient
 
 
 class Tau2Env(MCPToolClient):
+    # [CLASS DOC]
+    # MCPToolClient subclass with no additions: tools are listed and called via the base class
+    # (list_tools, call_tool), and reset/state come from it as well.
     """Client for the τ²-bench environment; `MCPToolClient` provides everything."""
 
     pass

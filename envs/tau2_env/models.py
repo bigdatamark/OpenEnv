@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# State model for the MCP-only tau2-bench environment (actions/observations are the core MCP types).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -16,6 +18,9 @@ from openenv.core.env_server import State
 
 
 class Tau2State(State):
+    # [CLASS DOC]
+    # State with domain, split, task_id of the current episode, done flag, the tau2-bench reward
+    # (set when the conversation ends, default 0.0) and the evaluator's reward_info breakdown mapping.
     """
     Episode state.
 

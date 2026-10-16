@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Rollout graph data structures: TurnNode (one model call with engine prompt ids,
+# sampled ids and logprobs plus provenance), TrainingSequence (one flattened
+# root-to-leaf path with ids, loss mask and logprobs) and RolloutGraph, which links
+# calls by longest exact token prefix (falling back to message-list prefixes when no
+# token ids exist), detects retries/forks/discards structurally, and flattens paths.
+# Pure in-memory; no I/O.
 """The rollout graph: every model call a harness made, linked by token prefix.
 
 A rollout is not a list of turns. Harnesses retry, spawn subagents, generate titles, and compact
@@ -42,6 +49,8 @@ from typing import Any, Iterator
 
 
 def common_prefix_len(a: list[int], b: list[int]) -> int:
+    # [FUNCTION DOC]
+    # Returns the number of leading equal elements of two sequences.
     """How many leading tokens `a` and `b` share."""
     limit = min(len(a), len(b))
     i = 0
@@ -51,6 +60,10 @@ def common_prefix_len(a: list[int], b: list[int]) -> int:
 
 
 def _canonical_arguments(arguments: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Canonicalizes tool-call arguments for comparison: None -> ""; non-strings are
+    # JSON-dumped with sorted keys (str() if not serializable); JSON strings are re-dumped
+    # with sorted keys; non-JSON strings are stripped.
     """Tool-call arguments in a form that survives a harness re-serialising them.
 
     `arguments` travels the wire as a JSON *string*, and the string an agent sends back is not the
@@ -83,6 +96,10 @@ def _canonical_arguments(arguments: Any) -> str:
 
 
 def _message_identity(message: Any) -> tuple:
+    # [FUNCTION DOC]
+    # HELPER: Returns a comparison key (role, stripped text content, tuple of (tool name,
+    # canonical arguments)) for a message. List content is reduced to concatenated
+    # text/input_text parts; non-dict messages become ("", str(message), ()).
     """The part of a message that decides whether two messages are the same turn.
 
     Compared instead of the raw dicts because the assistant message a provider returns and the one a
@@ -123,11 +140,15 @@ def _message_identity(message: Any) -> tuple:
 
 
 def _same_message(a: Any, b: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if both messages have equal _message_identity keys.
     """Whether two messages are the same conversational turn. See `_message_identity`."""
     return _message_identity(a) == _message_identity(b)
 
 
 def _without_leading_system(messages: Any) -> list:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new list with leading system-role messages removed ([] for non-lists).
     """The message list with any leading system messages removed.
 
     Used only for PARENT LOOKUP, never for what gets stored. Some harnesses re-render their system
@@ -157,6 +178,12 @@ def _without_leading_system(messages: Any) -> list:
 
 @dataclass
 class TurnNode:
+    # [CLASS DOC]
+    # One model call. Fields: node_id, prompt_ids (engine tokenization), sampled_ids,
+    # sampled_logprobs (None if unavailable), parent_id; provenance fields index (arrival
+    # order), model, finish_reason, harness_session_id, system_digest, n_tools,
+    # request_messages, request_tools, sampling_params (actually submitted),
+    # requested_sampling_params (as the harness asked) and response_message.
     """One model call, and where it sits relative to the call before it."""
 
     node_id: str
@@ -190,10 +217,15 @@ class TurnNode:
 
     @property
     def end_ids(self) -> list[int]:
+        # [FUNCTION DOC]
+        # Returns prompt_ids followed by sampled_ids (new list).
         """Cumulative token sequence after this turn: its prompt plus what it sampled."""
         return self.prompt_ids + self.sampled_ids
 
     def context_ids(self, parent: "TurnNode | None") -> list[int]:
+        # [FUNCTION DOC]
+        # Returns the tokens this node adds before generation: the whole prompt for a root, or
+        # the prompt suffix after the parent's end_ids for a child.
         """Tokens this node adds to the sequence BEFORE the model starts generating.
 
         For a root that is the whole prompt. For a child it is the interstitial span: the tool
@@ -208,6 +240,9 @@ class TurnNode:
 
 @dataclass
 class TrainingSequence:
+    # [CLASS DOC]
+    # One flattened path: input_ids, loss_mask (1 at trainable sampled tokens), logprobs
+    # (0.0 at context), node_ids, prompt_len (tokens before the first sample), root_id, n_turns.
     """One path through the graph, flattened. Maps onto TRL's `TrainingSequence` fields."""
 
     input_ids: list[int]
@@ -220,9 +255,16 @@ class TrainingSequence:
 
     @property
     def n_trainable(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of 1s in loss_mask.
         return sum(self.loss_mask)
 
     def turn_lengths(self) -> list[int]:
+        # [FUNCTION DOC]
+        # Returns lengths of consecutive runs of 1s in loss_mask, in order.
+        # KNOWN ISSUE: turns whose logprobs were unusable (mask 0) are omitted, and two turns
+        # with no context tokens between them merge into one run, so this is not always one
+        # entry per turn as documented.
         """Sampled-token count per turn, in order. The join key against a harness trace."""
         lengths, run = [], 0
         for m in self.loss_mask:
@@ -237,6 +279,9 @@ class TrainingSequence:
 
 
 class RolloutGraph:
+    # [CLASS DOC]
+    # All model calls of one rollout. Stores nodes by id, arrival order and child lists.
+    # Linking is independent of arrival order (late-arriving ancestors adopt orphans).
     """All model calls for one rollout, linked by prefix.
 
     `add_turn` is the whole ingestion path: it finds the parent by token prefix and appends. Calls
@@ -245,12 +290,19 @@ class RolloutGraph:
     """
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Initializes empty node map, order list and children map.
         self._nodes: dict[str, TurnNode] = {}
         self._order: list[str] = []
         self._children: dict[str, list[str]] = {}
 
     # --- construction --------------------------------------------------
     def add_turn(self, node: TurnNode) -> TurnNode:
+        # [FUNCTION DOC]
+        # Ingests a node: sets its index to the arrival position, finds its parent, stores it,
+        # registers it as a child of the parent, then re-parents any existing nodes for which it
+        # is a closer exact-prefix predecessor.
+        # Returns: the same node (mutated). Side effects: mutates graph and node.
         node.index = len(self._order)
         node.parent_id = self._find_parent(node)
         self._nodes[node.node_id] = node
@@ -262,6 +314,11 @@ class RolloutGraph:
         return node
 
     def _adopt_orphaned_roots(self, node: TurnNode) -> None:
+        # [FUNCTION DOC]
+        # HELPER: For each other node whose prompt is longer than the new node's prompt, whose
+        # current parent (if any) ends before the new node's end, and whose prompt starts with
+        # the new node's end_ids, moves it under the new node. No-op if end_ids is empty.
+        # Side effects: mutates parent ids and child lists.
         """Re-parent descendants when a closer exact-prefix predecessor arrives late.
 
         `_find_parent` only looks backwards, and it skips any candidate whose `end_ids` is longer than
@@ -297,6 +354,10 @@ class RolloutGraph:
                 self._children[node.node_id].append(candidate_id)
 
     def _find_parent(self, node: TurnNode) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Returns the id of the existing node whose end_ids is the longest exact prefix
+        # of the new node's prompt (requiring a strictly shorter candidate prompt), or None.
+        # Uses _find_parent_by_messages when the node has no prompt ids.
         """The existing node whose prompt+completion is the LONGEST exact prefix of this prompt.
 
         Longest wins so a deep chain attaches to its immediate predecessor rather than to an early
@@ -324,6 +385,11 @@ class RolloutGraph:
         return best_id
 
     def _find_parent_by_messages(self, node: TurnNode) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Message-based parent lookup for captures without token ids. A candidate's span
+        # is its request messages plus its response (with role defaulted to assistant); the
+        # longest span that, after dropping leading system messages on both sides, matches the
+        # start of the node's request messages message-by-message wins. Returns its id or None.
         """Same longest-exact-prefix rule, keyed on the message list instead of token ids.
 
         Only reachable on an eval endpoint, where the upstream returns no token ids at all. Without
@@ -367,21 +433,33 @@ class RolloutGraph:
 
     # --- structure -----------------------------------------------------
     def nodes(self) -> list[TurnNode]:
+        # [FUNCTION DOC]
+        # Returns all nodes in arrival order.
         return [self._nodes[i] for i in self._order]
 
     def get(self, node_id: str) -> TurnNode:
+        # [FUNCTION DOC]
+        # Returns the node with the given id. Raises KeyError if absent.
         return self._nodes[node_id]
 
     def children(self, node_id: str) -> list[TurnNode]:
+        # [FUNCTION DOC]
+        # Returns the child nodes of node_id ([] if none or unknown).
         return [self._nodes[i] for i in self._children.get(node_id, [])]
 
     def roots(self) -> list[TurnNode]:
+        # [FUNCTION DOC]
+        # Returns nodes without a parent, in arrival order.
         return [self._nodes[i] for i in self._order if self._nodes[i].parent_id is None]
 
     def leaves(self) -> list[TurnNode]:
+        # [FUNCTION DOC]
+        # Returns nodes with no children, in arrival order.
         return [self._nodes[i] for i in self._order if not self._children.get(i)]
 
     def root_of(self, node_id: str) -> str:
+        # [FUNCTION DOC]
+        # Returns the id of the root reached by following parent links from node_id.
         """Which conversation this node belongs to. Walks parents to the top."""
         node = self._nodes[node_id]
         while node.parent_id is not None:
@@ -389,6 +467,8 @@ class RolloutGraph:
         return node.node_id
 
     def path_to(self, leaf_id: str) -> list[TurnNode]:
+        # [FUNCTION DOC]
+        # Returns the list of nodes from the root down to leaf_id.
         path: list[TurnNode] = []
         node: TurnNode | None = self._nodes[leaf_id]
         while node is not None:
@@ -397,15 +477,23 @@ class RolloutGraph:
         return list(reversed(path))
 
     def paths(self) -> Iterator[list[TurnNode]]:
+        # [FUNCTION DOC]
+        # Yields the root-to-leaf node path for every leaf.
         """Every root-to-leaf path. One per distinct trajectory, including discarded branches."""
         for leaf in self.leaves():
             yield self.path_to(leaf.node_id)
 
     def forks(self) -> list[tuple[str, list[str]]]:
+        # [FUNCTION DOC]
+        # Returns (parent_id, child_ids) for every node with more than one child.
         """Nodes with more than one child: retries, resamples, or parallel branches."""
         return [(pid, kids) for pid, kids in self._children.items() if len(kids) > 1]
 
     def discarded_nodes(self) -> list[TurnNode]:
+        # [FUNCTION DOC]
+        # Returns childless nodes judged discarded: within each sibling group (children of a
+        # fork, or roots sharing an identical prompt), if at least one sibling has children, the
+        # childless siblings are discarded. Groups where all are terminal are kept.
         """Sampled turns that led nowhere.
 
         A sibling with no children whose parent has another child that DID continue was generated and
@@ -441,6 +529,12 @@ class RolloutGraph:
 
     # --- flattening ----------------------------------------------------
     def sequence_for(self, leaf_id: str) -> TrainingSequence:
+        # [FUNCTION DOC]
+        # Flattens the path to leaf_id into a TrainingSequence: for each node, appends its
+        # context ids (mask 0, logprob 0.0), then its sampled ids with mask 1 and its logprobs
+        # when logprobs exist and match the sampled length, otherwise mask 0 and zero logprobs.
+        # prompt_len is the root's context length.
+        # Raises: KeyError for unknown ids.
         """Flatten one root-to-leaf path into token ids, mask and logprobs.
 
         Invariant enforced here rather than trusted: a turn whose logprobs are missing or misaligned
@@ -484,9 +578,13 @@ class RolloutGraph:
         )
 
     def sequences(self) -> list[TrainingSequence]:
+        # [FUNCTION DOC]
+        # Returns one TrainingSequence per leaf.
         return [self.sequence_for(leaf.node_id) for leaf in self.leaves()]
 
     def stats(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns counts: n_turns, n_roots, n_leaves, n_forks, n_discarded.
         return {
             "n_turns": len(self._order),
             "n_roots": len(self.roots()),

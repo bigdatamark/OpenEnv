@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Startup checks for the Harbor server/CLI: loads a dotenv file into the environment,
+# probes the LLM endpoint (reachability, served model, capture level / token-id support),
+# builds the Capabilities object (harnesses, sandbox credentials, datasets, LLM status),
+# optionally prints it, and fails only when a required LLM is missing or unreachable.
 """Everything that must be true before the server accepts a request.
 
 Four checks, in the order that fails cheapest first:
@@ -36,6 +41,11 @@ _ENV_LOADED = False
 
 
 def load_env_file(path: str | Path | None = None) -> list[str]:
+    # [FUNCTION DOC]
+    # Reads a dotenv file (path, else $OPENENV_ENV_FILE, else ./.env; ~ expanded). Ignores
+    # blank, comment and lines without "="; strips whitespace and surrounding quotes from
+    # values; sets only variables not already in os.environ. Returns the names set (empty if
+    # the file does not exist). Side effects: mutates os.environ; sets the module flag.
     """Export `KEY=value` pairs from a dotenv file into the process environment.
 
     Existing variables win: an operator who exported something deliberately should not have it
@@ -80,6 +90,19 @@ def prepare(
     auth_header: str = "Authorization",
     provider: str = "openai",
 ) -> Capabilities:
+    # [FUNCTION DOC]
+    # Loads env file, then resolves model ($OPENENV_MODEL), api_key ($OPENENV_LLM_API_KEY),
+    # datasets ($OPENENV_DATASETS, comma-separated) and sandboxes ($OPENENV_SANDBOXES).
+    # Raises RuntimeError if require_llm and no llm_url. With an llm_url: if no model, lists
+    # served models and uses the single one (else empty); runs validate_llm when a model is
+    # known and records url, model, ok, findings, served models, capture level, rollout type,
+    # trainable, reachable, param fixes, logprobs mode, tool support and whether a key was
+    # used (never the key); without a model records a not-ok finding. Builds Capabilities
+    # from datasets, llm and sandboxes (dataset resolution and sandbox preflight happen
+    # there), prints its rendering unless quiet, then raises RuntimeError (with findings and
+    # engine hint) if require_llm and the LLM info is not reachable. Returns Capabilities.
+    # Side effects: network calls to the LLM, env var mutation, stdout printing.
+    # KNOWN ISSUE: the docstring does not document the provider argument.
     """Run every startup check and return what this server can do.
 
     Args:

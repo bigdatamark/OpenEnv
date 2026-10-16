@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the CARLA environment server.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -18,6 +20,9 @@ from .models import CarlaAction, CarlaObservation, CarlaState
 
 
 class CarlaEnv(EnvClient[CarlaAction, CarlaObservation, CarlaState]):
+    # [CLASS DOC]
+    # Typed EnvClient that serializes CarlaAction, and parses CarlaObservation and CarlaState.
+    # reset accepts extra keyword args (scenario_name, scenario_config) forwarded by the base class.
     """
     Client for CARLA environment.
 
@@ -57,6 +62,8 @@ class CarlaEnv(EnvClient[CarlaAction, CarlaObservation, CarlaState]):
         base_url: str = "http://localhost:8000",
         **kwargs: Any,
     ):
+        # [FUNCTION DOC]
+        # Passes base_url (default http://localhost:8000) and other kwargs to EnvClient.
         """
         Initialize CARLA environment client.
 
@@ -67,10 +74,16 @@ class CarlaEnv(EnvClient[CarlaAction, CarlaObservation, CarlaState]):
         super().__init__(base_url=base_url, **kwargs)
 
     def _step_payload(self, action: CarlaAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the action's model_dump dict as the step payload.
         """Convert CarlaAction to JSON payload."""
         return action.model_dump()
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[CarlaObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult from a response dict: CarlaObservation from "observation",
+        # reward from "reward" (may be None), done from "done" (default False).
+        # Raises: KeyError if "observation" is missing; pydantic ValidationError for bad fields.
         """Parse JSON response to StepResult."""
         observation = CarlaObservation(**payload["observation"])
         return StepResult(
@@ -80,5 +93,7 @@ class CarlaEnv(EnvClient[CarlaAction, CarlaObservation, CarlaState]):
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> CarlaState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a CarlaState from the state payload dict.
         """Parse JSON response to CarlaState."""
         return CarlaState(**payload)

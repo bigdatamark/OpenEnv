@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI entry point for Grid World: builds the app via create_app with the
+# environment class as factory, allowing up to MAX_CONCURRENT_ENVS (default 8)
+# concurrent sessions.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -38,6 +42,8 @@ app = create_app(
 
 # --- 3. Add Entry Point ---
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn serving the app on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

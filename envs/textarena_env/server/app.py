@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# FastAPI app for TextArena. At import reads TEXTARENA_ENV_ID (default Wordle-v0), TEXTARENA_NUM_PLAYERS
+# (default 1), TEXTARENA_MAX_TURNS (optional), TEXTARENA_DOWNLOAD_NLTK (default on), any TEXTARENA_KW_*
+# vars as extra game kwargs, and MAX_CONCURRENT_ENVS (default 8). Builds the module-level app with a
+# per-session factory, adding the custom Gradio tab only when the installed create_app accepts
+# gradio_builder (logs a warning otherwise).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -28,6 +34,9 @@ except ImportError:
 
 
 def _parse_env_kwargs(prefix: str = "TEXTARENA_KW_") -> dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: returns a mapping of all env vars starting with prefix, keyed by the remainder lowercased, with
+    # string values.
     """Collect arbitrary environment kwargs from the process environment."""
 
     env_kwargs: dict[str, str] = {}
@@ -50,6 +59,8 @@ max_concurrent = int(os.getenv("MAX_CONCURRENT_ENVS", "8"))
 
 # Factory function to create TextArenaEnvironment instances
 def create_textarena_environment():
+    # [FUNCTION DOC]
+    # Factory returning a new TextArenaEnvironment configured from the module-level settings.
     """Factory function that creates TextArenaEnvironment with config."""
     return TextArenaEnvironment(
         env_id=env_id,
@@ -90,6 +101,8 @@ else:
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default 8000) and serves the app with uvicorn; blocks.
     """
     Entry point for direct execution via uv run or python -m.
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Opt-in end-to-end smoke test for ACASandboxProvider against real Azure Container Apps
+# sandboxes (skipped unless OPENENV_ACA_INTEGRATION=1 and OPENENV_ACA_DISK are set).
+# Proves the WebSocket reset/step/state round trip through the anonymous-port ingress,
+# optionally under a default-deny egress policy.
 """Opt-in smoke test for ACASandboxProvider against real Azure resources.
 
 This is the end-to-end test you run locally against a real ACA Sandbox Group to
@@ -91,6 +96,9 @@ _DEFAULT_PYPI_ALLOW = "pypi.org,*.pypi.org,files.pythonhosted.org,*.pythonhosted
 
 
 def _bootstrap_cmd() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns a shell command that base64-decodes the bundled aca_integration_server.py
+    # to /tmp, pip installs fastapi/uvicorn/websockets and execs the server. Reads the fixture file.
     """Build a start command that runs the bundled server on a public disk.
 
     Base64-encodes the fixture so the whole command survives the provider's
@@ -114,6 +122,12 @@ def _bootstrap_cmd() -> str:
     reason="Set OPENENV_ACA_INTEGRATION=1 to run the real ACA smoke test",
 )
 async def test_aca_provider_real_sandbox_smoke():
+    # [FUNCTION DOC]
+    # Uses OPENENV_ACA_CMD or the bootstrap command (defaulting the egress allowlist to PyPI),
+    # starts a sandbox from the disk image, asserts an https URL, waits for readiness, checks
+    # /health, then via GenericEnvClient runs reset(seed 7), a step (OPENENV_ACA_STEP_ACTION
+    # JSON or a default message) and state(), asserting dict results. Always closes the
+    # provider. Side effects: creates real cloud resources and network calls.
     disk = os.environ.get("OPENENV_ACA_DISK")
     if not disk:
         pytest.skip("Set OPENENV_ACA_DISK to an ACA disk image that runs OpenEnv")

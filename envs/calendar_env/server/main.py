@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# FastAPI application entry point for the Calendar API clone. Loads .env, configures
+# logging, imports all API routers and (if importable) the OpenEnv wrapper. Builds the app
+# with a lifespan that initializes the seed database and registers OpenEnv /reset,
+# /step, /state routes via MCPHTTPEnvServer; adds permissive CORS; mounts MCP, core,
+# database, calendars, calendarList, events, colors, users, settings, ACL and freebusy
+# routers; defines root redirects and a 500 handler.
 """
 Calendar API Clone - FastAPI Application
 Complete implementation of Google Calendar APIs
@@ -50,6 +57,9 @@ except ImportError as e:
 
 
 def create_calendar_environment():
+    # [FUNCTION DOC]
+    # Factory called per OpenEnv session: returns a new MCPEnvironment using env vars
+    # DEFAULT_DATABASE_ID (default "default") and DEFAULT_AUTH_TOKEN (may be None).
     """
     Factory function for creating Calendar environment with config.
 
@@ -63,6 +73,11 @@ def create_calendar_environment():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # [FUNCTION DOC]
+    # Async context manager for app startup/shutdown. Startup: init_seed_database (creates
+    # seed store), then, if OpenEnv imports succeeded, creates MCPHTTPEnvServer with the
+    # factory and registers its routes on the app; failures are logged and ignored.
+    # Shutdown: only logs.
     """
     Generic lifespan event handler for OpenEnv integration.
 
@@ -192,18 +207,25 @@ app.include_router(freebusy_router)
 
 @app.get("/", include_in_schema=False)
 async def root():
+    # [FUNCTION DOC]
+    # GET "/": redirects to /docs.
     """Redirect root to API documentation"""
     return RedirectResponse(url="/docs")
 
 
 @app.get("/api", include_in_schema=False)
 async def api_root():
+    # [FUNCTION DOC]
+    # GET "/api": redirects to /docs.
     """API root endpoint"""
     return RedirectResponse(url="/docs")
 
 
 @app.exception_handler(500)
 async def internal_error_handler(request, exc):
+    # [FUNCTION DOC]
+    # Exception handler for status 500: logs the URL and error and returns a JSON 500 with
+    # generic error/message/support fields.
     """Custom 500 handler"""
     from fastapi.responses import JSONResponse
 

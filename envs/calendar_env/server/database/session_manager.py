@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Per-database_id SQLAlchemy engine/session management for calendar SQLite files stored
+# under ./mcp_databases/calendar_<id>.sqlite, plus schema introspection of the ORM models.
 """
 Calendar Session Manager - Database session handling for Calendar services using SQLAlchemy
 """
@@ -14,19 +17,28 @@ logger = logging.getLogger(__name__)
 
 
 class CalendarSessionManager:
+    # [CLASS DOC]
+    # Caches one engine and one sessionmaker per database id in instance dicts.
     """Calendar session manager with SQLAlchemy support for calendar services"""
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes empty engine and sessionmaker caches.
         self._engines = {}  # Cache engines per database
         self._session_makers = {}  # Cache session makers per database
 
     def get_db_path(self, db_id: str) -> str:
+        # [FUNCTION DOC]
+        # Returns "./mcp_databases/calendar_<db_id>.sqlite". Side effect: creates ./mcp_databases if missing.
         """Get database path for a specific session ID"""
         databases_dir = "./mcp_databases"
         os.makedirs(databases_dir, exist_ok=True)
         return os.path.join(databases_dir, f"calendar_{db_id}.sqlite")
 
     def get_engine(self, db_id: str):
+        # [FUNCTION DOC]
+        # Returns the cached engine for db_id, creating a SQLite engine (check_same_thread off,
+        # pre-ping, 1h recycle) on first use. Does not create tables.
         """Get SQLAlchemy engine for the specified database"""
         if db_id not in self._engines:
             db_path = self.get_db_path(db_id)
@@ -41,6 +53,8 @@ class CalendarSessionManager:
         return self._engines[db_id]
 
     def get_session_maker(self, db_id: str):
+        # [FUNCTION DOC]
+        # Returns the cached sessionmaker bound to db_id's engine, creating it on first use.
         """Get SQLAlchemy session maker for the specified database"""
         if db_id not in self._session_makers:
             engine = self.get_engine(db_id)
@@ -48,11 +62,15 @@ class CalendarSessionManager:
         return self._session_makers[db_id]
 
     def get_session(self, db_id: str):
+        # [FUNCTION DOC]
+        # Returns a new Session for db_id; caller is responsible for closing it.
         """Get SQLAlchemy session for the specified database"""
         session_maker = self.get_session_maker(db_id)
         return session_maker()
 
     def close_session(self, db_id: str):
+        # [FUNCTION DOC]
+        # Drops the cached sessionmaker and disposes/removes the cached engine for db_id; logs. Does not delete the file.
         """Close and remove session for the specified database"""
         if db_id in self._session_makers:
             del self._session_makers[db_id]
@@ -62,6 +80,9 @@ class CalendarSessionManager:
         logger.info(f"Closed session for database id '{db_id}'")
 
     def init_database(self, db_id: str, create_tables: bool = False):
+        # [FUNCTION DOC]
+        # Ensures an engine exists for db_id and, only if create_tables is True, creates all ORM
+        # tables. Returns None. Re-raises any error after logging.
         """Initialize the database with SQLAlchemy models"""
         try:
             engine = self.get_engine(db_id)
@@ -79,6 +100,13 @@ class CalendarSessionManager:
             raise
 
     def get_database_schema(self) -> Dict:
+        # [FUNCTION DOC]
+        # Builds a description of every table in Base.metadata: returns a dict table_name ->
+        # {"table_name", "columns": name -> SQL-like definition string (mapped type such as
+        # INTEGER/TEXT/BOOLEAN/REAL/DATETIME, PRIMARY KEY, AUTOINCREMENT, UNIQUE, NOT NULL,
+        # DEFAULT), "foreign_keys": list of FOREIGN KEY strings, "indexes": list of index strings}.
+        # No DB access.
+        # KNOWN ISSUE: python_type raises NotImplementedError for some column types rather than being absent, so the hasattr branch may raise; also "AUTOINCREMENT" is appended whenever autoincrement is truthy, including its default "auto" value, and unique indexes render as "UNIQUE INDEX" while others render as "INDEX INDEX".
         """Get the database schema definition dynamically from SQLAlchemy models"""
         from sqlalchemy import inspect
 

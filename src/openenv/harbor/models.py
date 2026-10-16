@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Pydantic wire types for harbor_env (task refs, captured turns, conversations, step
+# results, rollout results, session state) and helpers that convert a capture document
+# (turn nodes + sequences from the capture proxy) into HarborTurn rows and
+# HarborConversation transcripts.
 """Wire types for harbor_env.
 
 Two shapes matter. `HarborTaskRef` is what the Task API hands out during discovery, one per dataset
@@ -18,6 +23,8 @@ from pydantic import BaseModel, Field
 
 
 class HarborTaskRef(BaseModel):
+    # [CLASS DOC]
+    # One task from the Task API: index, task id, task name, dataset spec and instruction text.
     """One task, as returned by the Task API. What a trainer's dataset holds per row."""
 
     index: int
@@ -28,6 +35,11 @@ class HarborTaskRef(BaseModel):
 
 
 class HarborTurn(BaseModel):
+    # [CLASS DOC]
+    # One captured model call: turn index, role, finish reason, engine prompt/completion
+    # token ids, per-token logprobs, optional full prompt+completion loss mask, capture node
+    # id, tool count, discarded/trainable flags, submitted and requested sampling params,
+    # assistant text, flat tool calls, and the request messages/tools that produced it.
     """One model call, captured exactly. The unit a trainer consumes.
 
     `prompt_token_ids` is the engine's own tokenisation of everything before this turn, not a local
@@ -76,6 +88,9 @@ class HarborTurn(BaseModel):
 
 
 class HarborConversation(BaseModel):
+    # [CLASS DOC]
+    # One full conversation per capture root: root id, role (agent/auxiliary/discarded),
+    # turn count and full message list including the final assistant response.
     """One complete conversation from a rollout, exactly as the harness assembled it.
 
     A rollout can contain several: a root is a conversation that started from a fresh prompt, so
@@ -91,6 +106,8 @@ class HarborConversation(BaseModel):
 
 
 class HarborStepResult(BaseModel):
+    # [CLASS DOC]
+    # One step of a multi-step task: name, rewards mapping and passed flag.
     """One step of a multi-step task. Harbor gates progression on `min_reward`."""
 
     name: str = ""
@@ -99,6 +116,11 @@ class HarborStepResult(BaseModel):
 
 
 class HarborRolloutResult(BaseModel):
+    # [CLASS DOC]
+    # Everything a rollout returns: identity fields, verifier reward(s) and reward key, step
+    # results, rollout type (train/eval) and capture level, upstream param fixes, turns,
+    # conversations, counts, ATIF/trace check status, findings, timings, agent log tail, and
+    # failure info (ok, error, exception type). Failures are represented, not raised.
     """Everything one rollout produced.
 
     A failed rollout is still a valid result: `ok=False`, `error` set, `reward=None`. Nothing raises
@@ -133,6 +155,8 @@ class HarborRolloutResult(BaseModel):
 
     @property
     def trainable(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True when rollout_type is "train".
         return self.rollout_type == "train"
 
     # capture
@@ -164,11 +188,16 @@ class HarborRolloutResult(BaseModel):
 
     @property
     def solved(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True when a reward exists and is > 0.
         """Graded AND positive. `reward is None` means the verifier never ran, which is not a zero."""
         return self.reward is not None and self.reward > 0
 
 
 class HarborState(State):
+    # [CLASS DOC]
+    # OpenEnv State subclass with per-session counters: rollouts completed, last reward,
+    # task id, trial name, plus the LLM URL and capture intercept URL.
     """Per-session counters. Mutated inside the tool, since `step` only dispatches."""
 
     rollouts_completed: int = 0
@@ -180,6 +209,9 @@ class HarborState(State):
 
 
 def _assistant_text(response: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the assistant text from a response message: joins "text" parts of a
+    # block list with spaces, returns a string content as-is, else "".
     """The assistant's own words, flattened across the shapes the four dialects produce."""
     content = response.get("content")
     if isinstance(content, list):  # anthropic / responses send block lists
@@ -192,6 +224,10 @@ def _assistant_text(response: dict[str, Any]) -> str:
 
 
 def _tool_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: returns flat {name, arguments} tool calls from a response: OpenAI-style
+    # tool_calls (function.name/arguments or top-level name/arguments; nameless skipped) plus
+    # Anthropic "tool_use" content blocks (arguments = input).
     """Tool calls as `{name, arguments}`, normalised across dialects.
 
     Kept as data rather than a rendered string: a reward function that wants to check which tool ran
@@ -228,6 +264,11 @@ def _tool_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def conversations_from_document(document: dict[str, Any]) -> list[HarborConversation]:
+    # [FUNCTION DOC]
+    # For each sequence in the capture document with node ids, takes the last node's request
+    # messages and appends its response (role defaulting to assistant); skips empty ones.
+    # Keys by root_id (or first node id) and keeps the candidate with the most messages per
+    # root. Returns the conversations in first-seen root order.
     """Rebuild the full conversations, system prompt and tool results included.
 
     The deepest node of a chain already carries the whole conversation in `request_messages`, since
@@ -266,6 +307,16 @@ def conversations_from_document(document: dict[str, Any]) -> list[HarborConversa
 
 
 def turns_from_document(document: dict[str, Any]) -> list[HarborTurn]:
+    # [FUNCTION DOC]
+    # Builds HarborTurn rows from "agent" sequences only. For each node in a sequence slices
+    # the sequence input_ids into prompt (first n_prompt) and completion (next n_sampled),
+    # takes the loss-mask span for the completion, logprobs from the node's sampled_logprobs
+    # or the sequence slice, and request/response details from the node. Nodes shared by
+    # several sequences are emitted once. Turn indices are sequential over emitted rows;
+    # trainable means at least one mask bit is 1.
+    # Raises ValueError for negative counts, spans beyond input_ids or a mask span of the
+    # wrong length, or a shared node whose mask span differs between sequences; KeyError if
+    # a sequence lacks input_ids/logprobs/node_ids.
     """Flatten a capture document into per-turn training rows.
 
     Only `agent` sequences become turns. Auxiliary calls are dropped here rather than marked,

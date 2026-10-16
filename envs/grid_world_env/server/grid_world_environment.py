@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Server-side Grid World environment: a 5x5 grid, agent starts at (0, 0), goal
+# at (4, 4). Also provides optional web playground hooks (move buttons and an
+# HTML board rendering).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -16,6 +20,10 @@ from ..models import GridWorldAction, GridWorldObservation, MoveAction
 
 
 class GridWorldEnvironment(Environment):
+    # [CLASS DOC]
+    # Environment with agent coordinates (agent_x is the row, agent_y the column),
+    # fixed grid size 5 and goal [4, 4]. Supports concurrent sessions (each session
+    # gets its own instance).
     """
     A simple 5x5 Grid World environment.
 
@@ -25,6 +33,8 @@ class GridWorldEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Sets grid size, goal, agent at (0, 0) and a State with a new UUID and step 0.
         super().__init__()
 
         # ---Environment Configuration ---
@@ -39,6 +49,9 @@ class GridWorldEnvironment(Environment):
         self._state = State(episode_id=str(uuid.uuid4()), step_count=0)
 
     def reset(self) -> GridWorldObservation:
+        # [FUNCTION DOC]
+        # Moves the agent back to (0, 0), resets step_count and assigns a new episode
+        # UUID. Returns the welcome observation with reward 0.0 and done False.
         # Update State
         self.agent_x = 0
         self.agent_y = 0
@@ -55,6 +68,11 @@ class GridWorldEnvironment(Environment):
         )
 
     def step(self, action: GridWorldAction) -> GridWorldObservation:
+        # [FUNCTION DOC]
+        # Increments step_count, applies the move (UP/DOWN change agent_x i.e. row,
+        # LEFT/RIGHT change agent_y i.e. column), clamps to the grid, and returns an
+        # observation. Reward is -0.1 per step and 1.0 with done True on reaching the
+        # goal. Episodes never end otherwise (no step limit).
         # Increment step counter in the base State
         self._state.step_count += 1
         # =============================================
@@ -102,6 +120,10 @@ class GridWorldEnvironment(Environment):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns one (label, action-dict) button per MoveAction,
+        # label being an arrow plus the lowercase move name, action dict {"action": move}.
+        # The observation argument is unused.
         """The four moves as buttons."""
         arrows = {"UP": "↑", "DOWN": "↓", "LEFT": "←", "RIGHT": "→"}
         return [
@@ -110,6 +132,10 @@ class GridWorldEnvironment(Environment):
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns an HTML string drawing the grid as styled spans,
+        # marking the agent cell with a dot and the goal with a star (agent wins if both).
+        # Returns None if the observation dict has no "x" key.
         """Draw the grid with the agent (a dot) and the goal (a star)."""
         if "x" not in observation:
             return None
@@ -139,4 +165,6 @@ class GridWorldEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State.
         return self._state

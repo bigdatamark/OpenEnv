@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Unit tests for the Agent World Model (AWM) environment modules: scenario name
+# normalization, JSONL loading, AWMDataLoader over a mock data directory,
+# SQLite db_manager helpers, SQL/code verifiers and run_verifier, Azure URL
+# normalization, models and the environment/MCP behaviour. Side effects:
+# prepends the repo root and src/ to sys.path at import time.
 """Unit tests for Agent World Model environment modules."""
 
 import json
@@ -35,19 +41,31 @@ from envs.agent_world_model_env.server.verifier import (
 
 
 class TestNormalizeScenarioName:
+    # [CLASS DOC]
+    # Tests for normalize_scenario_name.
     def test_simple(self):
+        # [FUNCTION DOC]
+        # Already-normal names are unchanged.
         assert normalize_scenario_name("e_commerce_33") == "e_commerce_33"
 
     def test_uppercase(self):
+        # [FUNCTION DOC]
+        # Names are lowercased.
         assert normalize_scenario_name("E_Commerce_33") == "e_commerce_33"
 
     def test_spaces_and_special(self):
+        # [FUNCTION DOC]
+        # Spaces and punctuation collapse to single underscores.
         assert normalize_scenario_name("My App - v2!") == "my_app_v2"
 
     def test_multiple_underscores(self):
+        # [FUNCTION DOC]
+        # Repeated underscores collapse.
         assert normalize_scenario_name("foo___bar") == "foo_bar"
 
     def test_leading_trailing(self):
+        # [FUNCTION DOC]
+        # Leading/trailing underscores are stripped.
         assert normalize_scenario_name("__test__") == "test"
 
 
@@ -55,7 +73,11 @@ class TestNormalizeScenarioName:
 
 
 class TestLoadJsonl:
+    # [CLASS DOC]
+    # Tests for _load_jsonl.
     def test_basic(self, tmp_path):
+        # [FUNCTION DOC]
+        # Parses one JSON object per line into a list.
         p = tmp_path / "test.jsonl"
         p.write_text('{"a": 1}\n{"b": 2}\n')
         result = _load_jsonl(str(p))
@@ -64,6 +86,8 @@ class TestLoadJsonl:
         assert result[1] == {"b": 2}
 
     def test_empty_lines(self, tmp_path):
+        # [FUNCTION DOC]
+        # Blank lines are skipped.
         p = tmp_path / "test.jsonl"
         p.write_text('{"a": 1}\n\n{"b": 2}\n\n')
         result = _load_jsonl(str(p))
@@ -75,6 +99,10 @@ class TestLoadJsonl:
 
 @pytest.fixture
 def mock_data_dir(tmp_path):
+    # [FUNCTION DOC]
+    # Fixture: writes the seven gen_*.jsonl files (scenarios, tasks, env code, DB
+    # schemas, sample inserts, SQL verifiers, pure-code verifiers) for test_shop
+    # and test_bank into tmp_path; returns the directory path.
     """Create a minimal mock data directory with all required files."""
 
     scenarios = [
@@ -227,7 +255,11 @@ def mock_data_dir(tmp_path):
 
 
 class TestAWMDataLoader:
+    # [CLASS DOC]
+    # Tests for AWMDataLoader reading the mock data dir as its cache.
     def test_list_scenarios(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Lists both scenarios by name.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         scenarios = loader.list_scenarios()
         assert len(scenarios) == 2
@@ -236,6 +268,8 @@ class TestAWMDataLoader:
         assert "test_bank" in names
 
     def test_list_scenarios_has_tasks(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Scenario entries include num_tasks and task strings.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         scenarios = loader.list_scenarios()
         shop = next(s for s in scenarios if s["name"] == "test_shop")
@@ -243,49 +277,67 @@ class TestAWMDataLoader:
         assert "Buy a widget" in shop["tasks"]
 
     def test_scenario_exists(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # True for known scenarios, False otherwise.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         assert loader.scenario_exists("test_shop") is True
         assert loader.scenario_exists("nonexistent") is False
 
     def test_get_env_code(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Returns the scenario's full_code.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         code = loader.get_env_code("test_shop")
         assert "test shop code" in code
 
     def test_get_env_code_not_found(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Unknown scenarios raise ValueError "not found".
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         with pytest.raises(ValueError, match="not found"):
             loader.get_env_code("nonexistent")
 
     def test_get_tasks(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Returns the ordered task list.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         tasks = loader.get_tasks("test_shop")
         assert len(tasks) == 2
         assert tasks[0] == "Buy a widget"
 
     def test_get_tasks_empty(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Unknown scenarios yield an empty list.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         tasks = loader.get_tasks("nonexistent")
         assert tasks == []
 
     def test_get_verifier(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Returns the SQL verifier record with a verification key.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         v = loader.get_verifier("test_shop", 0, "sql")
         assert v is not None
         assert "verification" in v
 
     def test_get_verifier_not_found(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Unknown task index returns None.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         v = loader.get_verifier("test_shop", 99, "sql")
         assert v is None
 
     def test_get_db_schema(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Returns the schema with one table.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         schema = loader.get_db_schema("test_shop")
         assert "tables" in schema
         assert len(schema["tables"]) == 1
 
     def test_get_sample_data(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Returns sample data for the products table.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         data = loader.get_sample_data("test_shop")
         assert len(data) == 1
@@ -296,7 +348,11 @@ class TestAWMDataLoader:
 
 
 class TestDBManager:
+    # [CLASS DOC]
+    # Tests for db_manager helpers.
     def test_create_database(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # create_database builds the SQLite file from schema and inserts (2 rows).
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         schema = loader.get_db_schema("test_shop")
         sample = loader.get_sample_data("test_shop")
@@ -316,6 +372,8 @@ class TestDBManager:
             assert count == 2
 
     def test_save_snapshot(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # save_snapshot copies the DB so later writes to the original don't affect it.
         loader = AWMDataLoader(cache_dir=mock_data_dir)
         schema = loader.get_db_schema("test_shop")
         sample = loader.get_sample_data("test_shop")
@@ -343,6 +401,8 @@ class TestDBManager:
             assert count == 2
 
     def test_cleanup_session_dir(self):
+        # [FUNCTION DOC]
+        # cleanup_session_dir deletes a populated directory.
         td = tempfile.mkdtemp(prefix="awm_test_")
         with open(f"{td}/test.txt", "w") as f:
             f.write("hello")
@@ -350,6 +410,8 @@ class TestDBManager:
         assert not os.path.exists(td)
 
     def test_cleanup_nonexistent_dir(self):
+        # [FUNCTION DOC]
+        # cleanup_session_dir tolerates a missing directory.
         cleanup_session_dir("/nonexistent/path/awm_cleanup_test")
 
 
@@ -357,7 +419,12 @@ class TestDBManager:
 
 
 class TestVerifier:
+    # [CLASS DOC]
+    # Tests for verifier execution.
     def _setup_db(self, td, n_products=2):
+        # [FUNCTION DOC]
+        # HELPER: creates identical initial.db and final.db products tables with
+        # n_products rows in directory td; returns both paths.
         schema = {
             "tables": [
                 {
@@ -383,6 +450,8 @@ class TestVerifier:
         return initial_path, final_path
 
     def test_code_verifier_complete(self):
+        # [FUNCTION DOC]
+        # Code verifier returning "complete" yields result complete and status success.
         code = (
             "def verify_task_completion(initial_db_path, final_db_path, final_answer):\n"
             "    return {'result': 'complete'}\n"
@@ -396,6 +465,8 @@ class TestVerifier:
             assert result["execution_status"] == "success"
 
     def test_code_verifier_others(self):
+        # [FUNCTION DOC]
+        # Code verifier returning "others" is passed through.
         code = (
             "def verify_task_completion(initial_db_path, final_db_path, final_answer):\n"
             "    return {'result': 'others'}\n"
@@ -408,6 +479,8 @@ class TestVerifier:
             assert result["result"] == "others"
 
     def test_code_verifier_bad_function(self):
+        # [FUNCTION DOC]
+        # Missing target function gives execution_status error and result "others".
         code = "def wrong_name():\n    return {'result': 'complete'}\n"
         with tempfile.TemporaryDirectory() as td:
             initial, final = self._setup_db(td)
@@ -418,6 +491,8 @@ class TestVerifier:
             assert result["result"] == "others"
 
     def test_code_verifier_db_query(self):
+        # [FUNCTION DOC]
+        # Verifier can query the final DB (2 rows -> complete).
         code = (
             "def verify_task_completion(initial_db_path, final_db_path, final_answer):\n"
             "    import sqlite3\n"
@@ -438,6 +513,8 @@ class TestVerifier:
             assert result["result"] == "complete"
 
     def test_code_verifier_2arg_signature(self):
+        # [FUNCTION DOC]
+        # Two-argument verifier (no final_answer) is supported.
         """Bug #8: verifier with 2-arg signature (no final_answer) should work."""
         code = (
             "def verify_task(initial_db_path, final_db_path):\n"
@@ -450,6 +527,8 @@ class TestVerifier:
             assert result["execution_status"] == "success"
 
     def test_sql_verifier(self):
+        # [FUNCTION DOC]
+        # SQL verifier returns its dict (product_count 2).
         code = (
             "def verify_task(initial_db_path, final_db_path):\n"
             "    import sqlite3\n"
@@ -466,6 +545,8 @@ class TestVerifier:
             assert result["product_count"] == 2
 
     def test_sql_verifier_missing_db(self):
+        # [FUNCTION DOC]
+        # Nonexistent DB paths give execution_status error.
         code = "def verify_task(initial_db_path, final_db_path):\n    return {}\n"
         result = execute_sql_verifier(
             code, "verify_task", "/nonexistent/a.db", "/nonexistent/b.db"
@@ -473,6 +554,8 @@ class TestVerifier:
         assert result["execution_status"] == "error"
 
     def test_run_verifier_code_mode(self):
+        # [FUNCTION DOC]
+        # run_verifier in code mode returns reward type "complete".
         verifier_entry = {
             "verification": {
                 "code": (
@@ -487,6 +570,8 @@ class TestVerifier:
             assert reward_type == "complete"
 
     def test_run_verifier_code_mode_2arg(self):
+        # [FUNCTION DOC]
+        # run_verifier code mode also works with a 2-arg verify_task function.
         """Bug #8: run_verifier in code mode with 2-arg function name."""
         verifier_entry = {
             "verification": {
@@ -502,6 +587,8 @@ class TestVerifier:
             assert reward_type == "complete"
 
     def test_run_verifier_no_code(self):
+        # [FUNCTION DOC]
+        # Empty verifier code yields reward type "judge_error".
         verifier_entry = {"verification": {"code": ""}}
         with tempfile.TemporaryDirectory() as td:
             initial, final = self._setup_db(td)
@@ -513,7 +600,11 @@ class TestVerifier:
 
 
 class TestAzureURLNormalization:
+    # [CLASS DOC]
+    # Tests for _normalize_azure_url.
     def test_azure_url_without_suffix(self):
+        # [FUNCTION DOC]
+        # Azure host URL gains "/openai/v1".
         url = "https://sfc-ml-sweden.openai.azure.com/"
         assert (
             _normalize_azure_url(url)
@@ -521,6 +612,8 @@ class TestAzureURLNormalization:
         )
 
     def test_azure_url_with_suffix(self):
+        # [FUNCTION DOC]
+        # URLs already ending in /openai/v1/ are unchanged.
         url = "https://sfc-ml-sweden.openai.azure.com/openai/v1/"
         assert (
             _normalize_azure_url(url)
@@ -528,10 +621,14 @@ class TestAzureURLNormalization:
         )
 
     def test_non_azure_url_unchanged(self):
+        # [FUNCTION DOC]
+        # Non-Azure URLs are unchanged.
         url = "https://api.openai.com/v1"
         assert _normalize_azure_url(url) == url
 
     def test_azure_url_no_trailing_slash(self):
+        # [FUNCTION DOC]
+        # Azure host without trailing slash gains "/openai/v1".
         url = "https://sfc-ml-sweden.openai.azure.com"
         assert (
             _normalize_azure_url(url)
@@ -543,13 +640,19 @@ class TestAzureURLNormalization:
 
 
 class TestScenarioManagerHelpers:
+    # [CLASS DOC]
+    # Unit-testable scenario_manager helpers.
     def test_get_random_port(self):
+        # [FUNCTION DOC]
+        # _get_random_port returns a port in 1024..65535.
         from envs.agent_world_model_env.server.scenario_manager import _get_random_port
 
         port = _get_random_port()
         assert 1024 <= port <= 65535
 
     def test_patch_env_code_replaces_create_engine(self):
+        # [FUNCTION DOC]
+        # _patch_env_code rewrites the SQLite URL and port and injects FastApiMCP.
         from envs.agent_world_model_env.server.scenario_manager import _patch_env_code
 
         code = (
@@ -564,6 +667,8 @@ class TestScenarioManagerHelpers:
         assert "FastApiMCP" in patched
 
     def test_scenario_process_initial_state(self):
+        # [FUNCTION DOC]
+        # A new ScenarioProcess has no port/URL and is not running.
         from envs.agent_world_model_env.server.scenario_manager import ScenarioProcess
 
         proc = ScenarioProcess()
@@ -576,7 +681,11 @@ class TestScenarioManagerHelpers:
 
 
 class TestAWMObservation:
+    # [CLASS DOC]
+    # AWMObservation serialization tests.
     def test_top_level_fields_survive_model_dump(self):
+        # [FUNCTION DOC]
+        # Tool fields appear in model_dump excluding reward/done/metadata.
         """Bug #4 workaround: fields should be in model_dump excluding metadata."""
         obs = AWMObservation(
             done=False,
@@ -591,6 +700,8 @@ class TestAWMObservation:
         assert dumped["tool_result"] == "found items"
 
     def test_observation_with_verify_result(self):
+        # [FUNCTION DOC]
+        # Verify-related fields are dumped.
         obs = AWMObservation(
             done=True,
             reward=None,
@@ -607,6 +718,8 @@ class TestAWMObservation:
         assert dumped["steps_taken"] == 5
 
     def test_none_fields_excluded_by_default(self):
+        # [FUNCTION DOC]
+        # None-valued fields are omitted by default.
         """Bug #23: None-valued fields should not appear in model_dump output."""
         obs = AWMObservation(done=False, reward=None, reward_type="reset_ok")
         dumped = obs.model_dump(exclude={"reward", "done", "metadata"})
@@ -615,6 +728,8 @@ class TestAWMObservation:
         assert "error" not in dumped
 
     def test_none_fields_included_when_requested(self):
+        # [FUNCTION DOC]
+        # exclude_none=False includes them as None.
         """Caller can explicitly override exclude_none=False."""
         obs = AWMObservation(done=False, reward=None, reward_type="reset_ok")
         dumped = obs.model_dump(
@@ -624,6 +739,8 @@ class TestAWMObservation:
         assert dumped["error"] is None
 
     def test_tool_name_present_when_set(self):
+        # [FUNCTION DOC]
+        # Set tool_name is dumped.
         """Bug #23: tool_name should appear when it has a value."""
         obs = AWMObservation(
             done=False, reward=None, reward_type="tool_call_ok", tool_name="search"
@@ -633,6 +750,8 @@ class TestAWMObservation:
         assert dumped["tool_name"] == "search"
 
     def test_has_verifier_bool_converted_to_dict(self):
+        # [FUNCTION DOC]
+        # has_verifier True becomes sql/code True mapping; False becomes None.
         """Legacy bool has_verifier should be converted to dict format."""
         obs = AWMObservation(
             done=False, reward=None, reward_type="reset_ok", has_verifier=True
@@ -645,6 +764,8 @@ class TestAWMObservation:
         assert obs2.has_verifier is None
 
     def test_has_verifier_dict_preserved(self):
+        # [FUNCTION DOC]
+        # Mapping has_verifier is kept as-is.
         """Dict has_verifier should be preserved as-is."""
         obs = AWMObservation(
             done=False,
@@ -659,7 +780,11 @@ class TestAWMObservation:
 
 
 class TestAWMAction:
+    # [CLASS DOC]
+    # AWMAction discriminated-union tests.
     def test_deserialize_call_tool(self):
+        # [FUNCTION DOC]
+        # type call_tool validates into CallToolAction.
         """Bug #24: AWMAction.model_validate should return CallToolAction."""
         action = AWMAction.model_validate(
             {"type": "call_tool", "tool_name": "search", "arguments": {"q": "test"}}
@@ -670,6 +795,8 @@ class TestAWMAction:
         assert action.tool_name == "search"
 
     def test_deserialize_list_tools(self):
+        # [FUNCTION DOC]
+        # type list_tools validates into ListToolsAction.
         """Bug #24: AWMAction.model_validate should return ListToolsAction."""
         action = AWMAction.model_validate({"type": "list_tools"})
         from openenv.core.env_server.mcp_types import ListToolsAction
@@ -677,11 +804,15 @@ class TestAWMAction:
         assert isinstance(action, ListToolsAction)
 
     def test_model_json_schema(self):
+        # [FUNCTION DOC]
+        # model_json_schema returns a dict.
         """Bug #24: AWMAction should expose a valid JSON schema."""
         schema = AWMAction.model_json_schema()
         assert isinstance(schema, dict)
 
     def test_invalid_type_rejected(self):
+        # [FUNCTION DOC]
+        # Unknown type raises pydantic ValidationError.
         """Bug #24: unknown action type should raise ValidationError."""
         import pydantic
 
@@ -693,7 +824,12 @@ class TestAWMAction:
 
 
 class TestAWMEnvironmentUnit:
+    # [CLASS DOC]
+    # AWMEnvironment tests that need no scenario subprocess; internal private
+    # attributes are sometimes set directly to simulate a reset.
     def test_reset_without_scenario(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # reset without scenario returns reset_error mentioning "required".
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
         loader = AWMDataLoader(cache_dir=mock_data_dir)
@@ -704,6 +840,8 @@ class TestAWMEnvironmentUnit:
         assert "required" in obs.error
 
     def test_reset_nonexistent_scenario(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Unknown scenario returns reset_error "not found".
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
         loader = AWMDataLoader(cache_dir=mock_data_dir)
@@ -713,6 +851,8 @@ class TestAWMEnvironmentUnit:
         assert "not found" in obs.error
 
     def test_reset_invalid_task_idx(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Out-of-range task index returns reset_error "out of range".
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
         loader = AWMDataLoader(cache_dir=mock_data_dir)
@@ -722,6 +862,8 @@ class TestAWMEnvironmentUnit:
         assert "out of range" in obs.error
 
     def test_list_scenarios_tool(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # __list_scenarios__ tool returns tool_call_ok with both scenarios.
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
 
@@ -735,6 +877,8 @@ class TestAWMEnvironmentUnit:
         assert "test_shop" in names
 
     def test_reset_custom_reward_config(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # reward_config passed to reset is stored on the environment.
         """Custom reward_config should be used when provided."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -745,6 +889,8 @@ class TestAWMEnvironmentUnit:
         assert env._reward_config == custom_config
 
     def test_step_without_reset(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Calling a tool before reset gives server_error.
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
 
@@ -754,6 +900,8 @@ class TestAWMEnvironmentUnit:
         assert obs.reward_type == "server_error"
 
     def test_done_without_reset(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # "done" before reset ends the episode with server_error "not initialized".
         """Bug #11: done should fail gracefully if reset was never called."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -766,6 +914,8 @@ class TestAWMEnvironmentUnit:
         assert "not initialized" in obs.error
 
     def test_done_without_task(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # "done" with no task ends with episode_done and reward 0.0.
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
 
@@ -781,6 +931,8 @@ class TestAWMEnvironmentUnit:
         assert obs.reward == 0.0
 
     def test_close_no_error(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # close on a fresh environment does not raise.
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
         loader = AWMDataLoader(cache_dir=mock_data_dir)
@@ -788,6 +940,8 @@ class TestAWMEnvironmentUnit:
         env.close()
 
     def test_verify_invalid_verifier_mode(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # verify with an unknown verifier_mode returns invalid_args "Invalid verifier_mode".
         """Invalid verifier_mode in verify tool should be rejected."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -808,6 +962,8 @@ class TestAWMEnvironmentUnit:
         assert "Invalid verifier_mode" in obs.error
 
     def test_valid_verifier_modes(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # VALID_VERIFIER_MODES is exactly sql and code.
         """'sql' and 'code' should be accepted verifier modes."""
         from envs.agent_world_model_env.server.awm_environment import (
             VALID_VERIFIER_MODES,
@@ -816,6 +972,8 @@ class TestAWMEnvironmentUnit:
         assert VALID_VERIFIER_MODES == {"sql", "code"}
 
     def test_step_blocked_after_done(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # After "done", further tool calls return episode_already_done mentioning reset().
         """Bug #21: step() should be blocked after done returns done=True."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -836,6 +994,8 @@ class TestAWMEnvironmentUnit:
         assert "reset()" in obs2.error
 
     def test_step_blocked_after_done_list_tools(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # After "done", even ListToolsAction returns episode_already_done.
         """Bug #21: even list_tools should be blocked after done."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
@@ -853,6 +1013,8 @@ class TestAWMEnvironmentUnit:
         assert obs.reward_type == "episode_already_done"
 
     def test_done_double_call_blocked(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # A second "done" returns episode_already_done.
         """Bug #21: calling done twice should return episode_already_done."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -871,6 +1033,8 @@ class TestAWMEnvironmentUnit:
         assert obs2.reward_type == "episode_already_done"
 
     def test_episode_done_resets_on_new_reset(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # A new reset clears the internal episode-done flag.
         """After done, a new reset() should unblock step()."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -888,6 +1052,8 @@ class TestAWMEnvironmentUnit:
         assert env._episode_done is False
 
     def test_subprocess_stopped_after_done(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # "done" calls stop() once on a running (mocked) scenario process.
         """Bug #22: subprocess should be stopped after done."""
         from unittest.mock import MagicMock
 
@@ -907,6 +1073,9 @@ class TestAWMEnvironmentUnit:
         env._process.stop.assert_called_once()
 
     def test_has_verifier_none_for_empty_code(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # With a loader returning empty verifier code for all modes, reset leaves
+        # has_verifier as None.
         """Verifier with empty/trivial code should set has_verifier=None."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -914,6 +1083,9 @@ class TestAWMEnvironmentUnit:
 
         # Override get_verifier to return empty code for both modes
         def mock_get_verifier(s, i, m):
+            # [FUNCTION DOC]
+            # Stub loader.get_verifier(scenario, index, mode) returning a fixed verifier
+            # record (or None for non-code modes where applicable).
             return {"verification": {"code": ""}}
 
         loader.get_verifier = mock_get_verifier
@@ -923,6 +1095,8 @@ class TestAWMEnvironmentUnit:
         assert env._has_verifier is None
 
     def test_has_verifier_dict_with_available_modes(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # With real mock verifiers, reset sets has_verifier to a mapping with sql and code keys.
         """has_verifier should be a dict showing which modes are available."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -936,6 +1110,8 @@ class TestAWMEnvironmentUnit:
         assert "code" in env._has_verifier
 
     def test_verify_without_task(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # verify with no task returns no_verifier mentioning "no task".
         """verify should fail if no task was specified at reset."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -953,6 +1129,8 @@ class TestAWMEnvironmentUnit:
         assert "no task" in obs.error.lower()
 
     def test_verify_without_reset(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # verify before reset returns server_error "not initialized".
         """verify should fail if reset was not called."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -966,6 +1144,9 @@ class TestAWMEnvironmentUnit:
         assert "not initialized" in obs.error
 
     def test_error_classification(self):
+        # [FUNCTION DOC]
+        # _classify_tool_error maps messages to tool_not_found, invalid_args, timeout
+        # or server_error.
         from envs.agent_world_model_env.server.awm_environment import (
             _classify_tool_error,
         )
@@ -984,6 +1165,9 @@ class TestAWMEnvironmentUnit:
         assert _classify_tool_error("Connection refused") == "server_error"
 
     def test_get_reward_default_config(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Default rewards: complete 1.0, incomplete 0.1, format errors -1.0 (also for
+        # tool_not_found/invalid_args), others 0.0.
         """Test _get_reward with default reward config."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -1003,6 +1187,8 @@ class TestAWMEnvironmentUnit:
         assert env._get_reward("unknown_type") == 0.0
 
     def test_get_reward_custom_config(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # Custom config values are used; missing keys give 0.0.
         """Test _get_reward with custom reward config."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -1018,6 +1204,8 @@ class TestAWMEnvironmentUnit:
         assert env._get_reward("format_error") == 0.0
 
     def test_reset_with_llm_credentials(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # LLM base URL/key/model passed to reset are stored.
         """LLM credentials passed at reset should be stored for sql verifier."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -1035,6 +1223,8 @@ class TestAWMEnvironmentUnit:
         assert env._llm_model == "gpt-4o"
 
     def test_reset_llm_credentials_from_env(self, mock_data_dir, monkeypatch):
+        # [FUNCTION DOC]
+        # LLM settings fall back to OPENENV_AWM_LLM_* environment variables.
         """LLM credentials should fall back to environment variables."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
 
@@ -1051,6 +1241,9 @@ class TestAWMEnvironmentUnit:
         assert env._llm_model == "gpt-env"
 
     def test_verify_accepts_final_answer(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # verify in code mode with final_answer is accepted and yields a verifier
+        # reward type (paths are fake, so judge_error is allowed).
         """verify tool should accept final_answer parameter for code mode."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -1067,6 +1260,9 @@ class TestAWMEnvironmentUnit:
 
         # Mock the data loader to return a verifier that uses final_answer
         def mock_get_verifier(s, i, m):
+            # [FUNCTION DOC]
+            # Stub loader.get_verifier(scenario, index, mode) returning a fixed verifier
+            # record (or None for non-code modes where applicable).
             if m == "code":
                 return {
                     "verification": {
@@ -1092,6 +1288,8 @@ class TestAWMEnvironmentUnit:
         assert obs.reward_type in ("complete", "others", "judge_error")
 
     def test_verify_returns_reward_value(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # verify returns a numeric reward (1.0 when complete).
         """verify tool should return a numeric reward value, not None."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -1107,6 +1305,9 @@ class TestAWMEnvironmentUnit:
         env._initial_db_path = "/tmp/test_initial.db"
 
         def mock_get_verifier(s, i, m):
+            # [FUNCTION DOC]
+            # Stub loader.get_verifier(scenario, index, mode) returning a fixed verifier
+            # record (or None for non-code modes where applicable).
             return {
                 "verification": {
                     "code": (
@@ -1129,6 +1330,8 @@ class TestAWMEnvironmentUnit:
             assert obs.reward == 1.0
 
     def test_done_returns_reward_zero(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # "done" returns done, reward 0.0 and episode_done.
         """done tool should return reward=0.0, not None."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -1146,6 +1349,8 @@ class TestAWMEnvironmentUnit:
         assert obs.reward_type == "episode_done"
 
     def test_verify_multiple_times(self, mock_data_dir):
+        # [FUNCTION DOC]
+        # verify can be called repeatedly without ending the episode.
         """verify can be called multiple times with different modes."""
         from envs.agent_world_model_env.server.awm_environment import AWMEnvironment
         from openenv.core.env_server.mcp_types import CallToolAction
@@ -1161,6 +1366,9 @@ class TestAWMEnvironmentUnit:
         env._initial_db_path = "/tmp/test_initial.db"
 
         def mock_get_verifier(s, i, m):
+            # [FUNCTION DOC]
+            # Stub loader.get_verifier(scenario, index, mode) returning a fixed verifier
+            # record (or None for non-code modes where applicable).
             return {
                 "verification": {
                     "code": (

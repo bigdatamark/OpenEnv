@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the Jupyter environment's notebook cells, setup/verify
+# command results and extended state.
 """Pydantic models for Jupyter environment state."""
 
 from typing import List, Optional
@@ -7,6 +10,10 @@ from pydantic import BaseModel, Field
 
 
 class NotebookCell(BaseModel):
+    # [CLASS DOC]
+    # One executed cell: id, type ("code" or "shell"), source, plain-text output,
+    # optional error/traceback, execution count, image flag and base64 PNG list,
+    # and success flag.
     """Represents a single executed cell in the notebook."""
 
     cell_id: str
@@ -21,6 +28,9 @@ class NotebookCell(BaseModel):
 
 
 class CommandResult(BaseModel):
+    # [CLASS DOC]
+    # Result of one task setup or verify shell command: command, output, optional
+    # error, success flag.
     """Outcome of one setup or verify shell command."""
 
     command: str
@@ -30,6 +40,10 @@ class CommandResult(BaseModel):
 
 
 class JupyterState(State):
+    # [CLASS DOC]
+    # State extended with executed cells, sandbox id, last cell success, setup and
+    # verify command results, verify commands, submitted answer, last reward, and
+    # an optional note recording an ignored reward override.
     """Extended state tracking notebook cells and sandbox info."""
 
     cells: List[NotebookCell] = Field(default_factory=list)

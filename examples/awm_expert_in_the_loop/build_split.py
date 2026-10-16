@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# CLI script that builds a reproducible train/val split of non-trivial AWM tasks and writes it as a JSON manifest
+# (meta info plus "train"/"val" lists of [scenario, task_idx] pairs). Relies on task_select.build_split which
+# probes a running AWM server.
 """Discover and save an honest AWM task split.
 
 Scans candidate tasks (those with a ``code`` verifier) in one or more scenario
@@ -27,6 +31,9 @@ from run_benchmark import DEFAULT_BASE_URL
 
 
 async def main() -> None:
+    # [FUNCTION DOC]
+    # Parses CLI args (prefixes, base url, max tasks, val fraction, seed, output path), builds the split, writes the
+    # manifest JSON (creating parent dirs) and prints a summary line. Side effects: network calls to the server, file write.
     parser = argparse.ArgumentParser(description="Build an honest AWM task split")
     parser.add_argument(
         "--prefixes",

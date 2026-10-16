@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# SUMO-RL environment server subpackage (no exports).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

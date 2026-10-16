@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# FastAPI entry point for the Git environment. Reads GITEA_URL, GITEA_USERNAME,
+# GITEA_PASSWORD and WORKSPACE_DIR from the process environment at import (with
+# local defaults, logging a warning when default credentials are used) and
+# builds the app via create_app with a per-session environment factory.
 
 """
 FastAPI application for Git Environment.
@@ -57,6 +62,10 @@ if "GITEA_USERNAME" not in os.environ or "GITEA_PASSWORD" not in os.environ:
 
 # Factory function to create GitTaskEnvironment instances
 def create_git_environment():
+    # [FUNCTION DOC]
+    # Factory used by create_app: returns a new GitTaskEnvironment configured from
+    # the module-level Gitea settings. Note the environment constructor blocks
+    # waiting for Gitea readiness.
     """Factory function that creates GitTaskEnvironment with config."""
     return GitTaskEnvironment(
         gitea_url=gitea_url,
@@ -72,6 +81,8 @@ app = create_app(create_git_environment, GitAction, GitObservation, env_name="gi
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn serving the app on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

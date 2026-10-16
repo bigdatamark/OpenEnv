@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Static checks that each env's openenv.yaml "app" field names an existing module that can be
+# imported under the declared name (no relative import escapes above its root package), using ast
+# instead of importing env code. Builds the MANIFESTS list at import time by reading every
+# envs/*/openenv.yaml.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Every `openenv.yaml` `app` field must name a module that actually imports.
@@ -39,6 +44,8 @@ ENVS_DIR = REPO_ROOT / "envs"
 
 
 def _manifests_with_app() -> list[pathlib.Path]:
+    # [FUNCTION DOC]
+    # HELPER: Returns sorted manifest paths whose YAML is a mapping with a string "app" field.
     """Env manifests that declare an `app` field.
 
     A few envs still carry the pre-spec manifest format, which has no `app`
@@ -57,6 +64,9 @@ MANIFESTS = _manifests_with_app()
 
 
 def _runtime_launches_under_envs_prefix(env_dir: pathlib.Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the env's server Dockerfile or any .sh script under it has a line
+    # mentioning uvicorn and "envs.<env>."; unreadable files are skipped.
     """Whether this env's *image* imports its server as `envs.<env>....`.
 
     Resolving against the repo root unconditionally would be wrong: the source
@@ -83,6 +93,11 @@ def _runtime_launches_under_envs_prefix(env_dir: pathlib.Path) -> bool:
 
 
 def _resolve(env_dir: pathlib.Path, dotted: str) -> pathlib.Path | None:
+    # [FUNCTION DOC]
+    # HELPER: Maps a dotted module path to a file: tries it relative to the env dir, then with a leading
+    # env-name segment stripped, then relative to the repo root if the image launches under the envs
+    # prefix; for each candidate tries <path>.py then <path>/__init__.py (an empty remainder means the
+    # env dir's __init__.py). Returns the path or None.
     """Map a dotted module path to its file, relative to the env directory.
 
     The env directory is both the container's working directory and the root of
@@ -116,6 +131,9 @@ def _resolve(env_dir: pathlib.Path, dotted: str) -> pathlib.Path | None:
 
 
 def _guarded(tree: ast.Module) -> set[ast.ImportFrom]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the set of ImportFrom nodes inside try bodies or handlers whose handlers catch
+    # ImportError, ModuleNotFoundError, Exception, BaseException (or bare except).
     """Relative imports wrapped in a `try` that catches the resulting error.
 
     Most envs support both layouts by attempting the in-repo relative import and
@@ -162,6 +180,12 @@ _CAUGHT = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}
 
 
 def _escaping_imports(env_dir: pathlib.Path, declared: str) -> list[tuple[str, str]]:
+    # [FUNCTION DOC]
+    # HELPER: Breadth-walks modules reachable from the declared module (and its ancestor packages) via
+    # relative imports; for each unguarded relative import whose level exceeds the depth of its
+    # containing package in the declared namespace, records (module, "from <dots><module> import ...").
+    # Otherwise enqueues the resolved target. Unparseable or unresolvable modules are skipped.
+    # Returns the offender list.
     """Relative imports that climb above `declared`'s root package.
 
     Walks every module reachable from the declared entry point by relative
@@ -222,12 +246,16 @@ def _escaping_imports(env_dir: pathlib.Path, declared: str) -> list[tuple[str, s
 
 
 def test_manifests_with_app_field_were_found() -> None:
+    # [FUNCTION DOC]
+    # More than 20 manifests with an app field exist.
     """Guard against the glob silently matching nothing."""
     assert len(MANIFESTS) > 20
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda p: p.parent.name)
 def test_manifest_app_target_exists(manifest: pathlib.Path) -> None:
+    # [FUNCTION DOC]
+    # Parametrized per manifest: app is in "module:attr" form and the module resolves to a file.
     env_dir = manifest.parent
     app = yaml.safe_load(manifest.read_text())["app"]
 
@@ -250,6 +278,9 @@ def test_manifest_app_target_exists(manifest: pathlib.Path) -> None:
 def test_manifest_app_target_is_importable_as_declared(
     manifest: pathlib.Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized per manifest: no relative import escapes the declared root package; skipped when the
+    # module does not resolve. The failure message suggests the packaged name.
     env_dir = manifest.parent
     app = yaml.safe_load(manifest.read_text())["app"]
     declared = app.split(":", 1)[0]
@@ -284,6 +315,9 @@ def test_manifest_app_target_is_importable_as_declared(
 
 
 def test_rejects_envs_prefix_for_env_root_layout() -> None:
+    # [FUNCTION DOC]
+    # agent_world_model_env does not launch under the envs prefix, so the envs-prefixed name does not
+    # resolve while the packaged name does.
     """AWM's original value must not resolve, and must not become resolvable.
 
     `agent_world_model_env` is built with its own directory as the context
@@ -300,6 +334,8 @@ def test_rejects_envs_prefix_for_env_root_layout() -> None:
 
 
 def test_accepts_envs_prefix_for_repo_root_layout() -> None:
+    # [FUNCTION DOC]
+    # grid_world_env launches under the envs prefix and its prefixed module resolves.
     """`grid_world_env` genuinely runs under the prefix, so it must be allowed.
 
     Its image keeps the env at `/app/envs/grid_world_env` with `/app` on
@@ -312,6 +348,8 @@ def test_accepts_envs_prefix_for_repo_root_layout() -> None:
 
 
 def test_repo_root_build_context_alone_does_not_allow_the_prefix() -> None:
+    # [FUNCTION DOC]
+    # coding_env does not launch under the envs prefix.
     """`coding_env` is built from the repo root but installs itself as a dist.
 
     Its `CMD` is `coding_env.server.app:app`, so the prefix is not importable

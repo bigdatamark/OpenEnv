@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Manages a private Xvfb virtual display (801x601x24) and uses xdotool for real
+# window focus and pointer clicks inside the browser sandbox.
 """An owned X display and real pointer input inside the browser VM."""
 
 import os
@@ -8,7 +11,16 @@ from pathlib import Path
 
 
 class VirtualDesktop:
+    # [CLASS DOC]
+    # Owns an Xvfb subprocess, a temporary directory holding its log file, and an
+    # environment dict with DISPLAY set for child processes.
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates a temp dir and log file, launches Xvfb asking it to write its display
+        # number to stdout, waits up to 10 s for it, and builds env with DISPLAY=":N".
+        # Raises: RuntimeError on startup timeout or failure (resources are cleaned up
+        # via close() before re-raising any exception).
+        # Side effects: spawns a subprocess, creates temp files.
         self.process = None
         self.directory = tempfile.TemporaryDirectory(prefix="browser-display-")
         self.log = (Path(self.directory.name) / "xvfb.log").open("wb")
@@ -29,6 +41,11 @@ class VirtualDesktop:
             raise
 
     def focus_browser(self, process_id):
+        # [FUNCTION DOC]
+        # Finds the first visible window of the given process id with xdotool search
+        # and focuses it synchronously.
+        # Raises: RuntimeError if no window is found; CalledProcessError or
+        # TimeoutExpired (10 s) from xdotool.
         window_ids = subprocess.check_output(
             ["xdotool", "search", "--onlyvisible", "--pid", str(process_id)],
             env=self.env,
@@ -45,6 +62,9 @@ class VirtualDesktop:
         )
 
     def click(self, x, y):
+        # [FUNCTION DOC]
+        # Moves the pointer to (x, y) and left-clicks via xdotool on this display.
+        # Raises: CalledProcessError or TimeoutExpired (10 s).
         subprocess.run(
             ["xdotool", "mousemove", str(x), str(y), "click", "1"],
             env=self.env,
@@ -53,6 +73,9 @@ class VirtualDesktop:
         )
 
     def close(self):
+        # [FUNCTION DOC]
+        # Terminates Xvfb (kill after a 5 s wait), closes its stdout pipe, closes the
+        # log file and removes the temp directory. Safe to call after a partial start.
         if self.process is not None:
             if self.process.poll() is None:
                 self.process.terminate()

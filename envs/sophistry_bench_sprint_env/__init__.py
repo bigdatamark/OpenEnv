@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Sophistry-Bench Sprint environment package: single-step advocacy task over QuALITY passages.
+# Re-exports the client (SophistryBenchSprintEnv) and the AdvocacyAction / AdvocacyObservation models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

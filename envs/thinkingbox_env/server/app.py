@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI server for ThinkingBox. Builds a WebSocket-only (production mode) OpenEnv app at import (module
+# "app") and adds a /ready endpoint that checks benchmark data, runtime config, user/judge models and Session
+# Proxy health. Tool execution itself is delegated to an external ThinkingBox Session Proxy.
 """Create the stateful FastAPI server for the ThinkingBox adapter.
 
 OpenEnv owns the WebSocket lifecycle while each environment instance delegates
@@ -31,6 +35,10 @@ def create_thinkingbox_app(
     *,
     max_concurrent_envs: int = config.MAX_CONCURRENT_ENVS,
 ) -> FastAPI:
+    # [FUNCTION DOC]
+    # Creates a FastAPI app, an HTTPEnvServer for ThinkingBox action/observation types with the given
+    # environment factory and concurrency limit (default from config), registers production-mode routes and
+    # stores the server on app.state.openenv_server. Returns the app.
     """Create the stateful OpenEnv WebSocket application.
 
     Args:
@@ -67,6 +75,12 @@ app = create_thinkingbox_app()
 
 @app.get("/ready", include_in_schema=False)
 async def ready() -> JSONResponse:
+    # [FUNCTION DOC]
+    # Readiness endpoint. Checks: benchmark data present; OPENENV_TB_CONFIG set and loadable; user and judge
+    # models configured; GET <proxy>/health succeeds within 3 s (proxy from the loaded settings or the default).
+    # Failures are logged with redacted exception info. Returns JSON with each component's status, a note that
+    # Typesense readiness is not observable, and HTTP 200 only when all are ready (503 otherwise).
+    # Side effects: reads config file, one HTTP request.
     """Report observable canonical benchmark readiness components.
 
     Returns:
@@ -143,6 +157,8 @@ async def ready() -> JSONResponse:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Serves the app with uvicorn on 0.0.0.0:8000; blocks.
     """Run the ThinkingBox OpenEnv application on its configured public port."""
     import uvicorn
 

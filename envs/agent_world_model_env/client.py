@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the AWM environment server: an MCPToolClient subclass whose result parsing keeps the
+# AWM-specific observation fields instead of dropping them.
 """
 Agent World Model Environment Client.
 
@@ -32,6 +35,10 @@ from .models import AWMListToolsObservation, AWMObservation
 
 
 class AWMEnv(MCPToolClient):
+    # [CLASS DOC]
+    # MCP tool client for AWM. reset() accepts scenario, task_idx, task, verifier_mode and LLM settings which
+    # are forwarded to the server; the hidden tools "done" and "__list_scenarios__" are callable via call_tool.
+    # Only result parsing is overridden; transport and tool calls are inherited.
     """
     Client for the Agent World Model Environment.
     Inherits all functionality from MCPToolClient.
@@ -57,6 +64,12 @@ class AWMEnv(MCPToolClient):
     """
 
     def _parse_result(self, payload: dict[str, Any]) -> StepResult:
+        # [FUNCTION DOC]
+        # HELPER: Converts a server response into a StepResult.
+        # Inputs: payload dict with optional "observation", "reward", "done".
+        # Returns: StepResult whose observation is an AWMListToolsObservation when the observation dict contains a
+        # "tools" key, otherwise an AWMObservation; reward may be None, done defaults to False.
+        # Raises: pydantic ValidationError if the observation contains unknown keys (both models forbid extras).
         """
         This override ensures AWM fields (reward_type, scenario, task, etc.)
         are available as observation attributes instead of being lost.

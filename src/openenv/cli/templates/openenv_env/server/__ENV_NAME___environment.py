@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Template server-side environment implementation for a generated environment:
+# an echo environment that returns each action's message with a length-based
+# reward. Imports models relatively, falling back to a top-level "models"
+# module when run outside the package.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -19,6 +24,10 @@ except ImportError:
 
 
 class __ENV_CLASS_NAME__Environment(Environment):
+    # [CLASS DOC]
+    # Environment subclass with per-instance State (episode id, step count) and a
+    # reset counter. Declares SUPPORTS_CONCURRENT_SESSIONS = True so the server may
+    # create one instance per WebSocket session.
     """
     A simple echo environment that echoes back messages.
 
@@ -42,11 +51,18 @@ class __ENV_CLASS_NAME__Environment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates a fresh State with a random UUID episode id and step count 0; reset
+        # counter starts at 0.
         """Initialize the __ENV_NAME__ environment."""
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._reset_count = 0
 
     def reset(self) -> __ENV_CLASS_NAME__Observation:
+        # [FUNCTION DOC]
+        # Replaces the state with a new episode id and step count 0, increments the
+        # reset counter, and returns an observation with a "<title> environment ready!"
+        # message, length 0, done False, reward 0.0.
         """
         Reset the environment.
 
@@ -64,6 +80,10 @@ class __ENV_CLASS_NAME__Environment(Environment):
         )
 
     def step(self, action: __ENV_CLASS_NAME__Action) -> __ENV_CLASS_NAME__Observation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Increments the step count and returns an observation echoing action.message
+        # with its length, done False, reward min(0.1 * length, 1.0), and metadata
+        # containing the original message and current step number.
         """
         Execute a step in the environment by echoing the message.
 
@@ -91,6 +111,8 @@ class __ENV_CLASS_NAME__Environment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Returns the current State object (live reference).
         """
         Get the current environment state.
 

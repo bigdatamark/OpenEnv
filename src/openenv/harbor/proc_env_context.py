@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Replaces the process-global os.environ with a mapping whose reads consult a
+# context-local (contextvars) overlay first, so concurrent rollouts in one process can
+# each see their own credentials (e.g. API key = session id) without a lock. Writes go
+# to the real environment. Can be disabled via OPENENV_CONCURRENT_PROC_ENV=0.
+# KNOWN ISSUE: the module docstring says subprocess builds the child environment from
+# os.environ; on POSIX, subprocess with env=None inherits the C-level environment, so the
+# overlay only reaches children when callers pass env explicitly (e.g. os.environ.copy()).
 """Per-rollout `os.environ` reads, so credential-by-env harnesses stop serialising.
 
 Three validated harnesses — claude-code, gemini-cli and goose — read `os.environ` inside their
@@ -55,19 +63,30 @@ _real_environ: MutableMapping[str, str] | None = None
 
 
 class _ContextEnviron(MutableMapping):
+    # [CLASS DOC]
+    # MutableMapping proxy over the real os.environ: lookups, membership, iteration, length
+    # and copy() see the base merged with the current context's overlay (overlay wins);
+    # set/delete affect only the base.
     """`os.environ` whose reads consult a context-local overlay first."""
 
     def __init__(self, base: MutableMapping[str, str]) -> None:
+        # [FUNCTION DOC]
+        # Stores the wrapped base mapping.
         self._base = base
 
     # --- reads: overlay wins ---------------------------------------------
     def __getitem__(self, key: str) -> str:
+        # [FUNCTION DOC]
+        # Returns the overlay value if the key is in the current overlay, else the base value
+        # (KeyError if absent in both).
         over = _overlay.get()
         if over is not None and key in over:
             return over[key]
         return self._base[key]
 
     def __iter__(self) -> Iterator[str]:
+        # [FUNCTION DOC]
+        # Yields all base keys (snapshot), then overlay keys not already present in the base.
         over = _overlay.get() or {}
         seen = set()
         for key in list(self._base):
@@ -78,14 +97,20 @@ class _ContextEnviron(MutableMapping):
                 yield key
 
     def __len__(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of distinct keys across base and overlay.
         over = _overlay.get() or {}
         return len(set(self._base) | set(over))
 
     def __contains__(self, key: object) -> bool:
+        # [FUNCTION DOC]
+        # True if the key is in the overlay or the base.
         over = _overlay.get()
         return (over is not None and key in over) or key in self._base
 
     def copy(self) -> dict[str, str]:
+        # [FUNCTION DOC]
+        # Returns a plain dict of base values updated with overlay values.
         """Merged, because `subprocess` uses this to build a child's environment."""
         merged = dict(self._base)
         merged.update(_overlay.get() or {})
@@ -93,20 +118,33 @@ class _ContextEnviron(MutableMapping):
 
     # --- writes: real environment ----------------------------------------
     def __setitem__(self, key: str, value: str) -> None:
+        # [FUNCTION DOC]
+        # Writes to the real environment (which also calls putenv).
         self._base[key] = value
 
     def __delitem__(self, key: str) -> None:
+        # [FUNCTION DOC]
+        # Deletes from the real environment; KeyError if absent there.
+        # KNOWN ISSUE: a key also set in the current overlay stays visible after deletion.
         del self._base[key]
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        # [FUNCTION DOC]
+        # Debug representation with the merged variable count and whether an overlay is active.
         return f"_ContextEnviron({len(self)} vars, overlay={bool(_overlay.get())})"
 
 
 def enabled() -> bool:
+    # [FUNCTION DOC]
+    # Returns False only when OPENENV_CONCURRENT_PROC_ENV is "0" (default enabled).
     return os.environ.get("OPENENV_CONCURRENT_PROC_ENV", "1") != "0"
 
 
 def install() -> bool:
+    # [FUNCTION DOC]
+    # If already installed returns True; if disabled returns False; otherwise saves the real
+    # os.environ and replaces os.environ with a _ContextEnviron wrapping it, logs, returns True.
+    # Side effects: mutates the global os module attribute for the whole process.
     """Swap `os.environ` for the context-aware proxy. Idempotent; returns whether it is active."""
     global _installed, _real_environ
     if _installed:
@@ -124,6 +162,10 @@ def install() -> bool:
 
 @contextlib.contextmanager
 def overlay(values: dict[str, str]):
+    # [FUNCTION DOC]
+    # Context manager that sets the current context's overlay to the parent overlay merged
+    # with values for the duration of the block, then restores the previous overlay. Only
+    # affects reads through the installed proxy (no effect if install() was not called).
     """Make `values` visible to `os.environ` reads in THIS context only."""
     parent = _overlay.get() or {}
     token = _overlay.set({**parent, **values})

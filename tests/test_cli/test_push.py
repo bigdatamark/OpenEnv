@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for "openenv push": manifest/structure validation, HF authentication, repo id and
+# Space options, staging (Dockerfile placement, web interface, README front matter,
+# .openenvignore, delete patterns), upload calls and Dockerfile rewriting. HfApi, whoami
+# and login are patched so nothing reaches the Hub; most tests chdir into tmp_path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the openenv push command."""
@@ -18,11 +23,17 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _strip_ansi(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns text with ANSI colour escape sequences removed.
     """Remove ANSI escape sequences from CLI output for stable assertions."""
     return ANSI_ESCAPE_RE.sub("", text)
 
 
 def _create_test_openenv_env(env_dir: Path, env_name: str = "test_env") -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes a minimal valid env into env_dir: openenv.yaml (name, space, fastapi,
+    # server.app:app, port 8000), pyproject.toml, __init__/client/models, server/ with app.py
+    # and a Dockerfile, and a README with Space front matter. Side effects: file writes.
     """Create a complete OpenEnv environment for testing."""
     # Create openenv.yaml
     manifest = {
@@ -74,6 +85,8 @@ app_port: 8000
 
 
 def test_push_validates_openenv_directory(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Push in a dir without openenv.yaml fails mentioning the manifest.
     """Test that push validates openenv.yaml is present."""
     old_cwd = os.getcwd()
     try:
@@ -89,6 +102,8 @@ def test_push_validates_openenv_directory(tmp_path: Path) -> None:
 
 
 def test_push_validates_openenv_yaml_format(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Unparseable openenv.yaml fails with a parse/yaml message.
     """Test that push validates openenv.yaml format."""
     # Create complete env structure then overwrite openenv.yaml with invalid content
     _create_test_openenv_env(tmp_path)
@@ -106,6 +121,8 @@ def test_push_validates_openenv_yaml_format(tmp_path: Path) -> None:
 
 
 def test_push_validates_openenv_yaml_has_name(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A manifest without name fails mentioning "name".
     """Test that push validates openenv.yaml has a name field."""
     import yaml
 
@@ -127,6 +144,8 @@ def test_push_validates_openenv_yaml_has_name(tmp_path: Path) -> None:
 
 
 def test_push_authenticates_with_hf(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Push calls whoami.
     """Test that push ensures Hugging Face authentication."""
     _create_test_openenv_env(tmp_path)
 
@@ -155,6 +174,8 @@ def test_push_authenticates_with_hf(tmp_path: Path) -> None:
 
 
 def test_push_authenticates_after_login(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # If whoami first fails, login is called once, whoami retried, and upload proceeds.
     """Test that push verifies the username after an interactive login."""
     _create_test_openenv_env(tmp_path)
 
@@ -181,6 +202,10 @@ def test_push_authenticates_after_login(tmp_path: Path) -> None:
 
 
 def test_push_enables_web_interface_in_dockerfile(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Push with a valid env reaches upload_folder.
+    # KNOWN ISSUE: despite its name, only asserts upload_folder was called; the Dockerfile
+    # contents are not checked.
     """Test that push enables web interface in Dockerfile."""
     _create_test_openenv_env(tmp_path)
 
@@ -206,6 +231,9 @@ def test_push_enables_web_interface_in_dockerfile(tmp_path: Path) -> None:
 
 
 def test_push_updates_readme_frontmatter(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Push with a README lacking base_path reaches upload_folder.
+    # KNOWN ISSUE: only asserts upload_folder was called; the README front matter is not checked.
     """Test that push updates README frontmatter with base_path."""
     _create_test_openenv_env(tmp_path)
 
@@ -242,6 +270,8 @@ app_port: 8000
 
 
 def test_push_uses_repo_id_option(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --repo-id is passed to create_repo.
     """Test that push respects --repo-id option."""
     _create_test_openenv_env(tmp_path)
 
@@ -269,6 +299,8 @@ def test_push_uses_repo_id_option(tmp_path: Path) -> None:
 
 
 def test_push_uses_default_repo_id(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Default repo id is <username>/<env name>.
     """Test that push uses default repo-id from username and env name."""
     _create_test_openenv_env(tmp_path, env_name="test_env")
 
@@ -296,6 +328,8 @@ def test_push_uses_default_repo_id(tmp_path: Path) -> None:
 
 
 def test_push_uses_private_option(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --private passes private True to create_repo.
     """Test that push respects --private option."""
     _create_test_openenv_env(tmp_path)
 
@@ -323,6 +357,8 @@ def test_push_uses_private_option(tmp_path: Path) -> None:
 
 
 def test_push_uses_hardware_option(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --hardware passes space_hardware to create_repo.
     """Test that push respects --hardware option."""
     _create_test_openenv_env(tmp_path)
 
@@ -350,6 +386,8 @@ def test_push_uses_hardware_option(tmp_path: Path) -> None:
 
 
 def test_push_default_hardware_is_none(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Without --hardware, space_hardware is not passed.
     """Test that push does not pass space_hardware when --hardware is not specified."""
     _create_test_openenv_env(tmp_path)
 
@@ -377,6 +415,9 @@ def test_push_default_hardware_is_none(tmp_path: Path) -> None:
 
 
 def test_push_uses_base_image_option(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --base-image push reaches upload_folder.
+    # KNOWN ISSUE: the base image substitution itself is not verified.
     """Test that push respects --base-image option."""
     _create_test_openenv_env(tmp_path)
 
@@ -402,6 +443,8 @@ def test_push_uses_base_image_option(tmp_path: Path) -> None:
 
 
 def test_push_uses_directory_argument(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A positional directory argument is pushed (upload_folder called).
     """Test that push respects directory argument."""
     env_dir = tmp_path / "my_env"
     env_dir.mkdir()
@@ -428,6 +471,8 @@ def test_push_uses_directory_argument(tmp_path: Path) -> None:
 
 
 def test_push_accepts_dockerfile_at_env_root(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A root-level Dockerfile is staged at the root, not under server/.
     """Test that push works when Dockerfile is at environment root instead of server/."""
     _create_test_openenv_env(tmp_path)
     # Move Dockerfile from server/ to env root
@@ -437,6 +482,8 @@ def test_push_accepts_dockerfile_at_env_root(tmp_path: Path) -> None:
     staged_files: list[list[str]] = []
 
     def _capture_staging(*, folder_path: str, **_: object) -> None:
+        # [FUNCTION DOC]
+        # HELPER: upload_folder side effect recording the sorted relative file list of the staging folder.
         staging = Path(folder_path)
         staged_files.append(
             sorted(
@@ -472,6 +519,8 @@ def test_push_accepts_dockerfile_at_env_root(tmp_path: Path) -> None:
 
 
 def test_push_accepts_env_without_models(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # An env without models.py pushes successfully.
     """Test that push works without models.py, as in MCP environments like echo_env."""
     _create_test_openenv_env(tmp_path)
     (tmp_path / "models.py").unlink()
@@ -498,6 +547,8 @@ def test_push_accepts_env_without_models(tmp_path: Path) -> None:
 
 
 def test_push_handles_missing_dockerfile(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Missing Dockerfile fails mentioning dockerfile/missing.
     """Test that push fails when Dockerfile is missing (required for deployment)."""
     _create_test_openenv_env(tmp_path)
     # Remove Dockerfile (no root Dockerfile either)
@@ -516,6 +567,8 @@ def test_push_handles_missing_dockerfile(tmp_path: Path) -> None:
 
 
 def test_push_handles_missing_readme(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Missing README fails mentioning readme/missing.
     """Test that push fails when README.md is missing (required for deployment)."""
     _create_test_openenv_env(tmp_path)
     # Remove README
@@ -534,6 +587,8 @@ def test_push_handles_missing_readme(tmp_path: Path) -> None:
 
 
 def test_push_initializes_hf_api_without_token(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # HfApi is constructed without a token kwarg.
     """Test that push initializes HfApi without token parameter."""
     _create_test_openenv_env(tmp_path)
 
@@ -562,6 +617,8 @@ def test_push_initializes_hf_api_without_token(tmp_path: Path) -> None:
 
 
 def test_push_validates_repo_id_format(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A repo id with two slashes fails.
     """Test that push rejects repo-ids with more than one slash."""
     _create_test_openenv_env(tmp_path)
 
@@ -586,6 +643,8 @@ def test_push_validates_repo_id_format(tmp_path: Path) -> None:
 
 
 def test_push_bare_repo_id_expands_to_username(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A bare repo name becomes <username>/<name> for space creation (staging/upload patched).
     """Bare repo-name (no slash) is expanded to username/repo-name before push."""
     _create_test_openenv_env(tmp_path)
 
@@ -617,6 +676,8 @@ def test_push_bare_repo_id_expands_to_username(tmp_path: Path) -> None:
 
 
 def test_push_validates_manifest_is_dict(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A non-mapping manifest fails.
     """Test that push validates manifest is a dictionary."""
     import yaml
 
@@ -637,12 +698,18 @@ def test_push_validates_manifest_is_dict(tmp_path: Path) -> None:
 
 
 def test_push_handles_whoami_object_return(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # An object-shaped whoami result with a name attribute is accepted.
     """Test that push handles whoami returning an object instead of dict."""
     _create_test_openenv_env(tmp_path)
 
     # Create a mock object with name attribute
     class MockUser:
+        # [CLASS DOC]
+        # HELPER: Object with name "testuser".
         def __init__(self):
+            # [FUNCTION DOC]
+            # Sets name to "testuser".
             self.name = "testuser"
 
     with (
@@ -667,6 +734,8 @@ def test_push_handles_whoami_object_return(tmp_path: Path) -> None:
 
 
 def test_push_handles_authentication_failure(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # whoami and login both failing makes push fail with an auth/login message.
     """Test that push handles authentication failure."""
     _create_test_openenv_env(tmp_path)
 
@@ -698,6 +767,8 @@ def test_push_handles_authentication_failure(tmp_path: Path) -> None:
 
 
 def test_push_handles_whoami_missing_username(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A whoami result without any username field fails with a username/extract message.
     """Test that push handles whoami response without username."""
     _create_test_openenv_env(tmp_path)
 
@@ -726,6 +797,8 @@ def test_push_handles_whoami_missing_username(tmp_path: Path) -> None:
 
 
 def test_push_handles_readme_without_frontmatter(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A README without front matter still reaches upload.
     """Test that push handles README without frontmatter."""
     _create_test_openenv_env(tmp_path)
 
@@ -754,6 +827,8 @@ def test_push_handles_readme_without_frontmatter(tmp_path: Path) -> None:
 
 
 def test_push_handles_hf_api_create_repo_error(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A create_repo exception is tolerated (warning) and upload is still attempted.
     """Test that push handles HF API create_repo error."""
     _create_test_openenv_env(tmp_path)
 
@@ -781,6 +856,8 @@ def test_push_handles_hf_api_create_repo_error(tmp_path: Path) -> None:
 
 
 def test_push_handles_hf_api_upload_error(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # An upload_folder exception makes push fail with an upload/failed message.
     """Test that push handles HF API upload_folder error."""
     _create_test_openenv_env(tmp_path)
 
@@ -807,6 +884,8 @@ def test_push_handles_hf_api_upload_error(tmp_path: Path) -> None:
 
 
 def test_push_handles_base_image_not_found_in_dockerfile(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --base-image with a Dockerfile lacking FROM still reaches upload.
     """Test that push handles Dockerfile without FROM line."""
     _create_test_openenv_env(tmp_path)
 
@@ -837,6 +916,9 @@ def test_push_handles_base_image_not_found_in_dockerfile(tmp_path: Path) -> None
 
 
 def test_rewrite_dockerfile_skips_healthcheck_cmd() -> None:
+    # [FUNCTION DOC]
+    # _rewrite_dockerfile_for_space inserts ENABLE_WEB_INTERFACE before the real CMD, not
+    # before a continued HEALTHCHECK CMD line, and reports "enabled web interface".
     """Test that web-interface ENV is not inserted before a HEALTHCHECK CMD."""
     dockerfile = "\n".join(
         [
@@ -863,6 +945,9 @@ def test_rewrite_dockerfile_skips_healthcheck_cmd() -> None:
 
 
 def test_push_excludes_files_from_ignore_file(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --exclude .openenvignore patterns (plus hidden files ".*") are passed as ignore
+    # patterns and the matching files are absent from the staged folder.
     """Test that push excludes files using patterns loaded via --exclude."""
     _create_test_openenv_env(tmp_path)
 
@@ -892,6 +977,8 @@ excluded_dir/
         mock_hf_api_class.return_value = mock_api
 
         def _assert_upload_payload(*_unused_args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: upload_folder side effect asserting ignore patterns and staged folder contents.
             ignore_patterns = kwargs["ignore_patterns"]
             assert "excluded_dir/" in ignore_patterns
             assert "*.bin" in ignore_patterns
@@ -919,6 +1006,8 @@ excluded_dir/
 
 
 def test_push_does_not_use_gitignore_as_default_excludes(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # .gitignore patterns are not applied by default.
     """Test that .gitignore patterns are not used by default."""
     _create_test_openenv_env(tmp_path)
     (tmp_path / ".gitignore").write_text("excluded_from_gitignore/\n")
@@ -937,6 +1026,8 @@ def test_push_does_not_use_gitignore_as_default_excludes(tmp_path: Path) -> None
         mock_hf_api_class.return_value = mock_api
 
         def _assert_upload_payload(*_unused_args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: upload_folder side effect asserting the gitignored dir is still staged.
             ignore_patterns = kwargs["ignore_patterns"]
             assert "excluded_from_gitignore/" not in ignore_patterns
 
@@ -958,6 +1049,8 @@ def test_push_does_not_use_gitignore_as_default_excludes(tmp_path: Path) -> None
 
 
 def test_push_excludes_build_artifacts_by_default(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # build/ and *.egg-info are never staged.
     """Test that local build artifacts are never uploaded to the Space."""
     _create_test_openenv_env(tmp_path)
     (tmp_path / "build" / "lib" / "test_env").mkdir(parents=True)
@@ -976,6 +1069,8 @@ def test_push_excludes_build_artifacts_by_default(tmp_path: Path) -> None:
         mock_hf_api_class.return_value = mock_api
 
         def _assert_upload_payload(*_unused_args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: upload_folder side effect asserting build artifacts are absent and client.py present.
             staged = Path(kwargs["folder_path"])
             assert not (staged / "build").exists()
             assert not (staged / "test_env.egg-info").exists()
@@ -995,6 +1090,8 @@ def test_push_excludes_build_artifacts_by_default(tmp_path: Path) -> None:
 
 
 def test_push_deletes_remote_files_only_with_delete(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # delete_patterns is None by default and equals the --delete patterns when given.
     """Test that push deletes nothing by default and forwards --delete patterns, as `hf upload` does."""
     _create_test_openenv_env(tmp_path)
 
@@ -1027,6 +1124,8 @@ def test_push_deletes_remote_files_only_with_delete(tmp_path: Path) -> None:
 
 
 def test_push_fails_when_exclude_file_missing(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A missing --exclude file fails mentioning "exclude file".
     """Test that push fails if --exclude points to a missing file."""
     _create_test_openenv_env(tmp_path)
 
@@ -1055,6 +1154,8 @@ def test_push_fails_when_exclude_file_missing(tmp_path: Path) -> None:
 
 
 def test_push_create_pr_sets_upload_flag_and_skips_create_repo(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --create-pr uploads with create_pr True and does not create the repo.
     """Test that --create-pr uploads with PR mode and skips repo creation."""
     _create_test_openenv_env(tmp_path)
 
@@ -1086,6 +1187,8 @@ def test_push_create_pr_sets_upload_flag_and_skips_create_repo(tmp_path: Path) -
 
 
 def test_push_count_deploys_multiple_spaces(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --count 3 creates and uploads to repo ids suffixed -1..-3 with [i/3] progress output.
     """Test that --count 3 calls create_repo and upload_folder 3 times with suffixed repo IDs."""
     _create_test_openenv_env(tmp_path)
 
@@ -1142,6 +1245,8 @@ def test_push_count_deploys_multiple_spaces(tmp_path: Path) -> None:
 
 
 def test_push_count_one_is_default_behavior(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --count 1 uses the unsuffixed repo id.
     """Test that --count 1 behaves exactly like no flag (no suffix)."""
     _create_test_openenv_env(tmp_path)
 
@@ -1177,6 +1282,8 @@ def test_push_count_one_is_default_behavior(tmp_path: Path) -> None:
 
 
 def test_push_count_with_registry_errors(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --count >1 with --registry fails naming both options.
     """Test that --count 2 --registry fails with error."""
     _create_test_openenv_env(tmp_path)
 
@@ -1196,6 +1303,8 @@ def test_push_count_with_registry_errors(tmp_path: Path) -> None:
 
 
 def test_push_count_with_create_pr_errors(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --count >1 with --create-pr fails naming both options.
     """Test that --count 2 --create-pr fails with error."""
     _create_test_openenv_env(tmp_path)
 
@@ -1224,6 +1333,8 @@ def test_push_count_with_create_pr_errors(tmp_path: Path) -> None:
 
 
 def test_push_sets_space_variable_from_cli(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # -e KEY=VALUE calls add_space_variable once and no secret.
     """-e KEY=VALUE triggers add_space_variable after upload."""
     _create_test_openenv_env(tmp_path)
 
@@ -1257,6 +1368,8 @@ def test_push_sets_space_variable_from_cli(tmp_path: Path) -> None:
 
 
 def test_push_sets_space_secret_from_cli(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --secret KEY=VALUE calls add_space_secret once and no variable.
     """--secret KEY=VALUE triggers add_space_secret after upload."""
     _create_test_openenv_env(tmp_path)
 
@@ -1290,6 +1403,8 @@ def test_push_sets_space_secret_from_cli(tmp_path: Path) -> None:
 
 
 def test_push_secret_value_is_not_logged(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Secret values never appear in output; the key does.
     """Secret values must never appear in CLI output (only the key)."""
     _create_test_openenv_env(tmp_path)
 
@@ -1322,6 +1437,8 @@ def test_push_secret_value_is_not_logged(tmp_path: Path) -> None:
 
 
 def test_push_loads_variables_from_openenv_yaml(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Manifest "variables" are each applied via add_space_variable.
     """variables: in openenv.yaml are applied via add_space_variable."""
     _create_test_openenv_env(tmp_path)
     # Overwrite openenv.yaml adding a variables section
@@ -1370,6 +1487,8 @@ def test_push_loads_variables_from_openenv_yaml(tmp_path: Path) -> None:
 
 
 def test_push_cli_env_var_overrides_yaml(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A CLI -e value replaces the same manifest variable (single call).
     """-e on CLI overrides the same key from openenv.yaml variables."""
     _create_test_openenv_env(tmp_path)
     manifest = {
@@ -1413,6 +1532,8 @@ def test_push_cli_env_var_overrides_yaml(tmp_path: Path) -> None:
 
 
 def test_push_rejects_env_var_without_equals(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # -e without "=" fails and sets no variables.
     """-e KEY (no =) must fail with a clear error and not call HfApi."""
     _create_test_openenv_env(tmp_path)
 
@@ -1445,6 +1566,8 @@ def test_push_rejects_env_var_without_equals(tmp_path: Path) -> None:
 def test_push_rejects_secret_without_equals_without_leaking_value(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Malformed --secret fails without echoing the value and sets no secrets.
     """Malformed --secret must fail without echoing the secret value."""
     _create_test_openenv_env(tmp_path)
 
@@ -1474,6 +1597,8 @@ def test_push_rejects_secret_without_equals_without_leaking_value(
 
 
 def test_push_rejects_env_var_with_empty_key(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # -e with an empty key fails and sets no variables.
     """-e =VALUE must fail with a clear error."""
     _create_test_openenv_env(tmp_path)
 
@@ -1499,6 +1624,8 @@ def test_push_rejects_env_var_with_empty_key(tmp_path: Path) -> None:
 
 
 def test_push_env_var_value_can_contain_equals(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # -e KEY=a=b=c splits on the first "=" only.
     """-e KEY=a=b=c splits only on first '=' so values with '=' are preserved."""
     _create_test_openenv_env(tmp_path)
 
@@ -1526,6 +1653,8 @@ def test_push_env_var_value_can_contain_equals(tmp_path: Path) -> None:
 
 
 def test_push_no_variables_is_backward_compatible(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Without variables or secrets, no variable/secret APIs are called.
     """Without -e/--secret and without variables: in yaml, no HF var APIs are called."""
     _create_test_openenv_env(tmp_path)
 
@@ -1552,6 +1681,8 @@ def test_push_no_variables_is_backward_compatible(tmp_path: Path) -> None:
 
 
 def test_push_count_applies_variables_to_all_instances(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # With --count 3, variables and secrets are set on each suffixed repo.
     """--count N pushes variables and secrets to each of the N instances."""
     _create_test_openenv_env(tmp_path)
 
@@ -1606,6 +1737,8 @@ def test_push_count_applies_variables_to_all_instances(tmp_path: Path) -> None:
 
 
 def test_push_rejects_non_mapping_variables_block(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A list-valued manifest "variables" block fails with a "variables ... mapping" message.
     """Falsey non-dict variables blocks must still be rejected."""
     _create_test_openenv_env(tmp_path)
     manifest = {
@@ -1633,6 +1766,8 @@ def test_push_rejects_non_mapping_variables_block(tmp_path: Path) -> None:
 
 
 def test_push_registry_rejects_space_settings_flags(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --registry with -e fails naming --registry and --env-var.
     """Custom registry pushes must reject Space-only flags."""
     _create_test_openenv_env(tmp_path)
 
@@ -1659,6 +1794,8 @@ def test_push_registry_rejects_space_settings_flags(tmp_path: Path) -> None:
 
 
 def test_push_create_pr_rejects_space_settings_flags(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --create-pr with --secret fails naming both options.
     """PR uploads cannot apply Space-only flags before merge."""
     _create_test_openenv_env(tmp_path)
 
@@ -1686,6 +1823,8 @@ def test_push_create_pr_rejects_space_settings_flags(tmp_path: Path) -> None:
 
 
 def test_push_exits_cleanly_if_setting_space_variable_fails(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # An add_space_variable error fails with a "failed to set variable" message and no traceback.
     """HF variable configuration errors should not surface a traceback."""
     _create_test_openenv_env(tmp_path)
 

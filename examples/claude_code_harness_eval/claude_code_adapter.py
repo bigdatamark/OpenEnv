@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# RFC 005 harness adapter that drives the Claude Code CLI in headless stream-json mode as one long-lived subprocess.
+# Each user message is written as a JSON line; stdout JSON events are mapped to harness events (text, tool call, tool
+# result, turn complete). Environment tools are exposed via an MCP HTTP server config pointing at the harness bridge,
+# Claude Code's built-in tools and settings files are disabled.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """RFC 005 adapter for Claude Code, driven through its headless stream-json mode.
@@ -34,6 +39,9 @@ TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
 
 
 class ClaudeCodeAdapter(AgenticHarnessAdapter):
+    # [CLASS DOC]
+    # AgenticHarnessAdapter implementation for Claude Code. Holds the harness config, an optional appended system prompt,
+    # the subprocess handle and the generated MCP config JSON.
     """
     Drive Claude Code as a turn-based harness over stdio.
 
@@ -51,6 +59,8 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
     """
 
     def __init__(self, config: HarnessConfig, system_prompt: Optional[str] = None):
+        # [FUNCTION DOC]
+        # Initialises the base adapter with the config and stores the optional system prompt; no process or MCP config yet.
         super().__init__(config)
         self.system_prompt = system_prompt
         self._process: Optional[HarnessProcess] = None
@@ -59,6 +69,9 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
     async def inject_tools(
         self, tools: list[Tool], bridge_url: Optional[str] = None
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores an MCP config JSON naming a single HTTP server ("env") at the bridge URL when tools and a URL are given;
+        # otherwise clears it. Must be called before start to take effect.
         if tools and bridge_url:
             self._mcp_config = json.dumps(
                 {"mcpServers": {MCP_SERVER_NAME: {"type": "http", "url": bridge_url}}}
@@ -67,6 +80,11 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
             self._mcp_config = None
 
     async def start(self, working_directory: str) -> None:
+        # [FUNCTION DOC]
+        # Builds the Claude Code command line (print mode, stream-json in/out, verbose, no built-in tools, strict MCP config, no
+        # setting sources, no session persistence), adding the MCP config and an allow rule for all env-server tools when set,
+        # the model when configured, and the appended system prompt when given. Starts it as a HarnessProcess in the working
+        # directory with configured env vars and startup timeout. Side effects: spawns a subprocess.
         command = [
             *self.config.command,
             "-p",
@@ -104,13 +122,23 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
         await self._process.start()
 
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the subprocess if one was started.
         if self._process is not None:
             await self._process.stop()
 
     async def is_alive(self) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if a process exists and is still running.
         return self._process is not None and self._process.is_running()
 
     async def send_message_streaming(self, message: str) -> AsyncIterator[HarnessEvent]:
+        # [FUNCTION DOC]
+        # Async generator for one turn. Raises HarnessError if not started. Writes the user message as a stream-json line, then
+        # reads lines: end of output raises HarnessError with stderr; a "result" event raises HarnessError if flagged as an error,
+        # otherwise yields a TURN_COMPLETE event (response text, done False, num_turns, usage) and ends; assistant/user events
+        # are mapped to text/tool events, tracking tool-use ids to names. Other event types are ignored.
+        # Raises json.JSONDecodeError on non-JSON lines.
         if self._process is None:
             raise HarnessError("Claude Code is not running; call start() first")
         await self._process.write_line(
@@ -150,6 +178,10 @@ class ClaudeCodeAdapter(AgenticHarnessAdapter):
 
 
 def _map_content(content: Any, tool_names: dict[str, str]) -> list[HarnessEvent]:
+    # [FUNCTION DOC]
+    # HELPER: Maps a message's content blocks to harness events: text blocks to TEXT_OUTPUT, tool_use blocks to TOOL_CALL
+    # (tool name with the MCP prefix stripped, recording id -> name in the given mapping, which is mutated), tool_result blocks
+    # to TOOL_RESULT (tool name looked up by id, content, error flag). Non-list content yields an empty list.
     """Map the content blocks of one assistant or user message to events."""
     if not isinstance(content, list):
         return []

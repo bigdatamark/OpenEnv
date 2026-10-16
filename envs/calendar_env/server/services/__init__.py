@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Calendar server services package. Re-exports NotificationService and the
+# get_notification_service factory for webhook notifications.
 """
 Services package for calendar application
 """

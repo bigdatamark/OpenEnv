@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Repository hygiene tests: no CRLF line endings in git-tracked text files, .gitattributes
+# enforces LF normalisation, and .claude/hooks/check-line-endings.sh exists, is executable
+# and detects CRLF. Uses git subprocesses.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -16,6 +20,8 @@ import pytest
 
 
 def get_repo_root() -> Path:
+    # [FUNCTION DOC]
+    # HELPER: Returns the git top-level directory. Raises CalledProcessError outside a repo.
     """Get the repository root directory."""
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
@@ -27,6 +33,8 @@ def get_repo_root() -> Path:
 
 
 def get_tracked_files() -> list[Path]:
+    # [FUNCTION DOC]
+    # HELPER: Returns absolute paths of all files listed by git ls-files.
     """Get all git-tracked files."""
     repo_root = get_repo_root()
     result = subprocess.run(
@@ -40,6 +48,9 @@ def get_tracked_files() -> list[Path]:
 
 
 def is_binary_file(file_path: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Uses git diff --no-index --numstat against /dev/null; returns True if git
+    # reports "-" counts (binary).
     """Check if a file is binary (not text)."""
     # Use git's built-in detection
     result = subprocess.run(
@@ -53,6 +64,8 @@ def is_binary_file(file_path: Path) -> bool:
 
 
 def has_crlf_line_endings(file_path: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the file bytes contain CRLF; False if unreadable.
     """Check if a file contains CRLF line endings."""
     try:
         content = file_path.read_bytes()
@@ -62,9 +75,13 @@ def has_crlf_line_endings(file_path: Path) -> bool:
 
 
 class TestLineEndings:
+    # [CLASS DOC]
+    # Checks tracked files for CRLF.
     """Tests for consistent LF line endings."""
 
     def test_no_crlf_in_tracked_files(self):
+        # [FUNCTION DOC]
+        # Fails listing every existing, non-binary tracked file that contains CRLF.
         """All tracked text files should use LF line endings, not CRLF."""
         tracked_files = get_tracked_files()
         crlf_files = []
@@ -85,9 +102,13 @@ class TestLineEndings:
 
 
 class TestGitAttributes:
+    # [CLASS DOC]
+    # Checks the .gitattributes configuration.
     """Tests for .gitattributes configuration."""
 
     def test_gitattributes_exists(self):
+        # [FUNCTION DOC]
+        # .gitattributes exists at the repo root.
         """Repository should have a .gitattributes file."""
         repo_root = get_repo_root()
         gitattributes = repo_root / ".gitattributes"
@@ -97,6 +118,8 @@ class TestGitAttributes:
         )
 
     def test_gitattributes_has_lf_normalization(self):
+        # [FUNCTION DOC]
+        # .gitattributes contains a text normalisation rule and eol=lf (skips if missing).
         """The .gitattributes file should configure LF normalization."""
         repo_root = get_repo_root()
         gitattributes = repo_root / ".gitattributes"
@@ -120,9 +143,13 @@ class TestGitAttributes:
 
 
 class TestLineEndingCheckScript:
+    # [CLASS DOC]
+    # Checks the check-line-endings.sh hook script.
     """Tests for the line ending check script."""
 
     def test_check_script_exists(self):
+        # [FUNCTION DOC]
+        # The script exists.
         """The check-line-endings.sh script should exist."""
         repo_root = get_repo_root()
         script_path = repo_root / ".claude" / "hooks" / "check-line-endings.sh"
@@ -132,6 +159,8 @@ class TestLineEndingCheckScript:
         )
 
     def test_check_script_is_executable(self):
+        # [FUNCTION DOC]
+        # The script has the owner execute bit (skips if missing).
         """The check-line-endings.sh script should be executable."""
         repo_root = get_repo_root()
         script_path = repo_root / ".claude" / "hooks" / "check-line-endings.sh"
@@ -150,6 +179,8 @@ class TestLineEndingCheckScript:
         )
 
     def test_check_script_detects_crlf(self, tmp_path):
+        # [FUNCTION DOC]
+        # Run on a temp dir with a CRLF file, the script exits non-zero and names the file.
         """The check script should detect files with CRLF line endings."""
         repo_root = get_repo_root()
         script_path = repo_root / ".claude" / "hooks" / "check-line-endings.sh"
@@ -178,6 +209,8 @@ class TestLineEndingCheckScript:
         )
 
     def test_check_script_passes_with_lf(self, tmp_path):
+        # [FUNCTION DOC]
+        # Run on a temp dir with only LF files, the script exits 0.
         """The check script should pass when all files have LF endings."""
         repo_root = get_repo_root()
         script_path = repo_root / ".claude" / "hooks" / "check-line-endings.sh"

@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# CARLA embodied-evaluation environment package. Re-exports the CarlaEnv client and the
+# CarlaAction, CarlaObservation and CarlaState models; defines __version__ "0.1.0".
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Server-side generic TextArena environment. Lazily imports textarena (cached, Python 3.10+), optionally
+# ensures NLTK data, wraps a TextArena game created by id, converts its messages into OpenEnv observations,
+# computes auxiliary reward signals and renders a Wordle board for the web UI. Module globals cache the
+# import and NLTK download status; regexes parse Wordle feedback and attempt counts.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -56,6 +61,13 @@ _WORDLE_TILES = {
 
 
 def _ensure_nltk_data() -> None:
+    # [FUNCTION DOC]
+    # HELPER: downloads NLTK "words" and "averaged_perceptron_tagger_eng" once per process. Raises
+    # RuntimeError if nltk is not installed. On nltk 3.10.3 with only a NO_PROXY setting and no explicit proxy
+    # handler, runs the NLTK downloader in a subprocess without NO_PROXY (works around an NLTK bug; 120 s
+    # timeout, CalledProcessError on failure); otherwise uses nltk.download raising on error. Verifies both
+    # resources exist (LookupError otherwise) before caching success.
+    # Side effects: network downloads, files in NLTK's data dir, possible subprocess, module global mutation.
     """Download NLTK data once per process."""
     global _NLTK_DOWNLOADED
     if _NLTK_DOWNLOADED:
@@ -111,6 +123,9 @@ def _ensure_nltk_data() -> None:
 
 
 def _import_textarena() -> Any:
+    # [FUNCTION DOC]
+    # HELPER: returns the textarena module, importing it once and caching the module or the failure. Raises the
+    # cached error on later calls, and RuntimeError on Python older than 3.10.
     """Import ``textarena`` lazily and cache the module reference."""
 
     global _TEXTARENA_MODULE, _TEXTARENA_IMPORT_ERROR
@@ -139,6 +154,9 @@ def _import_textarena() -> Any:
 
 
 class TextArenaEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment wrapping one TextArena game (self._ta_env) plus its reward providers, last reward
+    # signals and TextArenaState. Supports concurrent sessions.
     """Wrap any TextArena game behind the OpenEnv ``Environment`` API."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
@@ -152,6 +170,10 @@ class TextArenaEnvironment(Environment):
         download_nltk: bool = True,
         env_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Imports textarena, optionally ensures NLTK data, creates the game with ta.make(env_id, **env_kwargs),
+        # initialises state and reward providers, and resets the game once so step works immediately.
+        # max_turns is only recorded in state, not enforced.
         super().__init__()
 
         ta = _import_textarena()
@@ -189,6 +211,10 @@ class TextArenaEnvironment(Environment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> TextArenaObservation:
+        # [FUNCTION DOC]
+        # Clears accumulated full_observations on every wrapper layer of the game, resets the game with the
+        # configured player count, resets reward providers and state (given or random episode id, counters zeroed,
+        # raw snapshot refreshed). Seed is ignored. Returns the built observation with reward 0.0 and done False.
         # TextArena observation wrappers (LLMObservationWrapper, etc.) accumulate
         # observations in self.full_observations across resets. Since we can't modify TextArena,
         # we need to manually clear this state to prevent history accumulation.
@@ -221,6 +247,11 @@ class TextArenaEnvironment(Environment):
         return observation
 
     def step(self, action: TextArenaAction) -> TextArenaObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Raises TypeError for a non-TextArenaAction. Steps the game with the message, updates step count, turn
+        # (from the game state, else +1) and last info. Builds the observation, sets done and the reward extracted
+        # for the current player. Computes reward signals and, if any, merges them under "reward_signals" in the
+        # observation info, metadata and state last_info. Refreshes the raw snapshot. Returns the observation.
         if not isinstance(action, TextArenaAction):
             raise TypeError(f"Expected TextArenaAction, received {type(action)!r}")
 
@@ -254,6 +285,10 @@ class TextArenaEnvironment(Environment):
         return observation
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Returns HTML for a Wordle board when the serialised observation's concatenated messages contain an
+        # attempts count: one row per parsed guess with G/Y/X tile styling, then empty rows up to the attempts
+        # count. Returns None for non-Wordle games or observations without messages.
         """Draw the Wordle board (one row per guess, empty rows for those left). Other games draw nothing."""
         if "messages" not in observation:
             return None
@@ -284,12 +319,19 @@ class TextArenaEnvironment(Environment):
 
     @property
     def state(self) -> TextArenaState:
+        # [FUNCTION DOC]
+        # Property returning the current TextArenaState.
         return self._state
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
     def _build_observation(self) -> TextArenaObservation:
+        # [FUNCTION DOC]
+        # HELPER: gets (player id, raw messages) from the game, converts the messages, and picks the prompt: all
+        # PROMPT-category messages; else the first message at turn 0; else the env id. Returns a
+        # TextArenaObservation with the game's step_info as info and metadata holding env_id, turn and the raw
+        # converted messages.
         player_id, messages = self._ta_env.get_observation()
 
         ta_messages = self._convert_messages(messages)
@@ -338,6 +380,8 @@ class TextArenaEnvironment(Environment):
         return observation
 
     def _legal_players(self) -> List[int]:
+        # [FUNCTION DOC]
+        # HELPER: returns the sorted non-negative integer keys of the game state's role mapping.
         role_mapping = getattr(self._ta_env.state, "role_mapping", {}) or {}
         players = [
             pid for pid in role_mapping.keys() if isinstance(pid, int) and pid >= 0
@@ -345,12 +389,18 @@ class TextArenaEnvironment(Environment):
         return sorted(players)
 
     def _convert_messages(self, messages: Iterable[Any]) -> List[TextArenaMessage]:
+        # [FUNCTION DOC]
+        # HELPER: converts raw TextArena messages (3-tuples sender/content/category, 2-tuples, or anything else as
+        # game text) into TextArenaMessages, merging consecutive entries with the same sender and category by
+        # concatenating their content. Category enums are reduced to their name; non-numeric senders become -1.
         converted: List[TextArenaMessage] = []
         buffered_sender: int | None = None
         buffered_category: str | None = None
         buffered_content: List[str] = []
 
         def flush_buffer() -> None:
+            # [FUNCTION DOC]
+            # HELPER: appends the buffered content (if any) as one TextArenaMessage and clears the buffer.
             nonlocal buffered_content, buffered_sender, buffered_category
             if not buffered_content:
                 return
@@ -395,6 +445,9 @@ class TextArenaEnvironment(Environment):
         return converted
 
     def _extract_reward(self) -> float:
+        # [FUNCTION DOC]
+        # HELPER: returns the reward of the game's current player from the state's rewards mapping, else player
+        # 0's reward, else 0.0.
         rewards = getattr(self._ta_env.state, "rewards", None)
         if isinstance(rewards, dict):
             # Use current player reward if available, otherwise default to player 0.
@@ -406,6 +459,9 @@ class TextArenaEnvironment(Environment):
         return 0.0
 
     def _snapshot_state(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns a mapping snapshot of the game state (turn, game_state, logs, rewards, done, role
+        # mapping, game_info, step_info) plus the last reward signals when present.
         state = self._ta_env.state
         snapshot: Dict[str, Any] = {
             "turn": getattr(state, "turn", 0),
@@ -424,6 +480,9 @@ class TextArenaEnvironment(Environment):
     def _compute_reward_signals(
         self, *, action: TextArenaAction, observation: TextArenaObservation
     ) -> Dict[str, float]:
+        # [FUNCTION DOC]
+        # HELPER: runs every reward provider and merges their outputs into one mapping of floats; providers that
+        # raise are skipped silently. Returns {} if there are no providers.
         if not self._reward_providers:
             return {}
 

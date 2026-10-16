@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Executes Julia source code and captures stdout, stderr and exit code. Uses a
+# class-wide shared persistent-process pool (JuliaProcessPool, optional import)
+# when enabled, otherwise spawns one Julia subprocess per execution from a
+# temporary .jl file with timeout handling, process cleanup and optional retries.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -39,6 +44,8 @@ logger = logging.getLogger("julia_env.executor")
 
 @dataclass
 class CodeExecResult:
+    # [CLASS DOC]
+    # Dataclass result of one execution: stdout, stderr and integer exit code.
     """Result of code execution."""
 
     stdout: str
@@ -57,6 +64,11 @@ except ImportError:
 
 
 class JuliaExecutor:
+    # [CLASS DOC]
+    # Julia code runner. Instance settings: timeout, retry count, whether to add
+    # performance flags, whether to use the shared pool, the resolved Julia path and
+    # the base command. Class-level state: the shared pool, a lock guarding it, and
+    # the pool's configured size and timeout.
     """
     Executor for running Julia code with robust process management.
 
@@ -97,6 +109,14 @@ class JuliaExecutor:
         use_optimization_flags: bool = True,
         use_process_pool: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Resolves timeout (JULIA_EXECUTION_TIMEOUT, default 120, when None), locates
+        # julia on PATH or in common install locations (~/.juliaup/bin, ~/.julia/bin,
+        # /usr/local/bin, /usr/bin), and builds the base command, adding
+        # --compile=min --optimize=2 --startup-file=no --history-file=no when
+        # optimization flags are enabled.
+        # KNOWN ISSUE: the docstring says a RuntimeError is raised when Julia is not
+        # found, but the code only logs a warning (run() then returns exit code 127).
         """
         Initialize the JuliaExecutor.
 
@@ -163,6 +183,10 @@ class JuliaExecutor:
     def _kill_process_tree(
         self, proc: subprocess.Popen, script_file: Optional[str] = None
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: If the process is still running, terminates it, waits 2 s, then kills
+        # it and waits 2 s more. On unexpected errors, tries to SIGKILL the process
+        # group as a last resort. script_file is unused. Never raises.
         """
         Terminate a process and all its children.
 
@@ -208,6 +232,17 @@ class JuliaExecutor:
                     logger.error(f"Failed to kill process group: {pg_error}")
 
     def run(self, code: str, timeout: Optional[int] = None) -> CodeExecResult:
+        # [FUNCTION DOC]
+        # Runs code. If the instance uses the pool and a shared pool exists, delegates
+        # to it (timeout None means the pool default); on pool exception falls back to
+        # a subprocess. Subprocess path: uses the instance timeout when none is given;
+        # returns exit 127 if Julia was not found; otherwise for up to max_retries+1
+        # attempts writes the code to a temp .jl file, runs the base command on it in a
+        # new process group, and returns its output. On timeout kills the process tree
+        # and returns exit 124 with a timeout message on the last attempt (else sleeps
+        # 1 s and retries); a missing executable returns 127; other errors return exit 1
+        # on the last attempt. The temp file is always removed.
+        # Returns: CodeExecResult. Side effects: temp files, subprocesses, logging.
         """
         Execute Julia code and return the result with robust error handling.
 
@@ -368,6 +403,8 @@ class JuliaExecutor:
         )
 
     def _cleanup_temp_file(self, code_file: Optional[str]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Deletes the temp file if it exists, ignoring (but logging) errors.
         """Clean up temporary file safely."""
         if code_file and Path(code_file).exists():
             try:
@@ -377,6 +414,12 @@ class JuliaExecutor:
 
     @staticmethod
     def enable_process_pool(size: int = 4, timeout: Optional[int] = None) -> bool:
+        # [FUNCTION DOC]
+        # Static. Creates the shared JuliaProcessPool with the given size and timeout
+        # (JULIA_EXECUTION_TIMEOUT or 120 when None) under the class lock, recording
+        # size and timeout. Returns True if created or already enabled, False if the
+        # pool module is unavailable or creation failed.
+        # Side effects: starts Julia worker processes.
         """
         Enable the shared Julia process pool for all JuliaExecutor instances.
 
@@ -422,6 +465,9 @@ class JuliaExecutor:
 
     @staticmethod
     def shutdown_pool() -> None:
+        # [FUNCTION DOC]
+        # Static. Under the class lock, shuts down the shared pool (errors logged) and
+        # clears it. No-op if no pool exists.
         """
         Shutdown the shared Julia process pool.
 
@@ -440,12 +486,20 @@ class JuliaExecutor:
 
     @staticmethod
     def is_pool_enabled() -> bool:
+        # [FUNCTION DOC]
+        # Static. Returns whether the shared pool exists (checked under the lock).
         """Check if the process pool is currently enabled."""
         with JuliaExecutor._pool_lock:
             return JuliaExecutor._shared_pool is not None
 
     @staticmethod
     def get_pool_metrics() -> dict:
+        # [FUNCTION DOC]
+        # Static. Returns {"enabled": False, "pool_size": 0, "available_workers": 0}
+        # without a pool, else enabled True with configured pool_size, timeout and
+        # available_workers.
+        # KNOWN ISSUE: available_workers reports the configured pool size, not the
+        # number of currently idle workers.
         """Get metrics about the process pool."""
         if JuliaExecutor._shared_pool is None:
             return {

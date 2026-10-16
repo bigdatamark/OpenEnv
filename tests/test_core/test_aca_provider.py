@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Unit tests for ACASandboxProvider (Azure Container Apps sandboxes) using an in-memory
+# fake adapter: disk source parsing, start/stop/close lifecycle and cleanup, readiness
+# polling and crash reporting, security invariants (https only, explicit anonymous port,
+# egress warnings, URL/secret redaction), and the default adapter's mapping onto a faked
+# preview Azure SDK. The ContainerProvider base close/context-manager contract is also checked.
 """Unit tests for ACASandboxProvider. All tests use a fake ACA adapter."""
 
 from __future__ import annotations
@@ -15,18 +21,29 @@ from openenv.core.containers.runtime.providers import ContainerProvider
 
 
 def test_container_provider_base_has_noop_close_and_context_manager():
+    # [FUNCTION DOC]
+    # A minimal ContainerProvider subclass has a no-op close, __enter__ returns self, and
+    # __exit__ calls an overridden close.
     """The base ContainerProvider now defines close()/__enter__/__exit__ so a
     caller can release resources polymorphically; the default close() is a no-op
     and __exit__ calls it."""
 
     class _Minimal(ContainerProvider):
+        # [CLASS DOC]
+        # HELPER: Smallest concrete ContainerProvider (fixed URL, no-op stop/wait).
         def start_container(self, image, port=None, env_vars=None, **kwargs):
+            # [FUNCTION DOC]
+            # Returns "http://localhost:8000".
             return "http://localhost:8000"
 
         def stop_container(self):
+            # [FUNCTION DOC]
+            # No-op.
             pass
 
         def wait_for_ready(self, base_url, timeout_s=30.0):
+            # [FUNCTION DOC]
+            # No-op.
             pass
 
     # Default close() is a no-op and must not raise.
@@ -39,9 +56,13 @@ def test_container_provider_base_has_noop_close_and_context_manager():
 
     # __exit__ invokes close() (override path).
     class _Closes(_Minimal):
+        # [CLASS DOC]
+        # HELPER: _Minimal subclass recording close calls on a class attribute.
         closed = False
 
         def close(self):
+            # [FUNCTION DOC]
+            # Sets the class-level closed flag to True.
             type(self).closed = True
 
     with _Closes():
@@ -50,16 +71,27 @@ def test_container_provider_base_has_noop_close_and_context_manager():
 
 
 class _ExecResult:
+    # [CLASS DOC]
+    # HELPER: Exec result stand-in with a stdout string.
     def __init__(self, stdout: str = ""):
+        # [FUNCTION DOC]
+        # Stores stdout.
         self.stdout = stdout
 
 
 class _FakeSandbox:
+    # [CLASS DOC]
+    # HELPER: Opaque sandbox handle returned by the fake adapter.
     pass
 
 
 class _FakeAdapter:
+    # [CLASS DOC]
+    # HELPER: In-memory ACA adapter recording create/port/exec/delete/close calls, with
+    # switches to fail add_port or delete, report the server process dead, and a canned log.
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initialises the single sandbox, call logs, port URL and failure switches.
         self.sandbox = _FakeSandbox()
         self.created = []
         self.ports = []
@@ -74,16 +106,23 @@ class _FakeAdapter:
         self.log = "server crashed"
 
     def create_sandbox(self, **kwargs):
+        # [FUNCTION DOC]
+        # Records kwargs and returns the sandbox.
         self.created.append(kwargs)
         return self.sandbox
 
     def add_port(self, sandbox, *, port, anonymous):
+        # [FUNCTION DOC]
+        # Records the call; raises RuntimeError("port failed") if configured; returns port_url.
         self.ports.append({"sandbox": sandbox, "port": port, "anonymous": anonymous})
         if self.fail_add_port:
             raise RuntimeError("port failed")
         return self.port_url
 
     def exec(self, sandbox, command, *, working_directory=None):
+        # [FUNCTION DOC]
+        # Records the command; answers "kill -0" checks with DEAD/RUNNING and log cat commands
+        # with the canned log; otherwise empty output.
         self.exec_commands.append(
             {
                 "sandbox": sandbox,
@@ -98,17 +137,23 @@ class _FakeAdapter:
         return _ExecResult("")
 
     def delete_sandbox(self, sandbox):
+        # [FUNCTION DOC]
+        # Records the deletion; raises RuntimeError("delete failed") if configured.
         self.deleted.append(sandbox)
         if self.fail_delete:
             raise RuntimeError("delete failed")
 
     def close(self):
+        # [FUNCTION DOC]
+        # Marks closed and counts calls.
         self.closed = True
         self.close_count += 1
 
 
 @pytest.fixture()
 def adapter():
+    # [FUNCTION DOC]
+    # Fixture returning a fresh _FakeAdapter.
     return _FakeAdapter()
 
 
@@ -119,11 +164,17 @@ _SAFE_EGRESS = object()
 
 
 def _provider(adapter, **kwargs):
+    # [FUNCTION DOC]
+    # HELPER: Builds an ACASandboxProvider on the adapter with anonymous_port True and a
+    # sentinel egress policy (unless overridden) so no egress warning fires.
     kwargs.setdefault("egress_policy", _SAFE_EGRESS)
     return ACASandboxProvider(_adapter=adapter, anonymous_port=True, **kwargs)
 
 
 def test_start_container_creates_disk_sandbox_and_exposes_port(adapter):
+    # [FUNCTION DOC]
+    # Start creates a disk sandbox with env vars and merged labels, exposes port 8000
+    # anonymously, runs the cmd via exec and returns the port URL.
     provider = ACASandboxProvider(
         _adapter=adapter,
         anonymous_port=True,
@@ -157,6 +208,8 @@ def test_start_container_creates_disk_sandbox_and_exposes_port(adapter):
 
 
 def test_constructor_image_used_when_start_omits_image(adapter):
+    # [FUNCTION DOC]
+    # The constructor image and env vars are used when start gets none.
     provider = _provider(
         adapter,
         image="disk:constructor-env",
@@ -171,6 +224,8 @@ def test_constructor_image_used_when_start_omits_image(adapter):
 
 
 def test_start_image_overrides_constructor_image(adapter):
+    # [FUNCTION DOC]
+    # An explicit start image wins over the constructor image.
     provider = _provider(adapter, image="disk:constructor-env")
 
     provider.start_container("disk:explicit-env")
@@ -179,6 +234,8 @@ def test_start_image_overrides_constructor_image(adapter):
 
 
 def test_requires_image_from_constructor_or_start(adapter):
+    # [FUNCTION DOC]
+    # No image anywhere raises ValueError "requires an image".
     provider = _provider(adapter)
 
     with pytest.raises(ValueError, match="requires an image"):
@@ -186,6 +243,8 @@ def test_requires_image_from_constructor_or_start(adapter):
 
 
 def test_provider_imports_from_its_module():
+    # [FUNCTION DOC]
+    # The provider is importable from its own module.
     # Optional cloud providers are imported from their module, not re-exported
     # from the runtime package (matches DaytonaProvider).
     from openenv.core.containers.runtime.aca_provider import (
@@ -196,6 +255,8 @@ def test_provider_imports_from_its_module():
 
 
 def test_provider_not_in_runtime_package_all():
+    # [FUNCTION DOC]
+    # The runtime package neither exports nor exposes ACASandboxProvider.
     import openenv.core.containers.runtime as runtime_pkg
 
     # Optional cloud providers are not surfaced at the package root (matches
@@ -205,6 +266,8 @@ def test_provider_not_in_runtime_package_all():
 
 
 def test_empty_sources_raise_clear_errors(adapter):
+    # [FUNCTION DOC]
+    # Empty/whitespace sources and empty disk:/disk-id: values raise specific ValueErrors.
     provider = _provider(adapter)
 
     with pytest.raises(ValueError, match="non-empty ACA disk"):
@@ -223,6 +286,8 @@ def test_empty_sources_raise_clear_errors(adapter):
 
 @pytest.mark.parametrize("disk_name", ["ubuntu", "python-3.11"])
 def test_plain_image_is_treated_as_public_disk(disk_name):
+    # [FUNCTION DOC]
+    # Parametrized: bare names like ubuntu/python-3.11 are public disk names.
     # "ubuntu" and "python-3.11" (the disk name the live ACA demo uses) are bare
     # public disk names — hyphens/dots are fine; only "/" or ":" are rejected.
     # A fresh provider per disk (no start_container re-use).
@@ -235,6 +300,8 @@ def test_plain_image_is_treated_as_public_disk(disk_name):
 
 
 def test_docker_image_reference_is_rejected(adapter):
+    # [FUNCTION DOC]
+    # Registry/tag/repo-path image references raise ValueError before reaching the SDK.
     """A migration foot-gun: an OCI/Docker image string must fail with guidance,
     not be silently passed to the ACA SDK as a disk name."""
     provider = _provider(adapter)
@@ -251,6 +318,8 @@ def test_docker_image_reference_is_rejected(adapter):
 
 
 def test_disk_id_source(adapter):
+    # [FUNCTION DOC]
+    # "disk-id:" sources pass disk_id and no disk name.
     provider = _provider(adapter)
 
     provider.start_container(
@@ -265,6 +334,8 @@ def test_disk_id_source(adapter):
 
 
 def test_port_validation(adapter):
+    # [FUNCTION DOC]
+    # Ports other than 8000 raise ValueError.
     provider = _provider(adapter)
 
     with pytest.raises(ValueError, match="only supports port 8000"):
@@ -272,16 +343,22 @@ def test_port_validation(adapter):
 
 
 def test_anonymous_port_must_be_explicit(adapter):
+    # [FUNCTION DOC]
+    # Constructing without anonymous_port raises ValueError.
     with pytest.raises(ValueError, match="requires explicit anonymous_port=True"):
         ACASandboxProvider(_adapter=adapter)
 
 
 def test_authenticated_aca_ports_are_not_supported(adapter):
+    # [FUNCTION DOC]
+    # anonymous_port False raises ValueError.
     with pytest.raises(ValueError, match="authenticated ACA sandbox ports"):
         ACASandboxProvider(_adapter=adapter, anonymous_port=False)
 
 
 def test_start_container_cleans_up_on_port_failure(adapter):
+    # [FUNCTION DOC]
+    # An add_port failure propagates, deletes the sandbox and leaves no base_url.
     adapter.fail_add_port = True
     provider = _provider(adapter)
 
@@ -294,6 +371,8 @@ def test_start_container_cleans_up_on_port_failure(adapter):
 
 
 def test_cleanup_failure_does_not_mask_original_error(adapter):
+    # [FUNCTION DOC]
+    # When cleanup delete also fails, the original port error still propagates.
     """If cleanup (delete_sandbox) also fails, the ORIGINAL start error must
     still propagate, not be replaced by the secondary cleanup error."""
     adapter.fail_add_port = True  # original failure
@@ -307,6 +386,8 @@ def test_cleanup_failure_does_not_mask_original_error(adapter):
 
 
 def test_unsupported_start_kwargs_raise(adapter):
+    # [FUNCTION DOC]
+    # Unknown start kwargs raise ValueError.
     provider = _provider(adapter)
 
     with pytest.raises(ValueError, match="Unsupported ACASandboxProvider"):
@@ -314,6 +395,8 @@ def test_unsupported_start_kwargs_raise(adapter):
 
 
 def test_wait_for_ready_polls_health(adapter):
+    # [FUNCTION DOC]
+    # wait_for_ready GETs <url>/health with a 5 s timeout.
     provider = _provider(adapter)
     url = provider.start_container("ubuntu")
     response = MagicMock(status_code=200)
@@ -325,6 +408,8 @@ def test_wait_for_ready_polls_health(adapter):
 
 
 def test_wait_for_ready_reports_dead_server_log(adapter):
+    # [FUNCTION DOC]
+    # With surface_server_logs and a dead process, raises "server process died" including the log.
     adapter.dead_process = True
     provider = _provider(adapter, cmd="python -m broken", surface_server_logs=True)
     url = provider.start_container("ubuntu")
@@ -339,6 +424,8 @@ def test_wait_for_ready_reports_dead_server_log(adapter):
 
 
 def test_crash_log_not_surfaced_by_default(adapter):
+    # [FUNCTION DOC]
+    # By default the crash error says logs are not surfaced and omits log content.
     """S4: server output is not surfaced in the crash error by default."""
     adapter.dead_process = True
     adapter.log = "TOKEN=topsecret crashed"
@@ -356,6 +443,8 @@ def test_crash_log_not_surfaced_by_default(adapter):
 
 
 def test_non_https_error_does_not_leak_url(adapter):
+    # [FUNCTION DOC]
+    # A non-https port URL error does not include the URL.
     """S2: the bearer port URL is never interpolated into the error."""
     adapter.port_url = "http://secret-bearer-host.example/abc123"
     provider = _provider(adapter)
@@ -368,6 +457,8 @@ def test_non_https_error_does_not_leak_url(adapter):
 
 
 def test_timeout_error_does_not_leak_url(adapter):
+    # [FUNCTION DOC]
+    # The readiness TimeoutError does not include the URL (sleep patched).
     """S2: the timeout error does not interpolate the bearer URL."""
     provider = _provider(adapter)  # no cmd -> no dead-process check
     url = provider.start_container("ubuntu")
@@ -384,6 +475,8 @@ def test_timeout_error_does_not_leak_url(adapter):
 
 
 def test_start_time_anonymous_port_false_is_rejected(adapter):
+    # [FUNCTION DOC]
+    # anonymous_port False passed to start raises ValueError.
     """S2: a start-time anonymous_port=False override is rejected."""
     provider = _provider(adapter)
 
@@ -392,6 +485,8 @@ def test_start_time_anonymous_port_false_is_rejected(adapter):
 
 
 def test_stop_container_clears_redact_values(adapter):
+    # [FUNCTION DOC]
+    # Injected secret values tracked for redaction are cleared on stop.
     """Stale injected secret values must not survive across sandboxes."""
     provider = _provider(adapter)
     provider.start_container("ubuntu", env_vars={"TOKEN": "secret-123"})
@@ -403,10 +498,14 @@ def test_stop_container_clears_redact_values(adapter):
 
 
 def test_failed_create_auto_clears_redact_values(adapter):
+    # [FUNCTION DOC]
+    # A create_sandbox failure clears redaction values and deletes nothing.
     """create_sandbox failure must AUTO-clear injected secret values: the create
     stage drops them on failure, so no caller action is required."""
 
     def boom(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: create_sandbox replacement that raises RuntimeError.
         raise RuntimeError("create failed")
 
     adapter.create_sandbox = boom
@@ -421,6 +520,8 @@ def test_failed_create_auto_clears_redact_values(adapter):
 
 
 def test_double_start_raises_and_preserves_existing_sandbox(adapter):
+    # [FUNCTION DOC]
+    # A second start before stop raises and leaves the first sandbox intact.
     """Only one sandbox per provider: a second start_container before stop must
     raise and leave the existing sandbox intact (no orphaned/leaked sandbox)."""
     provider = _provider(adapter)
@@ -438,6 +539,8 @@ def test_double_start_raises_and_preserves_existing_sandbox(adapter):
 
 
 def test_start_after_stop_is_allowed(adapter):
+    # [FUNCTION DOC]
+    # After stop, a new start creates a second sandbox.
     """After stop_container the provider can start a fresh sandbox again."""
     provider = _provider(adapter)
     provider.start_container("ubuntu")
@@ -450,6 +553,8 @@ def test_start_after_stop_is_allowed(adapter):
 
 
 def test_close_deletes_sandbox(adapter):
+    # [FUNCTION DOC]
+    # close deletes the sandbox but does not close a non-owned adapter.
     provider = _provider(adapter)
     provider.start_container("ubuntu")
 
@@ -460,6 +565,8 @@ def test_close_deletes_sandbox(adapter):
 
 
 def test_adapter_owned_close_closes_adapter():
+    # [FUNCTION DOC]
+    # close closes the adapter when the provider owns it.
     adapter = _FakeAdapter()
     provider = _provider(adapter)
     provider._owns_adapter = True
@@ -470,6 +577,8 @@ def test_adapter_owned_close_closes_adapter():
 
 
 def test_double_close_closes_adapter_once():
+    # [FUNCTION DOC]
+    # Two closes close the owned adapter only once.
     """A second close()/context exit must not close the owned SDK client again
     (a preview SDK's close is not guaranteed idempotent)."""
     adapter = _FakeAdapter()
@@ -483,6 +592,8 @@ def test_double_close_closes_adapter_once():
 
 
 def test_context_manager_closes_provider():
+    # [FUNCTION DOC]
+    # Leaving the with block deletes the sandbox and closes the owned adapter.
     """Using the provider as a context manager stops the sandbox and releases
     the owned SDK client on exit (deterministic cleanup)."""
     adapter = _FakeAdapter()
@@ -497,6 +608,8 @@ def test_context_manager_closes_provider():
 
 
 def test_context_manager_closes_on_exception():
+    # [FUNCTION DOC]
+    # Cleanup also happens when the with body raises.
     """The point of the context manager: cleanup still happens if the `with`
     body raises."""
     adapter = _FakeAdapter()
@@ -513,19 +626,34 @@ def test_context_manager_closes_on_exception():
 
 
 def test_default_adapter_matches_preview_sdk_shape(monkeypatch):
+    # [FUNCTION DOC]
+    # With a fake azure.containerapps.sandbox module in sys.modules, the default adapter
+    # builds the client from region endpoint/credential/kwargs, maps create args to the SDK's
+    # begin_create_sandbox names (environment, polling_timeout, ...), and delegates add_port,
+    # exec, delete and close.
     calls = {}
 
     class _FakePoller:
+        # [CLASS DOC]
+        # HELPER: Poller stand-in returning a fixed result.
         def __init__(self, result):
+            # [FUNCTION DOC]
+            # Stores the result.
             self._result = result
 
         def result(self):
+            # [FUNCTION DOC]
+            # Returns the stored result.
             return self._result
 
     class _FakeSandboxPort:
+        # [CLASS DOC]
+        # HELPER: Port object with a fixed https url.
         url = "https://aca-port.example"
 
     class _FakeSandboxClient:
+        # [CLASS DOC]
+        # HELPER: Sandbox-scoped client recording add_port/exec calls and deletion.
         """Sandbox-scoped operations client.
 
         Mirrors the real SDK contract: ``begin_create_sandbox(...).result()``
@@ -537,38 +665,54 @@ def test_default_adapter_matches_preview_sdk_shape(monkeypatch):
         sandbox_id = "sandbox-xyz"
 
         def __init__(self):
+            # [FUNCTION DOC]
+            # Initialises call logs and the deleted flag.
             self.add_port_calls = []
             self.exec_calls = []
             self.deleted = False
 
         def add_port(self, port, *, anonymous):
+            # [FUNCTION DOC]
+            # Records the call and returns a _FakeSandboxPort.
             self.add_port_calls.append({"port": port, "anonymous": anonymous})
             return _FakeSandboxPort()
 
         def exec(self, command, *, working_directory=None):
+            # [FUNCTION DOC]
+            # Records the call and returns an _ExecResult with "ok".
             self.exec_calls.append(
                 {"command": command, "working_directory": working_directory}
             )
             return _ExecResult("ok")
 
         def begin_delete(self):
+            # [FUNCTION DOC]
+            # Marks deleted and returns a poller with no result.
             self.deleted = True
             return _FakePoller(None)
 
     fake_sandbox = _FakeSandboxClient()
 
     class _FakeEgressPolicy:
+        # [CLASS DOC]
+        # HELPER: Egress policy exposing a private dict conversion like the real SDK.
         """Mirrors the real SDK EgressPolicy, which exposes ``_to_dict()``."""
 
         def __init__(self, default):
+            # [FUNCTION DOC]
+            # Stores the default action.
             self._default = default
 
         def _to_dict(self):
+            # [FUNCTION DOC]
+            # Returns {"default": <default>}.
             return {"default": self._default}
 
     egress_policy = _FakeEgressPolicy("deny")
 
     class _FakeSandboxGroupClient:
+        # [CLASS DOC]
+        # HELPER: Group client recording its init args and create kwargs into the calls mapping.
         def __init__(
             self,
             endpoint,
@@ -579,6 +723,8 @@ def test_default_adapter_matches_preview_sdk_shape(monkeypatch):
             sandbox_group,
             **kwargs,
         ):
+            # [FUNCTION DOC]
+            # Records endpoint, credential, ids and extra kwargs.
             calls["client_init"] = {
                 "endpoint": endpoint,
                 "credential": credential,
@@ -589,6 +735,9 @@ def test_default_adapter_matches_preview_sdk_shape(monkeypatch):
             }
 
         def begin_create_sandbox(self, **kwargs):
+            # [FUNCTION DOC]
+            # Resolves any egress policy via its dict conversion, records kwargs, returns a poller of
+            # the fake sandbox client.
             # The real SDK resolves the egress policy via _to_dict(); a plain
             # dict would raise AttributeError here, so this guards the contract.
             policy = kwargs.get("egress_policy")
@@ -600,6 +749,8 @@ def test_default_adapter_matches_preview_sdk_shape(monkeypatch):
             return _FakePoller(fake_sandbox)
 
         def close(self):
+            # [FUNCTION DOC]
+            # Records that the client was closed.
             calls["closed"] = True
 
     sandbox_module = types.ModuleType("azure.containerapps.sandbox")
@@ -685,6 +836,8 @@ def test_default_adapter_matches_preview_sdk_shape(monkeypatch):
 
 
 def test_rejects_non_https_url(adapter):
+    # [FUNCTION DOC]
+    # A plaintext port URL raises "non-HTTPS" and deletes the created sandbox.
     """S1: a plaintext port URL must be refused (EnvClient would use ws://)."""
     adapter.port_url = "http://insecure.example"
     provider = _provider(adapter)
@@ -697,6 +850,8 @@ def test_rejects_non_https_url(adapter):
 
 
 def test_warns_on_unrestricted_egress(adapter):
+    # [FUNCTION DOC]
+    # No egress policy emits an "unrestricted egress" UserWarning.
     """S3: starting with no egress policy warns (ACA default is Allow)."""
     provider = ACASandboxProvider(_adapter=adapter, anonymous_port=True)
 
@@ -705,6 +860,8 @@ def test_warns_on_unrestricted_egress(adapter):
 
 
 def test_safe_egress_policy_does_not_warn(adapter, recwarn):
+    # [FUNCTION DOC]
+    # A non-None egress policy emits no such warning.
     """A non-None egress policy means no unrestricted-egress warning."""
     provider = _provider(adapter)  # _SAFE_EGRESS sentinel
     provider.start_container("ubuntu")
@@ -713,15 +870,25 @@ def test_safe_egress_policy_does_not_warn(adapter, recwarn):
 
 
 def test_deny_all_egress_builds_default_deny_policy(monkeypatch):
+    # [FUNCTION DOC]
+    # deny_all_egress builds a Deny-default policy with Allow host rules (fake SDK module).
     """deny_all_egress() lazily builds a default-deny EgressPolicy with allowlist."""
 
     class _FakeEgressHostRule:
+        # [CLASS DOC]
+        # HELPER: Host rule stand-in storing pattern and action.
         def __init__(self, *, pattern, action):
+            # [FUNCTION DOC]
+            # Stores pattern and action.
             self.pattern = pattern
             self.action = action
 
     class _FakeEgressPolicy:
+        # [CLASS DOC]
+        # HELPER: Policy stand-in storing default action and host rules.
         def __init__(self, *, default_action, host_rules):
+            # [FUNCTION DOC]
+            # Stores default_action and host_rules.
             self.default_action = default_action
             self.host_rules = host_rules
 
@@ -743,6 +910,8 @@ def test_deny_all_egress_builds_default_deny_policy(monkeypatch):
 
 
 def test_wait_for_ready_redacts_injected_secrets(adapter):
+    # [FUNCTION DOC]
+    # Surfaced crash logs have injected secret values replaced by "***".
     """S4: injected secret values are scrubbed from surfaced server output."""
     adapter.dead_process = True
     adapter.log = "Traceback: TOKEN=supersecret123 failed to load config"

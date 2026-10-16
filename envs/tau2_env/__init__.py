@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# tau2-bench environment package: customer-service conversations with an LLM-simulated user, driven
+# through MCP tools. Re-exports the client (Tau2Env), Tau2State, and the core MCP CallToolAction /
+# ListToolsAction types.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Typed OpenEnv client for ThinkingBox benchmark episodes. Handles only public actions/observations; grading
+# and private benchmark state stay server-side. Default per-message timeout is 1800 s because a turn may
+# include agent, user-simulator and judge work.
 """Provide the typed OpenEnv client for ThinkingBox benchmark episodes.
 
 The client only handles public WebSocket actions and observations; private
@@ -28,6 +32,10 @@ DEFAULT_MESSAGE_TIMEOUT_S = 1800.0
 class ThinkingBoxEnv(
     EnvClient[ThinkingBoxAction, ThinkingBoxObservation, ThinkingBoxState]
 ):
+    # [CLASS DOC]
+    # EnvClient for ThinkingBox with convenience methods for reset by test UID, listing tools, single and
+    # parallel tool calls, message submission and harness-side finishing. Each convenience method returns what
+    # the base reset/step returns (awaitable on the async client).
     """Connect a trusted harness to one ThinkingBox environment instance.
 
     Args:
@@ -53,6 +61,8 @@ class ThinkingBoxEnv(
         message_timeout_s: float = DEFAULT_MESSAGE_TIMEOUT_S,
         **kwargs: Any,
     ) -> None:
+        # [FUNCTION DOC]
+        # Forwards base_url, the message timeout (default 1800 s) and other kwargs to EnvClient.
         super().__init__(
             base_url=base_url,
             message_timeout_s=message_timeout_s,
@@ -68,6 +78,9 @@ class ThinkingBoxEnv(
         config: str | None = None,
         **kwargs: Any,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Builds reset kwargs with test_uid plus any extra kwargs, adding dataset, agent and config only when not
+        # None, and delegates to the base reset.
         """Start the task selected by its canonical UID.
 
         Args:
@@ -97,6 +110,8 @@ class ThinkingBoxEnv(
         return super().reset(**reset_kwargs)
 
     def list_tools(self) -> Any:
+        # [FUNCTION DOC]
+        # Steps with a ListToolsAction.
         """Return the tools permitted for the active scenario.
 
         Returns:
@@ -112,6 +127,9 @@ class ThinkingBoxEnv(
         call_id: str | None = None,
         **kwargs: Any,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Merges arguments (default empty) with extra kwargs and steps with a single-call CallToolAction carrying
+        # the tool name, merged arguments and optional call_id.
         """Execute one permitted tool call as an agent action.
 
         Args:
@@ -134,6 +152,8 @@ class ThinkingBoxEnv(
         )
 
     def call_tools(self, calls: list[SubmittedToolCall]) -> Any:
+        # [FUNCTION DOC]
+        # Steps with a CallToolAction carrying the given ordered parallel tool calls.
         """Execute one native parallel tool batch as one agent action.
 
         Args:
@@ -153,6 +173,9 @@ class ThinkingBoxEnv(
         terminal_tool_calls: list[SubmittedToolCall] | None = None,
         tool_calls_before_content: bool = False,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Steps with a SubmitMessageAction carrying the content, terminal tool calls (default empty) and the
+        # ordering flag.
         """Submit assistant-visible text or a terminal provider turn.
 
         Args:
@@ -176,6 +199,8 @@ class ThinkingBoxEnv(
         )
 
     def finish(self, reason: str = "harness") -> Any:
+        # [FUNCTION DOC]
+        # Steps with the private finish action carrying reason (default "harness").
         """Finish from trusted harness code without advertising a model tool.
 
         Args:
@@ -188,11 +213,17 @@ class ThinkingBoxEnv(
         return self.step(_FinishAction(reason=reason))
 
     def _step_payload(self, action: ThinkingBoxAction) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the action's JSON-mode pydantic dump.
         return action.model_dump(mode="json")
 
     def _parse_result(
         self, payload: dict[str, Any]
     ) -> StepResult[ThinkingBoxObservation]:
+        # [FUNCTION DOC]
+        # Copies the payload's observation mapping, injects envelope reward, done (default False) and non-null
+        # metadata, and validates it into a ThinkingBoxObservation (pydantic ValidationError on bad shape).
+        # Returns StepResult with observation, reward, done and metadata.
         data = dict(payload.get("observation", {}))
         data["reward"] = payload.get("reward")
         data["done"] = payload.get("done", False)
@@ -207,4 +238,6 @@ class ThinkingBoxEnv(
         )
 
     def _parse_state(self, payload: dict[str, Any]) -> ThinkingBoxState:
+        # [FUNCTION DOC]
+        # Validates the payload into a ThinkingBoxState.
         return ThinkingBoxState.model_validate(payload)

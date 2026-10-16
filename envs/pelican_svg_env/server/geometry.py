@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Geometry layer for structural scoring: parses SVG transforms, lengths and path data, flattens
+# drawable elements into polylines, applies accumulated transforms and normalises coordinates by
+# the larger viewBox dimension, and summarises each outline as a Shape with scale-free statistics
+# (centroid, radius, area, perimeter, extent, bbox, circularity, radius variation). Pure functions,
+# no I/O. Affine matrices are 6-tuples (a, b, c, d, e, f) in SVG matrix() order.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Flatten an SVG document into measurable shapes.
@@ -35,10 +41,14 @@ IDENTITY: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
 
 def _numbers(text: str | None) -> list[float]:
+    # [FUNCTION DOC]
+    # HELPER: Returns every number found in text (None treated as empty) as a list of floats.
     return [float(m) for m in _NUMBER.findall(text or "")]
 
 
 def multiply(outer: Matrix, inner: Matrix) -> Matrix:
+    # [FUNCTION DOC]
+    # Composes two affine matrices; the result applies inner first, then outer. Returns the 6-tuple.
     """Compose two affine transforms, applying `inner` first."""
     a1, b1, c1, d1, e1, f1 = outer
     a2, b2, c2, d2, e2, f2 = inner
@@ -53,6 +63,8 @@ def multiply(outer: Matrix, inner: Matrix) -> Matrix:
 
 
 def apply(matrix: Matrix, point: Point) -> Point:
+    # [FUNCTION DOC]
+    # Maps a 2D point through an affine matrix and returns the transformed point.
     """Map a point through an affine transform."""
     a, b, c, d, e, f = matrix
     x, y = point
@@ -60,6 +72,10 @@ def apply(matrix: Matrix, point: Point) -> Point:
 
 
 def parse_transform(value: str | None) -> Matrix:
+    # [FUNCTION DOC]
+    # Parses an SVG transform attribute (matrix, translate, scale, rotate with optional centre, skewX,
+    # skewY) into one matrix by composing the operations left to right. Malformed or argument-less
+    # operations are skipped. Returns the identity for empty or None input.
     """Parse an SVG ``transform`` attribute into a single affine matrix.
 
     Args:
@@ -103,6 +119,8 @@ def parse_transform(value: str | None) -> Matrix:
 
 
 def _sample_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> list[Point]:
+    # [FUNCTION DOC]
+    # HELPER: Samples a cubic bezier at 16 evenly spaced parameters excluding the start; returns the points.
     pts = []
     for i in range(1, _CURVE_SAMPLES + 1):
         t = i / _CURVE_SAMPLES
@@ -114,6 +132,8 @@ def _sample_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> list[Point]:
 
 
 def _sample_quadratic(p0: Point, p1: Point, p2: Point) -> list[Point]:
+    # [FUNCTION DOC]
+    # HELPER: Samples a quadratic bezier at 16 parameters excluding the start; returns the points.
     pts = []
     for i in range(1, _CURVE_SAMPLES + 1):
         t = i / _CURVE_SAMPLES
@@ -133,6 +153,10 @@ def _sample_arc(
     sweep: bool,
     end: Point,
 ) -> list[Point]:
+    # [FUNCTION DOC]
+    # HELPER: Flattens an SVG elliptical arc using the spec's endpoint-to-centre conversion (radii
+    # scaled up when too small, sweep direction honoured). Returns 16 points excluding the start, or
+    # just the end point when a radius is zero, endpoints coincide, or the geometry is degenerate.
     """Flatten an elliptical arc using the endpoint-to-centre conversion."""
     if rx == 0 or ry == 0 or start == end:
         return [end]
@@ -165,6 +189,8 @@ def _sample_arc(
     cy = sin_phi * cxp + cos_phi * cyp + (start[1] + end[1]) / 2.0
 
     def angle_of(ux: float, uy: float) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns the angle of vector (ux, uy) via atan2.
         return math.atan2(uy, ux)
 
     theta1 = angle_of((x1p - cxp) / rx, (y1p - cyp) / ry)
@@ -185,6 +211,10 @@ def _sample_arc(
 
 
 def _tokenize_path(d: str) -> list[str | float]:
+    # [FUNCTION DOC]
+    # HELPER: Tokenises path data into command letters and floats. Arc flag positions (4th and 5th
+    # arguments of each arc group) consume exactly one "0" or "1" character so compact flags parse
+    # correctly. Stops at the first unparseable character. Returns the token list.
     """Split path data into command letters and numbers.
 
     Needs command context rather than one regex, because arc flags are single
@@ -222,6 +252,11 @@ def _tokenize_path(d: str) -> list[str | float]:
 
 
 def flatten_path(d: str) -> list[tuple[list[Point], bool]]:
+    # [FUNCTION DOC]
+    # Flattens path data into a list of (points, closed) subpaths. Supports M/L/H/V/C/S/Q/T/A/Z in
+    # absolute and relative forms, implicit lineto after moveto, smooth-curve reflection, and closing
+    # back to the subpath start. Subpaths with fewer than 2 points are dropped. Parsing stops at the
+    # first command with too few arguments; unknown commands are skipped.
     """Flatten a path ``d`` attribute into subpaths of straight segments.
 
     Args:
@@ -244,6 +279,9 @@ def flatten_path(d: str) -> list[tuple[list[Point], bool]]:
     index = 0
 
     def flush(closed: bool) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Appends the current point list as a subpath (with the closed flag) if it has at least
+        # two points, then resets the current list. Mutates enclosing variables.
         nonlocal current
         if len(current) >= 2:
             subpaths.append((current, closed))
@@ -265,6 +303,9 @@ def flatten_path(d: str) -> list[tuple[list[Point], bool]]:
             continue
 
         def take(count: int) -> list[float] | None:
+            # [FUNCTION DOC]
+            # HELPER: Consumes count numeric tokens from the enclosing index and returns them as floats, or
+            # None (without consuming) if not enough tokens remain or a command letter intervenes.
             nonlocal index
             if index + count > len(tokens):
                 return None
@@ -407,6 +448,8 @@ def flatten_path(d: str) -> list[tuple[list[Point], bool]]:
 
 
 def _ellipse_points(cx: float, cy: float, rx: float, ry: float) -> list[Point]:
+    # [FUNCTION DOC]
+    # HELPER: Returns 49 points around an ellipse (first point repeated at the end) with centre (cx, cy) and radii rx, ry.
     steps = 48
     return [
         (
@@ -419,6 +462,8 @@ def _ellipse_points(cx: float, cy: float, rx: float, ry: float) -> list[Point]:
 
 @dataclass(frozen=True)
 class Viewport:
+    # [CLASS DOC]
+    # Immutable viewport size (width, height) in user units used to resolve percentage lengths.
     """The reference lengths percentages and relative units resolve against.
 
     Attributes:
@@ -433,6 +478,8 @@ class Viewport:
 
     @property
     def diagonal(self) -> float:
+        # [FUNCTION DOC]
+        # Property: normalised diagonal, square root of (width squared plus height squared) divided by 2.
         """`float`: The normalised diagonal the SVG spec uses for lengths that
         are neither horizontal nor vertical, such as a circle's `r`."""
         return math.sqrt((self.width**2 + self.height**2) / 2.0)
@@ -462,6 +509,10 @@ _LENGTH = re.compile(
 
 
 def length(value: str | None, reference: float, default: float = 0.0) -> float:
+    # [FUNCTION DOC]
+    # Resolves an SVG length string to user units: percentages relative to reference, CSS absolute and
+    # font-relative units via a fixed scale table (96 px per inch, 16 px em). Returns default for None
+    # or unparseable values.
     """Resolve an SVG length attribute to user units.
 
     Percentages and CSS units are legal in every geometry attribute and models
@@ -503,6 +554,12 @@ def length(value: str | None, reference: float, default: float = 0.0) -> float:
 def element_polylines(
     element: ET.Element, viewport: Viewport | None = None
 ) -> list[tuple[list[Point], bool]]:
+    # [FUNCTION DOC]
+    # Converts one SVG element (circle, ellipse, rect, line, polyline, polygon, path) to a list of
+    # (points, closed) polylines in its own user space, resolving lengths against viewport (default
+    # 100x100). Circles/ellipses and rects with non-positive size, polylines with fewer than 2 points,
+    # and other tags return an empty list. Polygons are closed by repeating the first point. Polyline
+    # and polygon point values are taken as raw numbers.
     """Convert one SVG element into untransformed polylines.
 
     Args:
@@ -562,6 +619,12 @@ def element_polylines(
 
 @dataclass(frozen=True)
 class Shape:
+    # [CLASS DOC]
+    # Immutable summary of a flattened outline in normalised coordinates: tag, points, closed, centroid,
+    # radius (length-weighted mean distance to centroid), area, perimeter, extent (bbox diagonal), bbox
+    # (min x, min y, max x, max y), circularity (capped at 1) and radius_cv.
+    # KNOWN ISSUE: the docstring calls the centroid the mean of the outline points, but it is a
+    # segment-length-weighted mean of segment midpoints; radius and bbox are not listed in the docstring.
     """A flattened outline in normalised canvas coordinates.
 
     Coordinates are divided by the larger viewBox dimension, so a value of 1.0
@@ -604,6 +667,8 @@ class Shape:
 
     @property
     def aspect(self) -> float:
+        # [FUNCTION DOC]
+        # Property: bounding-box width divided by height; 0.0 if either is non-positive.
         """`float`: Bounding-box width over height, clamped away from zero.
 
         A wheel seen from the side is close to 1.0. Rejecting shapes far from
@@ -618,6 +683,9 @@ class Shape:
 
 
 def _densify(points: Sequence[Point], target_segments: int = 64) -> list[Point]:
+    # [FUNCTION DOC]
+    # HELPER: Subdivides segments so none is longer than total length / target_segments (default 64).
+    # Returns the new point list (the input unchanged if total length is zero).
     """Subdivide long segments so shape statistics do not depend on vertex count.
 
     A rectangle has four segments whose midpoints are all equidistant from the
@@ -644,6 +712,11 @@ def _densify(points: Sequence[Point], target_segments: int = 64) -> list[Point]:
 
 
 def _build_shape(tag: str, raw_points: Sequence[Point], closed: bool) -> Shape | None:
+    # [FUNCTION DOC]
+    # HELPER: Builds a Shape from raw points: densifies, computes bbox and extent (returns None for
+    # fewer than 2 points or zero extent), length-weighted centroid and mean radius, shoelace area of the
+    # implicitly closed outline, circularity (4 pi area / perimeter squared, capped at 1) and the
+    # length-weighted coefficient of variation of radii (1.0 when undefined).
     if len(raw_points) < 2:
         return None
     points = _densify(raw_points)
@@ -719,6 +792,9 @@ def _build_shape(tag: str, raw_points: Sequence[Point], closed: bool) -> Shape |
 
 
 def viewbox_scale(root: ET.Element) -> tuple[float, float, float]:
+    # [FUNCTION DOC]
+    # Returns (min_x, min_y, size) for normalisation: from a valid viewBox (size = larger of width and
+    # height), else (0, 0, larger numeric width/height attribute), else size 100.
     """Return the `(min_x, min_y, size)` used to normalise coordinates."""
     box = _numbers(root.get("viewBox"))
     if len(box) == 4 and box[2] > 0 and box[3] > 0:
@@ -730,6 +806,9 @@ def viewbox_scale(root: ET.Element) -> tuple[float, float, float]:
 
 
 def root_viewport(root: ET.Element) -> Viewport:
+    # [FUNCTION DOC]
+    # Returns the Viewport for percentage resolution: viewBox size if valid, else the root width and
+    # height numbers when positive, each defaulting to 100.
     """Return the viewport percentages resolve against.
 
     The viewBox wins when present, since that is the coordinate system the
@@ -759,6 +838,9 @@ MAX_USE_DEPTH = 4
 
 
 def _presentation(element: ET.Element, name: str) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns a presentation property value, preferring an inline style declaration over the
+    # attribute of the same name; None if absent.
     """A presentation property, with any inline `style` declaration winning."""
     for declaration in (element.get("style") or "").split(";"):
         prop, _, value = declaration.partition(":")
@@ -768,6 +850,9 @@ def _presentation(element: ET.Element, name: str) -> str | None:
 
 
 def _use_target(element: ET.Element) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the fragment id referenced by a use element's href or xlink:href (only values
+    # beginning with "#"), or an empty string.
     """The id a `<use>` points at, from either `href` or the legacy
     `xlink:href`. Only same-document fragment references are resolvable."""
     for key, value in element.attrib.items():
@@ -777,6 +862,12 @@ def _use_target(element: ET.Element) -> str:
 
 
 def extract_shapes(root: ET.Element) -> list[Shape]:
+    # [FUNCTION DOC]
+    # Walks the SVG tree from root and returns all visible drawable outlines as Shapes in normalised
+    # coordinates, sorted by extent descending. Accumulates transforms, resolves use references (with
+    # x/y offset, up to depth 4), skips template containers (defs, symbol, clipPath, mask, marker,
+    # pattern), subtrees with display none, hidden visibility or zero opacity, elements whose fill is
+    # "none" with no stroke, and shapes whose bbox lies wholly outside the canvas.
     """Walk an SVG tree and return every drawable outline in normalised space.
 
     Transforms are accumulated down the tree, so a shape nested inside
@@ -811,6 +902,8 @@ def extract_shapes(root: ET.Element) -> list[Shape]:
     by_id = {el.get("id"): el for el in root.iter() if el.get("id")}
 
     def on_canvas(shape: Shape) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True if the shape's bbox intersects the normalised canvas rectangle.
         return (
             shape.bbox[2] >= 0
             and shape.bbox[3] >= 0
@@ -825,6 +918,10 @@ def extract_shapes(root: ET.Element) -> list[Shape]:
         stroke: str | None,
         depth: int = 0,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Recursive visitor: applies visibility rules, inherits fill/stroke, composes the element
+        # transform, follows use references, appends on-canvas shapes for painted elements to the shared
+        # list, and recurses into rendered children.
         if _presentation(element, "display") == "none":
             return
         if _presentation(element, "visibility") in {"hidden", "collapse"}:
@@ -874,11 +971,16 @@ def extract_shapes(root: ET.Element) -> list[Shape]:
 
 
 def significant_shapes(shapes: Sequence[Shape]) -> list[Shape]:
+    # [FUNCTION DOC]
+    # Returns only shapes whose extent is at least MIN_SHAPE_EXTENT (0.04).
     """Filter out detail work too small to carry structural meaning."""
     return [s for s in shapes if s.extent >= MIN_SHAPE_EXTENT]
 
 
 def to_dict(shape: Shape) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a compact JSON-safe mapping for a shape: tag, rounded centroid, radius, extent, aspect,
+    # circularity, radius_cv, and closed.
     """Return a compact JSON-serialisable summary of a shape."""
     return {
         "tag": shape.tag,

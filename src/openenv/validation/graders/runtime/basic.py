@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Runtime-level graders that inspect previously recorded wire exchanges (reset/step/
+# state request and response JSON) in subject.runtime_evidence, without talking to the
+# environment: reward well-formedness, observation schema conformance (evaluated in an
+# isolated subprocess) and state contract (episode id / step count).
 """Pure graders over independently collected, uncoerced wire evidence."""
 
 import json
@@ -13,6 +18,9 @@ from ...types import CheckStatus, Level
 
 
 def _remote_reference(value) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: recursively scans a JSON-schema value and returns True if any "$ref" or
+    # "$dynamicRef" is not a string starting with "#" (i.e. could trigger remote/file retrieval).
     if isinstance(value, dict):
         for key, child in value.items():
             if key in {"$ref", "$dynamicRef"} and (
@@ -27,15 +35,27 @@ def _remote_reference(value) -> bool:
 
 
 class _RuntimeGrader:
+    # [CLASS DOC]
+    # HELPER: base class for runtime graders: Level.RUNTIME, no capability/provider
+    # requirements, depends on "runtime.startup". Subclasses set check_id and implement
+    # check(subject, evidence) returning a list of problem strings.
     level = Level.RUNTIME
     requires_capabilities = frozenset()
     requires_provider = frozenset()
     depends_on = ("runtime.startup",)
 
     def applies_to(self, manifest) -> bool:
+        # [FUNCTION DOC]
+        # Always returns True.
         return True
 
     def run(self, subject) -> CheckResult:
+        # [FUNCTION DOC]
+        # Returns a CheckResult: SKIP (duration 0) if there is no runtime evidence, if evidence
+        # has a failure_reason, or if no "step" exchange was recorded. Otherwise calls check();
+        # ValueError/TypeError/KeyError/RecursionError/OverflowError become a single
+        # "malformed runtime evidence" problem. FAIL if any problems (first 20 as evidence,
+        # with remediation text) else PASS; measured holds the exchange count; duration is wall time.
         started = time.monotonic()
         evidence = subject.runtime_evidence
         if evidence is None:
@@ -77,11 +97,19 @@ class _RuntimeGrader:
 
 
 class RewardWellFormedGrader(_RuntimeGrader):
+    # [CLASS DOC]
+    # Checks every reset/step response carries a reward that is a finite int/float within
+    # the manifest's declared reward range (reset may have reward null).
     """Require numeric step rewards for Level Two, beyond the core API contract."""
 
     check_id = "runtime.reward_well_formed"
 
     def check(self, subject, evidence) -> list[str]:
+        # [FUNCTION DOC]
+        # For each reset/step exchange parses response_json["data"]; reports a malformed
+        # envelope if not a dict, missing reward, or reward that is not exactly int/float
+        # (bools rejected), non-finite, or out of [low, high]. Adds a problem if no
+        # observations were seen. Returns the problem list. KeyError/JSON errors propagate to run().
         problems = []
         observations = 0
         low, high = subject.manifest.reward.range
@@ -111,11 +139,23 @@ class RewardWellFormedGrader(_RuntimeGrader):
 
 
 class ObservationSchemaGrader(_RuntimeGrader):
+    # [CLASS DOC]
+    # Validates observation envelopes and their observations against the environment's
+    # published observation schema (and optional distinct reset schema).
     """Validate raw envelopes and reconstructed observations against the schema."""
 
     check_id = "runtime.observation_schema"
 
     def check(self, subject, evidence) -> list[str]:
+        # [FUNCTION DOC]
+        # Returns a problem immediately if the schema is unavailable or either schema contains
+        # a non-local $ref. Checks each reset/step response envelope is type "observation" with
+        # a dict data containing dict observation, bool done and a reward key; collects valid
+        # raw response JSON. Then runs runtime/schema_worker.py in an isolated Python
+        # subprocess (empty env, 5s timeout), passing schemas and observations as JSON on stdin;
+        # non-zero exit or timeout add a budget problem, otherwise the worker's JSON list of
+        # problems is redacted and appended. Returns the problems.
+        # Side effects: spawns a subprocess.
         if evidence.observation_schema_json is None:
             return ["observation schema unavailable"]
         schema = json.loads(evidence.observation_schema_json)
@@ -189,11 +229,19 @@ class ObservationSchemaGrader(_RuntimeGrader):
 
 
 class StateContractGrader(_RuntimeGrader):
+    # [CLASS DOC]
+    # Checks state snapshots report the episode id given at the last reset and the number
+    # of steps since that reset.
     """Verify episode identity and step counts in the same replayed session."""
 
     check_id = "runtime.state_contract"
 
     def check(self, subject, evidence) -> list[str]:
+        # [FUNCTION DOC]
+        # Walks exchanges in order: reset records request data.episode_id and zeroes the step
+        # count; step increments it; state responses must be type "state" with dict data whose
+        # episode_id equals the tracked one and whose step_count is an int equal to the count.
+        # Adds a problem if no state exchange was seen. Returns problems.
         problems = []
         episode_id = None
         steps = 0

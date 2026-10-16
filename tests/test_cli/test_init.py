@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for "openenv init": scaffolding a new environment from the packaged template,
+# placeholder and filename substitution, generated openenv.yaml/README/Dockerfile/
+# requirements, name validation, existing-path handling and the generated server entry
+# point. Most tests chdir into tmp_path (restored afterwards) and feed a newline as input.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the openenv init command."""
@@ -16,11 +21,17 @@ runner = CliRunner()
 
 
 def _snake_to_pascal(snake_str: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Converts snake_case to PascalCase by capitalising underscore-separated words.
+    # KNOWN ISSUE: unused in this module.
     """Helper function matching the one in init.py"""
     return "".join(word.capitalize() for word in snake_str.split("_"))
 
 
 def test_init_creates_directory_structure(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Scaffold contains package files, openenv.yaml, README and the server/ files incl.
+    # <name>_environment.py, Dockerfile and requirements.txt.
     """Test that init creates the correct directory structure."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -51,6 +62,9 @@ def test_init_creates_directory_structure(tmp_path: Path) -> None:
 
 
 def test_init_replaces_template_placeholders(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # For my_game_env, class names use prefix MyGame (trailing _env dropped) and no
+    # placeholders remain in models, client, __init__ or the environment file.
     """Test that template placeholders are replaced correctly."""
     env_name = "my_game_env"
     env_dir = tmp_path / env_name
@@ -94,6 +108,9 @@ def test_init_replaces_template_placeholders(tmp_path: Path) -> None:
 
 
 def test_init_generates_openenv_yaml(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # openenv.yaml has name/type/runtime/app/port/validation fields; the scaffold passes
+    # static "openenv validate"; the environment file contains the reward formula.
     """Test that openenv.yaml is generated correctly."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -137,6 +154,8 @@ def test_init_generates_openenv_yaml(tmp_path: Path) -> None:
 
 
 def test_init_readme_has_hf_frontmatter(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # README has HF Space front matter (title, sdk docker, app_port 8000, openenv tag).
     """Test that README has Hugging Face Space compatible frontmatter."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -169,6 +188,8 @@ def test_init_readme_has_hf_frontmatter(tmp_path: Path) -> None:
 
 
 def test_init_validates_env_name(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Names starting with a digit, containing spaces or hyphens are rejected.
     """Test that invalid environment names are rejected."""
     old_cwd = os.getcwd()
     try:
@@ -193,6 +214,8 @@ def test_init_validates_env_name(tmp_path: Path) -> None:
 
 
 def test_init_handles_existing_directory(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A non-empty existing directory makes init fail.
     """Test that init fails gracefully when directory exists."""
     env_name = "existing_env"
     env_dir = tmp_path / env_name
@@ -214,6 +237,8 @@ def test_init_handles_existing_directory(tmp_path: Path) -> None:
 
 
 def test_init_handles_empty_directory(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # An existing empty directory is filled.
     """Test that init works when directory exists but is empty."""
     env_name = "empty_env"
     env_dir = tmp_path / env_name
@@ -232,6 +257,8 @@ def test_init_handles_empty_directory(tmp_path: Path) -> None:
 
 
 def test_init_with_output_dir(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # --output-dir places the env under the given directory.
     """Test that init works with custom output directory."""
     env_name = "output_env"
     output_dir = tmp_path / "custom_output"
@@ -250,6 +277,8 @@ def test_init_with_output_dir(tmp_path: Path) -> None:
 
 
 def test_resolve_template_path_root() -> None:
+    # [FUNCTION DOC]
+    # The template package root resolves to a dir containing models.py.
     """Test resolving the packaged init template root."""
     template_path = _resolve_template_path("openenv.cli.templates.openenv_env", "")
 
@@ -258,6 +287,8 @@ def test_resolve_template_path_root() -> None:
 
 
 def test_resolve_template_path_nested_directory() -> None:
+    # [FUNCTION DOC]
+    # The "server" subpath resolves to a dir containing a Dockerfile.
     """Test resolving a nested init template directory."""
     template_path = _resolve_template_path(
         "openenv.cli.templates.openenv_env", "server"
@@ -268,6 +299,8 @@ def test_resolve_template_path_nested_directory() -> None:
 
 
 def test_init_filename_templating(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # __ENV_NAME___environment.py is renamed to <name>_environment.py.
     """Test that filenames with placeholders are renamed correctly."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -291,6 +324,8 @@ def test_init_filename_templating(tmp_path: Path) -> None:
 
 
 def test_init_all_naming_conventions(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # PascalCase class names, snake_case module name and a title/lowercase name in the README.
     """Test that all naming conventions are replaced correctly."""
     env_name = "complex_test_env"
     env_dir = tmp_path / env_name
@@ -322,6 +357,8 @@ def test_init_all_naming_conventions(tmp_path: Path) -> None:
 
 
 def test_init_server_app_imports(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # server/app.py imports the env module relatively, models directly, and uses prefix "Test".
     """Test that server/app.py has correct imports after templating."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -352,6 +389,9 @@ def test_init_server_app_imports(tmp_path: Path) -> None:
 
 
 def test_init_server_main_parses_host_and_port(tmp_path: Path, monkeypatch) -> None:
+    # [FUNCTION DOC]
+    # Imports the generated server.app with uvicorn.run patched and sys.argv set; main()
+    # passes host 127.0.0.1 and port 8001. Side effect: imports the generated package.
     """Test that the generated `server` entry point honors --host and --port."""
     import uvicorn
 
@@ -372,6 +412,8 @@ def test_init_server_main_parses_host_and_port(tmp_path: Path, monkeypatch) -> N
 
 
 def test_init_next_steps_use_generated_names(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Printed next steps and README/client image tags use openenv-demo, not doubled "_env" names.
     """Test that the printed next steps and image tags match the generated env."""
     env_name = "demo_env"
     result = runner.invoke(app, ["init", env_name, "--output-dir", str(tmp_path)])
@@ -392,6 +434,8 @@ def test_init_next_steps_use_generated_names(tmp_path: Path) -> None:
 
 
 def test_init_dockerfile_uses_correct_base(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Dockerfile uses the openenv-base image and server.app:app with no placeholders.
     """Test that Dockerfile uses correct base image and paths."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -421,6 +465,8 @@ def test_init_dockerfile_uses_correct_base(tmp_path: Path) -> None:
 
 
 def test_init_requirements_file(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # requirements.txt lists fastapi, uvicorn and openenv>=0.2.0.
     """Test that requirements.txt is generated correctly."""
     env_name = "test_env"
     env_dir = tmp_path / env_name
@@ -444,6 +490,8 @@ def test_init_requirements_file(tmp_path: Path) -> None:
 
 
 def test_init_validates_empty_env_name(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # An empty name fails with "cannot be empty".
     """Test that init validates empty environment name."""
     old_cwd = os.getcwd()
     try:
@@ -457,6 +505,8 @@ def test_init_validates_empty_env_name(tmp_path: Path) -> None:
 
 
 def test_init_env_name_without_env_suffix(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A name without _env suffix works and yields the Mygame prefix.
     """Test that init works with env names that don't end with _env."""
     env_name = "mygame"  # No _env suffix
     env_dir = tmp_path / env_name
@@ -477,6 +527,8 @@ def test_init_env_name_without_env_suffix(tmp_path: Path) -> None:
 
 
 def test_init_single_part_env_name(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A single-word name works.
     """Test that init works with single-part env names."""
     env_name = "game"  # Single part, no underscores
     env_dir = tmp_path / env_name
@@ -493,6 +545,10 @@ def test_init_single_part_env_name(tmp_path: Path) -> None:
 
 
 def test_init_handles_file_path_collision(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A target path that is an existing file makes init fail.
+    # KNOWN ISSUE: the error-content assertion is a broad disjunction (including the env name
+    # or "file" appearing anywhere), so it hardly constrains the error type.
     """Test that init fails when path exists as a file."""
     env_name = "existing_file"
     file_path = tmp_path / env_name

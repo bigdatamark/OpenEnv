@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# End-to-end smoke tests of the rollout collect pipeline (CollectRunner + RolloutSerializer) driving
+# the OpenSpiel tic_tac_toe session factory through MCPHarnessAdapter, with a scripted fake OpenSpiel
+# client and a deterministic teacher model step. Writes results.jsonl under tmp_path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """End-to-end smoke test for the rollout collect pipeline on OpenSpiel TTT.
@@ -27,14 +31,21 @@ from openspiel_env.models import OpenSpielAction, OpenSpielObservation, OpenSpie
 
 
 class ScriptedOpenSpielClient:
+    # [CLASS DOC]
+    # HELPER: Fake tic_tac_toe client that reports a win (reward 1.0, done) after a configured number of
+    # moves; tracks moves played and whether it was closed.
     """A tic_tac_toe client that wins after ``moves_until_win`` plays."""
 
     def __init__(self, moves_until_win: int = 1):
+        # [FUNCTION DOC]
+        # HELPER: Stores the moves needed to win and resets counters.
         self._moves_until_win = moves_until_win
         self._played = 0
         self.closed = False
 
     def reset(self, **kwargs: Any) -> StepResult[OpenSpielObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Resets the move count and returns an empty-board, all-legal, playing observation.
         self._played = 0
         empty_board = [1.0] * 9 + [0.0] * 18
         return StepResult(
@@ -49,6 +60,11 @@ class ScriptedOpenSpielClient:
         )
 
     def step(self, action: OpenSpielAction) -> StepResult[OpenSpielObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Increments the move count; returns a terminal win observation with reward 1.0 once the
+        # target is reached, otherwise a playing observation with legal actions 1..8 and reward 0.
+        # KNOWN ISSUE: the comment says it marks cell 0 as X, but the code sets info_state index 9 and
+        # indices 1..8 to 1.0; the board contents are arbitrary.
         self._played += 1
         done = self._played >= self._moves_until_win
         reward = 1.0 if done else 0.0
@@ -69,13 +85,20 @@ class ScriptedOpenSpielClient:
         )
 
     def state(self) -> OpenSpielState:
+        # [FUNCTION DOC]
+        # HELPER: Returns an OpenSpielState with the move count and game name tic_tac_toe.
         return OpenSpielState(step_count=self._played, game_name="tic_tac_toe")
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Marks the client closed.
         self.closed = True
 
 
 def _teacher_model_step(messages, tools, sampling):
+    # [FUNCTION DOC]
+    # HELPER: Model step ignoring its inputs and returning a ModelStepResult with one play_move tool call
+    # for action_id 0.
     """Deterministic teacher: always call play_move with the first legal action.
 
     Stands in for a hosted LLM (e.g. gpt-5-mini). Real teachers will parse
@@ -97,6 +120,9 @@ def _teacher_model_step(messages, tools, sampling):
 
 
 def test_collect_writes_trl_ready_jsonl_dataset(tmp_path: Path):
+    # [FUNCTION DOC]
+    # Collects 5 winning episodes; asserts counts, success rate 1.0, and that the first JSONL record has
+    # id "ttt-000000", reward 1.0, done, user/assistant/tool messages and a play_move tool trace.
     factory = OpenSpielSessionFactory(
         lambda: ScriptedOpenSpielClient(moves_until_win=1),
         game_name="tic_tac_toe",
@@ -134,6 +160,9 @@ def test_collect_writes_trl_ready_jsonl_dataset(tmp_path: Path):
 
 
 def test_collect_resume_skips_prior_episodes(tmp_path: Path):
+    # [FUNCTION DOC]
+    # A second runner over the same output dir asked for 4 episodes collects 2 new ones and skips the 2
+    # already written.
     factory = OpenSpielSessionFactory(
         lambda: ScriptedOpenSpielClient(moves_until_win=1),
     )
@@ -163,10 +192,15 @@ def test_collect_resume_skips_prior_episodes(tmp_path: Path):
 
 def test_collect_should_keep_filters_losing_rollouts(tmp_path: Path):
     # Alternate winning/losing clients on each create().
+    # [FUNCTION DOC]
+    # With one losing client among four and a should_keep filter on positive reward, 3 records are kept
+    # and 1 dropped.
     wins = [True, False, True, True]
     client_iter = iter(wins)
 
     def client_factory():
+        # [FUNCTION DOC]
+        # HELPER: Returns the next scripted client, winning in 1 move or needing 10 moves.
         winning = next(client_iter)
         return ScriptedOpenSpielClient(moves_until_win=1 if winning else 10)
 

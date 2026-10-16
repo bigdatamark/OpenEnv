@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client side of the MCP OpenEnv wrapper: MCPEnvClient, an EnvClient specialization
+# that serializes MCPAction to JSON and parses server payloads into MCPObservation/State.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -22,6 +25,10 @@ from .data_models import MCPAction, MCPObservation
 
 
 class MCPEnvClient(EnvClient[MCPAction, MCPObservation, State]):
+    # [CLASS DOC]
+    # EnvClient subclass for MCPAction/MCPObservation/State; transport (WebSocket/HTTP,
+    # reset/step/close, from_docker_image) comes from the base class; this class only
+    # implements the payload conversion hooks.
     """
     Generic WebSocket client for MCP Environment.
 
@@ -64,6 +71,9 @@ class MCPEnvClient(EnvClient[MCPAction, MCPObservation, State]):
     """
 
     def _step_payload(self, action: MCPAction) -> Dict:
+        # [FUNCTION DOC]
+        # Builds the step request dict: always "action_type"; adds "tool_name" and "arguments"
+        # only when they are not None. Returns that dict.
         """
         Convert MCPAction to JSON payload for step request.
 
@@ -86,6 +96,11 @@ class MCPEnvClient(EnvClient[MCPAction, MCPObservation, State]):
         return payload
 
     def _parse_result(self, payload: Dict) -> StepResult[MCPObservation]:
+        # [FUNCTION DOC]
+        # Converts a server response dict into StepResult[MCPObservation]: reads the nested
+        # "observation" dict (success default True, error_message, tools_list, tool_result,
+        # metadata default {}), and top-level "reward" and "done" (default False), which are set
+        # on both the observation and the StepResult.
         """
         Parse server response into StepResult[MCPObservation].
 
@@ -113,6 +128,8 @@ class MCPEnvClient(EnvClient[MCPAction, MCPObservation, State]):
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # Builds a State from payload "episode_id" and "step_count" (default 0).
         """
         Parse server response into State object.
 

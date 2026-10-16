@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# HELPER module: parses environment server configuration (the "app" field of
+# openenv.yaml and the CMD of a Dockerfile) for runtime providers that need to
+# know how to launch the server.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Shared helpers for reading environment server configuration."""
@@ -11,6 +15,10 @@ import yaml
 
 
 def parse_openenv_app_field(yaml_content: str) -> str | None:
+    # [FUNCTION DOC]
+    # Parses YAML text and returns the stripped string value of the top-level "app"
+    # key, or None if parsing fails, the document is not a mapping, or the value is
+    # missing, not a string, or empty.
     """Extract the top-level ``app`` value from raw ``openenv.yaml`` content."""
     try:
         data = yaml.safe_load(yaml_content) or {}
@@ -28,6 +36,12 @@ def parse_openenv_app_field(yaml_content: str) -> str | None:
 
 
 def parse_dockerfile_cmd(dockerfile_content: str) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the command of the last line beginning with "CMD" (case-insensitive,
+    # ignoring "#" comment lines). Exec-form JSON arrays of strings are joined with
+    # spaces; invalid JSON falls back to the raw text. Returns None if no CMD.
+    # KNOWN ISSUE: backslash line continuations are not joined, so a multi-line CMD
+    # yields only its first line's text.
     """Extract the server command from the last Dockerfile ``CMD``."""
     last_cmd: str | None = None
     for line in dockerfile_content.splitlines():

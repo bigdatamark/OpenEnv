@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Vendored CARLA GlobalRoutePlanner: builds a networkx directed graph of the map's lane topology
+# (segments sampled every sampling_resolution meters, plus loose ends and zero-cost lane-change
+# links) and finds routes with A*, annotating each waypoint with a RoadOption turn decision.
 # Copyright (c) 2018-2020 CVC.
 #
 # This work is licensed under the terms of the MIT license.
@@ -19,11 +23,18 @@ from carla_env.server.carla_agents.tools.misc import vector
 
 
 class GlobalRoutePlanner(object):
+    # [CLASS DOC]
+    # High-level route planner over a carla.Map. Nodes are rounded (x, y, z) segment endpoints;
+    # edges carry path waypoints, entry/exit waypoints and vectors, intersection flag and type
+    # (LANEFOLLOW or a lane change). Maintains turn-decision state across a trace.
     """
     This class provides a very high level route plan.
     """
 
     def __init__(self, wmap, sampling_resolution):
+        # [FUNCTION DOC]
+        # Stores map and resolution, then builds topology, graph, loose ends and lane-change links.
+        # Side effects: expensive map queries.
         self._sampling_resolution = sampling_resolution
         self._wmap = wmap
         self._topology = None
@@ -41,6 +52,12 @@ class GlobalRoutePlanner(object):
         self._lane_change_link()
 
     def trace_route(self, origin, destination):
+        # [FUNCTION DOC]
+        # Returns a list of (carla.Waypoint, RoadOption) from origin to destination locations. Follows the
+        # A* node path; for lane-change edges adds the current waypoint and a waypoint ~5 samples ahead in
+        # the target lane; for follow edges appends path waypoints from the closest one, stopping near the
+        # destination on the last edge.
+        # Raises: networkx errors if no path exists; TypeError if a location cannot be localized to an edge.
         """
         This method returns list of (carla.Waypoint, RoadOption)
         from origin to destination
@@ -108,6 +125,10 @@ class GlobalRoutePlanner(object):
         return route_trace
 
     def _build_topology(self):
+        # [FUNCTION DOC]
+        # HELPER: Converts map topology segments into dicts with entry/exit waypoints, rounded entry/exit
+        # xyz, and intermediate waypoints spaced by the resolution (segments shorter than the resolution
+        # get one next waypoint, or are skipped if none exists).
         """
         This function retrieves topology from the server as a list of
         road segments as pairs of waypoint objects, and processes the
@@ -148,6 +169,9 @@ class GlobalRoutePlanner(object):
             self._topology.append(seg_dict)
 
     def _build_graph(self):
+        # [FUNCTION DOC]
+        # HELPER: Creates the DiGraph, the xyz -> node id map and the road/section/lane -> (n1, n2) edge map,
+        # adding one LANEFOLLOW edge per segment with length = number of path points + 1 and direction vectors.
         """
         This function builds a networkx graph representation of topology, creating several class attributes:
         - graph (networkx.DiGraph): networkx graph representing the world map, with:
@@ -218,6 +242,9 @@ class GlobalRoutePlanner(object):
             )
 
     def _find_loose_ends(self):
+        # [FUNCTION DOC]
+        # HELPER: For segment exits whose road/section/lane has no edge, follows the lane forward and adds a
+        # new negative-id node and LANEFOLLOW edge for the dangling stretch.
         """
         This method finds road segments that have an unconnected end, and
         adds them to the internal graph representation
@@ -280,6 +307,9 @@ class GlobalRoutePlanner(object):
                     )
 
     def _lane_change_link(self):
+        # [FUNCTION DOC]
+        # HELPER: For non-junction segments, adds at most one zero-length CHANGELANERIGHT and one
+        # CHANGELANELEFT edge where lane markings allow changing into a same-road driving lane.
         """
         This method places zero cost links in the topology graph
         representing availability of lane changes.
@@ -356,6 +386,8 @@ class GlobalRoutePlanner(object):
                     break
 
     def _localize(self, location):
+        # [FUNCTION DOC]
+        # HELPER: Returns the (n1, n2) edge for the waypoint nearest the location, or None if unknown.
         """
         This function finds the road segment that a given location
         is part of, returning the edge it belongs to
@@ -371,6 +403,8 @@ class GlobalRoutePlanner(object):
         return edge
 
     def _distance_heuristic(self, n1, n2):
+        # [FUNCTION DOC]
+        # HELPER: Euclidean distance between two nodes' vertices (A* heuristic).
         """
         Distance heuristic calculator for path searching
         in self._graph
@@ -380,6 +414,9 @@ class GlobalRoutePlanner(object):
         return np.linalg.norm(l1 - l2)
 
     def _path_search(self, origin, destination):
+        # [FUNCTION DOC]
+        # HELPER: A* over edge "length" from the origin edge's start node to the destination edge's start
+        # node, then appends the destination edge's end node. Returns node id list.
         """
         This function finds the shortest path connecting origin and destination
         using A* search with distance heuristic.
@@ -401,6 +438,9 @@ class GlobalRoutePlanner(object):
         return route
 
     def _successive_last_intersection_edge(self, index, route):
+        # [FUNCTION DOC]
+        # HELPER: From index, walks consecutive intersection LANEFOLLOW edges and returns (last node,
+        # last such edge) to skip tiny junction edges when deciding turns.
         """
         This method returns the last successive intersection edge
         from a starting index on the route.
@@ -428,6 +468,13 @@ class GlobalRoutePlanner(object):
         return last_node, last_intersection_edge
 
     def _turn_decision(self, index, route, threshold=math.radians(35)):
+        # [FUNCTION DOC]
+        # HELPER: Returns the RoadOption for the edge leaving route[index]. When entering an intersection
+        # from a normal lane, compares the exit vectors of the current edge and the intersection tail edge:
+        # deviation below threshold (35 deg) is STRAIGHT; otherwise LEFT/RIGHT by the cross-product sign
+        # relative to other branches. Keeps the previous decision while still inside the same intersection;
+        # otherwise returns the edge type. Updates _previous_decision and _intersection_end_node.
+        # KNOWN ISSUE: for index 0 it reads route[-1] as previous node (unused there, but misleading).
         """
         This method returns the turn decision (RoadOption) for pair of edges
         around current index of route list
@@ -503,6 +550,8 @@ class GlobalRoutePlanner(object):
         return decision
 
     def _find_closest_in_list(self, current_waypoint, waypoint_list):
+        # [FUNCTION DOC]
+        # HELPER: Returns the index of the waypoint in the list closest to current_waypoint (-1 if empty).
         min_distance = float("inf")
         closest_index = -1
         for i, waypoint in enumerate(waypoint_list):

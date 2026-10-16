@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER: Core maze game engine (derived from an MIT-licensed RL maze project). Defines cell,
+# action, render-mode and status enums and the Maze class that tracks the agent position on a
+# 2D numpy grid (0 empty, 1 wall), applies moves, computes rewards and decides win/lose.
+# Coordinates are (col, row) tuples; the grid is indexed [row, col]. Optional matplotlib
+# rendering is supported through axes attributes that are never created in this module.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -14,12 +20,16 @@ import numpy as np
 
 
 class Cell(IntEnum):
+    # [CLASS DOC]
+    # Grid cell values: EMPTY (0, free), OCCUPIED (1, wall), CURRENT (2, agent marker).
     EMPTY = 0  # indicates empty cell where the agent can move to
     OCCUPIED = 1  # indicates cell which contains a wall and cannot be entered
     CURRENT = 2  # indicates current cell of the agent
 
 
 class Action(IntEnum):
+    # [CLASS DOC]
+    # Move directions as integers: MOVE_UP 0, MOVE_DOWN 1, MOVE_LEFT 2, MOVE_RIGHT 3.
     MOVE_LEFT = 2
     MOVE_RIGHT = 3
     MOVE_UP = 0
@@ -27,18 +37,28 @@ class Action(IntEnum):
 
 
 class Render(Enum):
+    # [CLASS DOC]
+    # Rendering modes: NOTHING, TRAINING (moves plus best-action map), MOVES (moves only).
     NOTHING = 0
     TRAINING = 1
     MOVES = 2
 
 
 class Status(Enum):
+    # [CLASS DOC]
+    # Game outcome: WIN, LOSE or PLAYING.
     WIN = 0
     LOSE = 1
     PLAYING = 2
 
 
 class Maze:
+    # [CLASS DOC]
+    # Stateful maze game. Class-level constants: list of all actions, exit reward +10, move penalty
+    # -0.05, revisit penalty -0.25, impossible-move penalty -0.75. Instance holds the grid, the list
+    # of all cells, the list of empty non-exit cells, exit cell, current/previous cell, accumulated
+    # reward, visited set and a minimum-reward threshold of -0.5 times the number of grid cells,
+    # below which the game is lost.
     """A maze with walls. An agent is placed at the start cell and must find the exit cell by moving through the maze.
 
     The layout of the maze and the rules how to move through it are called the environment. An agent is placed
@@ -76,6 +96,15 @@ class Maze:
     def __init__(
         self, maze, start_cell=(0, 0), exit_cell=None, rendering=Render.NOTHING
     ):
+        # [FUNCTION DOC]
+        # Builds the game. Inputs: maze - 2D numpy array; start_cell - (col, row), default (0, 0);
+        # exit_cell - (col, row) or None meaning bottom-right; rendering - a Render mode.
+        # Computes cell lists, removes the exit from the empty list, validates the exit, then calls reset.
+        # Raises: generic Exception if the exit is outside the maze or on a wall; ValueError from list
+        # removal if the exit cell is not an empty cell (happens before the explicit checks); any reset error.
+        # KNOWN ISSUE: the empty-list removal runs before the validity checks, so an invalid exit raises
+        # ValueError rather than the intended descriptive Exception. With rendering enabled, the axes
+        # attributes are None, so reset would fail.
         """Create a new maze game.
 
         :param numpy.array maze: 2D array containing empty cells (= 0) and cells occupied with walls (= 1)
@@ -119,6 +148,10 @@ class Maze:
         self.reset(start_cell)
 
     def reset(self, start_cell=(0, 0)):
+        # [FUNCTION DOC]
+        # Places the agent at start_cell, clears total reward and visited set, optionally redraws the
+        # board (matplotlib side effects), and returns the observation (1x2 numpy array of the position).
+        # Raises: Exception if start_cell is outside the maze, on a wall, or equal to the exit.
         """Reset the maze to its initial state and place the agent at start_cell.
 
         :param tuple start_cell: here the agent starts its journey through the maze (optional, else upper left)
@@ -167,6 +200,8 @@ class Maze:
         return self.__observe()
 
     def __draw(self):
+        # [FUNCTION DOC]
+        # HELPER: Draws a line from the previous to the current cell on the move axes and flushes the figure.
         """Draw a line from the agents previous cell to its current cell."""
         self.__ax1.plot(
             *zip(*[self.__previous_cell, self.__current_cell]), "bo-"
@@ -176,6 +211,9 @@ class Maze:
         self.__ax1.get_figure().canvas.flush_events()
 
     def step(self, action):
+        # [FUNCTION DOC]
+        # Applies one action. Inputs: action - integer direction. Adds the action reward to the total,
+        # logs at debug level, and returns a tuple (observation array, reward float, Status).
         """Move the agent according to 'action' and return the new state, reward and game status.
 
         :param Action action: the agent will move in this direction
@@ -193,6 +231,11 @@ class Maze:
         return state, reward, status
 
     def __execute(self, action):
+        # [FUNCTION DOC]
+        # HELPER: Moves the agent if the action is allowed and returns its reward: exit reward on reaching
+        # the exit, revisit penalty if the new cell was visited before, move penalty otherwise; impossible
+        # move penalty (no movement) if the action is not allowed; minimum reward minus 1 if no move is
+        # possible at all (forces a loss). Mutates current/previous cell and the visited set; draws if rendering.
         """Execute action and collect the reward or penalty.
 
         :param Action action: direction in which the agent will move
@@ -241,6 +284,9 @@ class Maze:
         return reward
 
     def __possible_actions(self, cell=None):
+        # [FUNCTION DOC]
+        # HELPER: Returns the list of actions from cell (default current cell) that stay within the grid
+        # and do not enter a wall.
         """Create a list with all possible actions from 'cell', avoiding the maze's edges and walls.
 
         :param tuple cell: location of the agent (optional, else use current cell)
@@ -272,6 +318,8 @@ class Maze:
         return possible_actions
 
     def __status(self):
+        # [FUNCTION DOC]
+        # HELPER: Returns WIN if on the exit, LOSE if total reward is below the minimum threshold, else PLAYING.
         """Return the game status.
 
         :return Status: current game status (WIN, LOSE, PLAYING)
@@ -287,6 +335,8 @@ class Maze:
         return Status.PLAYING
 
     def __observe(self):
+        # [FUNCTION DOC]
+        # HELPER: Returns the current position as a numpy array of shape (1, 2) holding [col, row].
         """Return the state of the maze - in this game the agents current location.
 
         :return numpy.array [1][2]: agents current location
@@ -294,6 +344,10 @@ class Maze:
         return np.array([[*self.__current_cell]])
 
     def play(self, model, start_cell=(0, 0)):
+        # [FUNCTION DOC]
+        # Runs a full game from start_cell, repeatedly asking model.predict(state=...) for an action until
+        # WIN or LOSE; returns that Status. May loop forever only if the model never ends the game (the
+        # loss threshold normally guarantees termination).
         """Play a single game, choosing the next move based a prediction from 'model'.
 
         :param class AbstractModel model: the prediction model to use
@@ -311,36 +365,51 @@ class Maze:
                 return status
 
     def possible_actions(self, cell=None):
+        # [FUNCTION DOC]
+        # Public wrapper returning the allowed actions from cell (or the current cell).
         """Return all possible actions from the given cell (or current cell)."""
         return self.__possible_actions(cell)
 
     @property
     def current_cell(self):
+        # [FUNCTION DOC]
+        # Property: current cell as (col, row).
         """Return the agent's current cell as (col, row)."""
         return self.__current_cell
 
     @property
     def previous_cell(self):
+        # [FUNCTION DOC]
+        # Property: previous cell as (col, row).
         """Return the agent's previous cell as (col, row)."""
         return self.__previous_cell
 
     @property
     def status(self):
+        # [FUNCTION DOC]
+        # Property: current game Status computed on demand.
         """Return the current game status."""
         game_status = self.__status()
         return game_status
 
     @property
     def exit_cell(self):
+        # [FUNCTION DOC]
+        # Property: exit cell as (col, row).
         """Return the exit cell as (col, row)."""
         return self.__exit_cell
 
     @property
     def total_reward(self):
+        # [FUNCTION DOC]
+        # Property: accumulated reward of the current episode.
         """Return the cumulative reward for the current episode."""
         return self.__total_reward
 
     def check_win_all(self, model):
+        # [FUNCTION DOC]
+        # Plays a game from every empty cell with rendering disabled (restored afterwards), logs the win
+        # rate, and returns a tuple (True if no games were lost, win rate float). Resets the maze repeatedly.
         """Check if the model wins from all possible starting cells."""
         previous = self.__render
         self.__render = (
@@ -369,12 +438,18 @@ class Maze:
         return result, win / (win + lose)
 
     def render_q(self, model):
+        # [FUNCTION DOC]
+        # When rendering mode is TRAINING, draws arrows for the best action(s) per empty cell from
+        # model.q(cell) (zeros if model is None), colored red to green by Q value clipped to [-1, 1].
+        # No return value; matplotlib side effects only.
         """Render the recommended action(s) for each cell as provided by 'model'.
 
         :param class AbstractModel model: the prediction model to use
         """
 
         def clip(n):
+            # [FUNCTION DOC]
+            # HELPER: Clamps n to the range [0, 1].
             return max(min(1, n), 0)
 
         if self.__render == Render.TRAINING:

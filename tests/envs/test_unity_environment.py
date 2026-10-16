@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Integration and model tests for the Unity ML-Agents environment. Skipped if
+# mlagents_envs is not installed. Server tests launch a real uvicorn server (port 8011)
+# and may download Unity binaries. Inserts the repo root into sys.path at import time.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -52,6 +56,11 @@ from envs.unity_env.models import UnityAction, UnityObservation, UnityState
 
 @pytest.fixture(scope="module")
 def server():
+    # [FUNCTION DOC]
+    # Module-scoped fixture: starts uvicorn serving the Unity app headless on port 8011
+    # (logs to tests/unity_server_test.log), polls /health up to 12 times (5 s apart),
+    # skips the module if never healthy (printing logs), yields the base URL, then
+    # terminates (or kills) the process. Side effects: subprocess, log file write, network.
     """Starts the Unity environment server as a background process.
 
     Note: Unity environments can take 30-120 seconds to initialize on first run
@@ -147,9 +156,13 @@ def server():
 
 
 class TestHealthEndpoint:
+    # [CLASS DOC]
+    # Checks the /health HTTP endpoint of the running server.
     """Tests for the health endpoint."""
 
     def test_health_endpoint_returns_200(self, server):
+        # [FUNCTION DOC]
+        # GET /health returns 200.
         """Test that the health endpoint returns 200 OK."""
         response = requests.get(
             f"{server}/health", proxies={"http": None, "https": None}
@@ -157,6 +170,8 @@ class TestHealthEndpoint:
         assert response.status_code == 200
 
     def test_health_endpoint_returns_status(self, server):
+        # [FUNCTION DOC]
+        # GET /health JSON has status "healthy".
         """Test that the health endpoint returns status field."""
         response = requests.get(
             f"{server}/health", proxies={"http": None, "https": None}
@@ -167,10 +182,14 @@ class TestHealthEndpoint:
 
 
 class TestUnityEnvClient:
+    # [CLASS DOC]
+    # End-to-end tests of the UnityEnv client against the live server.
     """Tests for the UnityEnv client."""
 
     # Note: This test may take up to 3 minutes on first run (binary download)
     def test_reset_returns_valid_observation(self, server):
+        # [FUNCTION DOC]
+        # Reset to PushBlock returns a UnityObservation with expected fields and done False.
         """Test that reset() returns a valid observation."""
         with UnityEnv(base_url=server) as env:
             result = env.reset(env_id="PushBlock")
@@ -184,6 +203,8 @@ class TestUnityEnvClient:
             assert result.observation.done is False
 
     def test_reset_with_different_environments(self, server):
+        # [FUNCTION DOC]
+        # Resetting to PushBlock then 3DBall switches behavior names accordingly.
         """Test that reset() can switch between environments."""
         with UnityEnv(base_url=server) as env:
             # Reset to PushBlock
@@ -197,6 +218,8 @@ class TestUnityEnvClient:
             assert "3DBall" in result2.observation.behavior_name
 
     def test_step_discrete_action(self, server):
+        # [FUNCTION DOC]
+        # A discrete step on PushBlock returns an observation, numeric/None reward and bool done.
         """Test that step() works with discrete actions (PushBlock)."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")
@@ -211,6 +234,8 @@ class TestUnityEnvClient:
             assert isinstance(result.done, bool)
 
     def test_step_continuous_action(self, server):
+        # [FUNCTION DOC]
+        # A continuous step on 3DBall returns an observation, numeric/None reward and bool done.
         """Test that step() works with continuous actions (3DBall)."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="3DBall")
@@ -225,6 +250,8 @@ class TestUnityEnvClient:
             assert isinstance(result.done, bool)
 
     def test_step_multiple_times(self, server):
+        # [FUNCTION DOC]
+        # Ten consecutive discrete steps each return an observation.
         """Test that step() can be called multiple times."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")
@@ -235,6 +262,8 @@ class TestUnityEnvClient:
                 assert result.observation is not None
 
     def test_state_endpoint(self, server):
+        # [FUNCTION DOC]
+        # state() returns a UnityState with expected fields and env_id PushBlock.
         """Test that state() returns valid state information."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")
@@ -251,6 +280,8 @@ class TestUnityEnvClient:
             assert state.env_id == "PushBlock"
 
     def test_step_count_increments(self, server):
+        # [FUNCTION DOC]
+        # step_count goes 0, 1, 2 across steps.
         """Test that step count increments correctly."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")
@@ -270,6 +301,8 @@ class TestUnityEnvClient:
             assert state3.step_count == 2
 
     def test_reset_resets_step_count(self, server):
+        # [FUNCTION DOC]
+        # step_count is 5 after five steps and 0 after a reset.
         """Test that reset() resets the step count."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")
@@ -289,6 +322,8 @@ class TestUnityEnvClient:
             assert state2.step_count == 0
 
     def test_episode_id_changes_on_reset(self, server):
+        # [FUNCTION DOC]
+        # Two resets produce different episode ids.
         """Test that episode ID changes on each reset."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")
@@ -300,6 +335,8 @@ class TestUnityEnvClient:
             assert state1.episode_id != state2.episode_id
 
     def test_action_spec_info(self, server):
+        # [FUNCTION DOC]
+        # PushBlock reports a discrete spec (size 1, branches); 3DBall a continuous spec of size 2.
         """Test that action spec info is provided correctly."""
         with UnityEnv(base_url=server) as env:
             # PushBlock - discrete actions
@@ -321,21 +358,29 @@ class TestUnityEnvClient:
 
 
 class TestUnityEnvModels:
+    # [CLASS DOC]
+    # Pure model construction tests (no server).
     """Tests for Unity environment models."""
 
     def test_unity_action_discrete(self):
+        # [FUNCTION DOC]
+        # Discrete-only action leaves continuous_actions None.
         """Test creating a discrete UnityAction."""
         action = UnityAction(discrete_actions=[1, 2, 3])
         assert action.discrete_actions == [1, 2, 3]
         assert action.continuous_actions is None
 
     def test_unity_action_continuous(self):
+        # [FUNCTION DOC]
+        # Continuous-only action leaves discrete_actions None.
         """Test creating a continuous UnityAction."""
         action = UnityAction(continuous_actions=[0.5, -0.3, 1.0])
         assert action.continuous_actions == [0.5, -0.3, 1.0]
         assert action.discrete_actions is None
 
     def test_unity_action_with_metadata(self):
+        # [FUNCTION DOC]
+        # Action keeps the given metadata mapping.
         """Test creating a UnityAction with metadata."""
         action = UnityAction(
             discrete_actions=[1], metadata={"test": "value", "number": 42}
@@ -344,6 +389,8 @@ class TestUnityEnvModels:
         assert action.metadata == {"test": "value", "number": 42}
 
     def test_unity_observation_creation(self):
+        # [FUNCTION DOC]
+        # Observation stores vector obs, behavior name, done and reward.
         """Test creating a UnityObservation."""
         obs = UnityObservation(
             vector_observations=[1.0, 2.0, 3.0],
@@ -359,6 +406,8 @@ class TestUnityEnvModels:
         assert obs.reward == 0.5
 
     def test_unity_state_creation(self):
+        # [FUNCTION DOC]
+        # State stores episode id, step count, env id and available envs.
         """Test creating a UnityState."""
         state = UnityState(
             episode_id="test-episode-123",
@@ -376,9 +425,13 @@ class TestUnityEnvModels:
 
 
 class TestAvailableEnvironments:
+    # [CLASS DOC]
+    # Tests listing of known Unity environments.
     """Tests for available environments functionality."""
 
     def test_available_environments_static_method(self):
+        # [FUNCTION DOC]
+        # UnityEnv.available_environments() returns a list including PushBlock and 3DBall.
         """Test the static available_environments method."""
         envs = UnityEnv.available_environments()
         assert isinstance(envs, list)
@@ -386,6 +439,8 @@ class TestAvailableEnvironments:
         assert "3DBall" in envs
 
     def test_available_envs_from_state(self, server):
+        # [FUNCTION DOC]
+        # Server state's available_envs is a non-empty list including PushBlock and 3DBall.
         """Test getting available environments from state."""
         with UnityEnv(base_url=server) as env:
             env.reset(env_id="PushBlock")

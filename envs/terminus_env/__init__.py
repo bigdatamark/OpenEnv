@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Terminus environment package: a single-tool ("terminal") MCP environment backed by one E2B sandbox per
+# episode. Re-exports TerminusEnv, TerminusState, CommandResult and the core MCP CallToolAction /
+# ListToolsAction types.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

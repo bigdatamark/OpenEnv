@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Example script: collects Tic-Tac-Toe rollouts from an OpenSpiel server with a real LLM
+# teacher through the provider-agnostic openenv llm_client (hosted OpenAI/Anthropic or any
+# OpenAI-compatible endpoint), using the harness CollectRunner and RolloutSerializer.
+# Adds src/ and envs/ to sys.path.
 """Collect Tic-Tac-Toe rollouts with a real LLM as the teacher.
 
 Provider-agnostic via ``openenv.core.llm_client``: works with OpenAI,
@@ -65,6 +70,10 @@ Choose moves that win or block the opponent.
 
 
 def _env_api_key(provider: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first non-empty env var among the provider's key names
+    # (OPENAI_API_KEY or ANTHROPIC_API_KEY, then API_KEY).
+    # Raises: RuntimeError if none is set (or the provider is unknown).
     mapping = {
         "openai": ["OPENAI_API_KEY", "API_KEY"],
         "anthropic": ["ANTHROPIC_API_KEY", "API_KEY"],
@@ -80,6 +89,11 @@ def _env_api_key(provider: str) -> str:
 
 
 def build_llm_client(args: argparse.Namespace) -> LLMClient:
+    # [FUNCTION DOC]
+    # Returns an OpenAIClient for --llm-endpoint (API key from OPENAI_API_KEY or a
+    # placeholder) or else a hosted client via create_llm_client for --provider; both use the
+    # system prompt, temperature and max tokens from args. Raises: RuntimeError if a hosted
+    # provider key is missing.
     """Pick the right LLMClient subclass based on CLI flags."""
     if args.llm_endpoint:
         # OpenAI-compatible self-hosted endpoint (vLLM, TGI, Ollama, etc.).
@@ -105,6 +119,9 @@ def build_llm_client(args: argparse.Namespace) -> LLMClient:
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Parses CLI args: required --base-url, episode count, max turns, output dir, episode id
+    # prefix, provider, model, llm endpoint/port, temperature, max tokens and --keep-losses.
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
@@ -163,6 +180,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: builds the LLM client and teacher label, session factory and serializer,
+    # writes metadata, runs CollectRunner with a model step built from the LLM client (keeping
+    # only rollouts with reward >= 0 unless --keep-losses), prints stats and paths and a
+    # summary of the first results line if present.
+    # Side effects: network calls, writes output files, stdout.
     args = parse_args()
 
     llm_client = build_llm_client(args)

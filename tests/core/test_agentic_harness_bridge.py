@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Integration tests for HarnessMCPBridge, the loopback HTTP server exposing an environment's MCP
+# tools to an external harness, and for its integration with HarnessEnvironment (start/stop
+# lifecycle, cancellation during reset, renamed conflicting tools, middleware, lifespan, sampling
+# and progress forwarding). Uses real HTTP servers on 127.0.0.1.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Integration tests for the loopback MCP bridge (real HTTP server)."""
@@ -28,10 +34,14 @@ from openenv.core.harness import (
 
 
 def make_mcp() -> FastMCP:
+    # [FUNCTION DOC]
+    # HELPER: Builds a FastMCP server named "domain" with a single "add" tool returning a+b.
     mcp = FastMCP("domain")
 
     @mcp.tool
     def add(a: int, b: int) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Tool returning the sum of two integers.
         """Add two numbers."""
         return a + b
 
@@ -39,31 +49,53 @@ def make_mcp() -> FastMCP:
 
 
 class RecordingAdapter(AgenticHarnessAdapter):
+    # [CLASS DOC]
+    # HELPER: Fake AgenticHarnessAdapter with a built-in tool named read_file. Records the bridge URL
+    # passed to inject_tools (initially the sentinel "unset") and an alive flag; every message yields a
+    # single TURN_COMPLETE event with response "ok".
     BUILTIN_TOOL_NAMES = frozenset({"read_file"})
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Initializes with a dummy HarnessConfig, bridge_url "unset" and alive False.
         super().__init__(HarnessConfig(name="fake", command=["fake"]))
         self.bridge_url: Optional[str] = "unset"
         self.alive = False
 
     async def start(self, working_directory: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Marks the adapter alive.
         self.alive = True
 
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Marks the adapter not alive.
         self.alive = False
 
     async def inject_tools(self, tools, bridge_url: Optional[str] = None) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Records the given bridge URL (tools are ignored).
         self.bridge_url = bridge_url
 
     async def send_message_streaming(self, message: str) -> AsyncIterator[HarnessEvent]:
+        # [FUNCTION DOC]
+        # HELPER: Async generator yielding one TURN_COMPLETE event with response "ok".
         yield HarnessEvent(type=HarnessEventType.TURN_COMPLETE, data={"response": "ok"})
 
     async def is_alive(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Returns the alive flag.
         return self.alive
 
 
 class TestBridgeStandalone:
+    # [CLASS DOC]
+    # Tests the bridge on its own: start/stop idempotency, distinct ports, serving tools, and teardown.
     async def test_stop_closes_active_http_stream(self):
+        # [FUNCTION DOC]
+        # Serves a Starlette app with a never-ending streaming endpoint through the bridge; verifies stop
+        # returns within 3s, joins the server thread, finalizes the stream generator, clears url, and that
+        # a subsequent start creates a new thread.
         from types import SimpleNamespace
 
         import httpx
@@ -74,7 +106,12 @@ class TestBridgeStandalone:
         finished = threading.Event()
 
         async def stream(request):
+            # [FUNCTION DOC]
+            # HELPER: Route handler returning a streaming response that yields one line then waits forever,
+            # setting the finished event when the generator is closed.
             async def chunks():
+                # [FUNCTION DOC]
+                # HELPER: Async generator body for the stream (yields "ready", blocks, sets finished on exit).
                 try:
                     yield b"ready\n"
                     await asyncio.Event().wait()
@@ -103,6 +140,10 @@ class TestBridgeStandalone:
             await asyncio.to_thread(bridge.stop)
 
     def test_failed_stop_keeps_server_until_thread_exits(self):
+        # [FUNCTION DOC]
+        # With a fake server thread that will not exit, stop with a short timeout raises HarnessError,
+        # keeps thread/server references, sets force_exit, and start then fails with "stopping"; once the
+        # thread is released stop succeeds and url is None.
         from types import SimpleNamespace
 
         release = threading.Event()
@@ -130,6 +171,8 @@ class TestBridgeStandalone:
         assert bridge.url is None
 
     async def test_serves_tools_over_http(self):
+        # [FUNCTION DOC]
+        # The bridge URL is http://127.0.0.1:<port>/mcp and serves list_tools and call_tool for "add".
         bridge = HarnessMCPBridge(make_mcp())
         url = bridge.start()
         try:
@@ -144,6 +187,8 @@ class TestBridgeStandalone:
             bridge.stop()
 
     def test_two_bridges_get_distinct_ports(self):
+        # [FUNCTION DOC]
+        # Two bridges started at once get different URLs.
         bridge_a = HarnessMCPBridge(make_mcp())
         bridge_b = HarnessMCPBridge(make_mcp())
         try:
@@ -155,6 +200,8 @@ class TestBridgeStandalone:
             bridge_b.stop()
 
     def test_stop_is_idempotent(self):
+        # [FUNCTION DOC]
+        # Calling stop twice after start is safe and leaves url None.
         bridge = HarnessMCPBridge(make_mcp())
         bridge.start()
         bridge.stop()
@@ -162,11 +209,15 @@ class TestBridgeStandalone:
         assert bridge.url is None
 
     def test_stop_before_start_is_noop(self):
+        # [FUNCTION DOC]
+        # Stopping a never-started bridge is a no-op.
         bridge = HarnessMCPBridge(make_mcp())
         bridge.stop()
         assert bridge.url is None
 
     def test_start_is_idempotent_while_running(self):
+        # [FUNCTION DOC]
+        # Calling start twice returns the same URL.
         bridge = HarnessMCPBridge(make_mcp())
         try:
             assert bridge.start() == bridge.start()
@@ -175,10 +226,17 @@ class TestBridgeStandalone:
 
 
 class TestBridgeEnvironmentIntegration:
+    # [CLASS DOC]
+    # Tests HarnessEnvironment's use of the bridge during reset and close.
     @pytest.mark.parametrize("cancellation", ["asyncio", "repeated_asyncio", "anyio"])
     async def test_cancelled_reset_waits_for_bridge_start_before_stopping(
         self, monkeypatch, cancellation
     ):
+        # [FUNCTION DOC]
+        # Parametrized over asyncio cancel, repeated asyncio cancels and anyio cancel scope. Delays bridge
+        # start and the second adapter stop via monkeypatching, cancels reset mid-start, and asserts the
+        # reset task does not finish until bridge start and adapter teardown complete; afterwards the
+        # server thread is dead, the bridge URL is cleared, the adapter is stopped and no episode is active.
         entered = threading.Event()
         release = threading.Event()
         finished = threading.Event()
@@ -190,6 +248,9 @@ class TestBridgeEnvironmentIntegration:
         original_start = HarnessMCPBridge.start
 
         def delayed_start(bridge):
+            # [FUNCTION DOC]
+            # HELPER: Replacement bridge start that records the bridge, signals entry, waits for release, then
+            # runs the real start and records the server thread; always signals finished.
             bridges.append(bridge)
             entered.set()
             try:
@@ -206,6 +267,9 @@ class TestBridgeEnvironmentIntegration:
         stop_calls = 0
 
         async def delayed_stop():
+            # [FUNCTION DOC]
+            # HELPER: Replacement adapter stop counting calls; on the second call blocks until released before
+            # running the real stop and then signals stopped.
             nonlocal stop_calls
             stop_calls += 1
             if stop_calls == 2:
@@ -220,6 +284,8 @@ class TestBridgeEnvironmentIntegration:
         cancel_scope = anyio.CancelScope()
 
         async def reset():
+            # [FUNCTION DOC]
+            # HELPER: Runs env.reset_async inside the anyio cancel scope.
             with cancel_scope:
                 await env.reset_async()
 
@@ -275,6 +341,8 @@ class TestBridgeEnvironmentIntegration:
             assert all(not thread.is_alive() for thread in server_threads)
 
     async def test_reset_passes_live_bridge_url(self):
+        # [FUNCTION DOC]
+        # Reset injects a working bridge URL that lists "add"; close clears the env's bridge.
         adapter = RecordingAdapter()
         env = HarnessEnvironment(adapter=adapter, mcp=make_mcp())
         try:
@@ -288,6 +356,8 @@ class TestBridgeEnvironmentIntegration:
         assert env._bridge is None
 
     async def test_no_tools_no_bridge(self):
+        # [FUNCTION DOC]
+        # With no MCP server, reset injects a None bridge URL.
         adapter = RecordingAdapter()
         env = HarnessEnvironment(adapter=adapter, mcp=None)
         try:
@@ -298,26 +368,38 @@ class TestBridgeEnvironmentIntegration:
 
 
 class TestRenamedToolsAreServed:
+    # [CLASS DOC]
+    # Tests that tools renamed to avoid built-in name collisions are served by the bridge under the
+    # injected names while preserving the source server's schemas, middleware, lifespan, and context.
     """Conflict resolution renames tools before injection; the bridge must
     answer to the injected names or the harness calls a name that 404s."""
 
     @staticmethod
     def make_colliding_mcp() -> FastMCP:
+        # [FUNCTION DOC]
+        # HELPER: Builds a FastMCP with "add" and a "read_file" tool colliding with the adapter built-in.
         mcp = FastMCP("domain")
 
         @mcp.tool
         def add(a: int, b: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool returning a+b.
             """Add two numbers."""
             return a + b
 
         @mcp.tool
         def read_file(path: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool returning "contents of <path>".
             """Collides with the adapter's built-in read_file."""
             return f"contents of {path}"
 
         return mcp
 
     async def test_renamed_tool_is_listed_and_callable(self):
+        # [FUNCTION DOC]
+        # read_file is injected and served as env_read_file with identical input/output schemas, calls to
+        # it resolve, the original name is unknown, add is untouched, and the source server is unmodified.
         adapter = RecordingAdapter()  # BUILTIN_TOOL_NAMES == {"read_file"}
         mcp = self.make_colliding_mcp()
         async with Client(mcp) as client:
@@ -366,10 +448,17 @@ class TestRenamedToolsAreServed:
         [("env_read_file", {"path": "secret"}), ("add", {"a": 2, "b": 3})],
     )
     async def test_renamed_bridge_preserves_source_middleware(self, name, arguments):
+        # [FUNCTION DOC]
+        # Parametrized over renamed and unrenamed tools: a source middleware that denies calls still runs
+        # and sees the original tool name.
         calls = []
 
         class DenyCalls(Middleware):
+            # [CLASS DOC]
+            # HELPER: Middleware recording the called tool name and raising ToolError.
             async def on_call_tool(self, context, call_next):
+                # [FUNCTION DOC]
+                # HELPER: Records the tool name and raises ToolError("blocked by source middleware").
                 calls.append(context.message.name)
                 raise ToolError("blocked by source middleware")
 
@@ -387,10 +476,16 @@ class TestRenamedToolsAreServed:
             env.close()
 
     async def test_renamed_bridge_preserves_source_lifespan_context(self):
+        # [FUNCTION DOC]
+        # The renamed tool sees the source server's lifespan context across multiple client sessions, and
+        # all lifespan resources are closed after env.close.
         resources = []
 
         @asynccontextmanager
         async def lifespan(server):
+            # [FUNCTION DOC]
+            # HELPER: Async context manager creating an open resource dict, yielding it in the lifespan context
+            # and marking it closed on exit.
             resource = {"open": True, "calls": 0}
             resources.append(resource)
             try:
@@ -402,6 +497,9 @@ class TestRenamedToolsAreServed:
 
         @mcp.tool
         def read_file(ctx: Context) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool incrementing and returning the lifespan resource's call count; raises RuntimeError
+            # if the resource is closed.
             resource = ctx.lifespan_context["resource"]
             if not resource["open"]:
                 raise RuntimeError("resource already closed")
@@ -424,17 +522,24 @@ class TestRenamedToolsAreServed:
         assert all(not resource["open"] for resource in resources)
 
     async def test_renamed_bridge_forwards_sampling_and_progress(self):
+        # [FUNCTION DOC]
+        # The renamed tool's sampling requests and progress reports are forwarded to the client handlers.
         sampled = []
         progress = []
         mcp = FastMCP("domain")
 
         @mcp.tool
         async def read_file(path: str, ctx: Context) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool that samples the path text via the client, reports progress 1/1, and returns the
+            # sampled text.
             response = await ctx.sample(path)
             await ctx.report_progress(1, 1, path)
             return response.text
 
         async def sample(messages, params, context):
+            # [FUNCTION DOC]
+            # HELPER: Sampling handler recording the prompt text and returning "sampled <text>".
             text = messages[0].content.text
             sampled.append(text)
             return CreateMessageResult(
@@ -444,6 +549,8 @@ class TestRenamedToolsAreServed:
             )
 
         async def record_progress(completed, total, message):
+            # [FUNCTION DOC]
+            # HELPER: Progress handler recording (completed, total, message) tuples.
             progress.append((completed, total, message))
 
         adapter = RecordingAdapter()
@@ -465,6 +572,8 @@ class TestRenamedToolsAreServed:
             env.close()
 
     async def test_no_renames_serves_the_source_server_directly(self):
+        # [FUNCTION DOC]
+        # Without collisions the bridge serves the source tools unchanged.
         adapter = RecordingAdapter()
         env = HarnessEnvironment(adapter=adapter, mcp=make_mcp())  # only "add"
         try:

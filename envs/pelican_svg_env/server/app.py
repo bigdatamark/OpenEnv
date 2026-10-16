@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI server entry for Pelican SVG. At import time builds "app" with create_app, passing the
+# environment class as a per-session factory and MAX_CONCURRENT_ENVS (default 8) as the session limit.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """FastAPI application for the Pelican SVG environment."""
@@ -21,6 +24,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: runs the app with uvicorn on 0.0.0.0:8000. Blocks.
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

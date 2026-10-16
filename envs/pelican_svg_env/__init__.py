@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Package entry for the Pelican SVG environment (single-turn "draw an animal riding a vehicle as
+# SVG" benchmark with layered scoring). Re-exports the client and the action/observation/state models.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Pelican SVG environment for OpenEnv.

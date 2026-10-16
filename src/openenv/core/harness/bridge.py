@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Loopback MCP bridge: serves an environment's FastMCP tool server over
+# streamable HTTP on 127.0.0.1 from a background thread, so a harness subprocess
+# can call the environment's domain tools (but never reset/step/state). Also builds
+# a renamed "view" server when tool-name conflict resolution renamed tools.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Loopback MCP bridge exposing environment tools to a harness (RFC 005)."""
@@ -14,6 +19,12 @@ from .adapter import HarnessError
 
 
 async def _source_tools(mcp_server: Any) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Async lookup of a FastMCP server's tools across FastMCP versions.
+    # If the server has get_tools() and it returns a dict, returns that dict; else if it
+    # has list_tools(), returns a mapping name -> tool built from the list; else empty dict.
+    # Inputs: mcp_server - a FastMCP server object.
+    # Returns: mapping from tool name to tool object.
     """Return {name: FastMCP tool}, compatible with FastMCP 2.x and 3.x.
 
     Async twin of [`~openenv.core.env_server.mcp_environment.get_server_tools`],
@@ -30,6 +41,17 @@ async def _source_tools(mcp_server: Any) -> dict[str, Any]:
 
 
 async def build_bridge_server(mcp_server: Any, renames: dict[str, str]) -> Any:
+    # [FUNCTION DOC]
+    # Returns a server exposing the environment's tools under injected (renamed) names.
+    # Inputs: mcp_server - the env's FastMCP server; renames - mapping injected name ->
+    # source name.
+    # Returns: mcp_server unchanged when renames is empty; otherwise a FastMCPProxy named
+    # "<server name or 'openenv'>-harness-view" with a ToolTransform renaming each source
+    # tool to its served name. The proxy uses a StatefulProxyClient so each harness MCP
+    # connection gets its own source session, and a lifespan that keeps a Client open on
+    # the source server for the bridge's lifetime.
+    # Raises: HarnessError if any source name in renames is not exposed by mcp_server.
+    # Side effects: lazily imports fastmcp submodules.
     """
     Return a FastMCP server exposing the env's tools under their injected names.
 
@@ -66,6 +88,9 @@ async def build_bridge_server(mcp_server: Any, renames: dict[str, str]) -> Any:
 
     @asynccontextmanager
     async def lifespan(server):
+        # [FUNCTION DOC]
+        # HELPER: Async context manager used as the proxy server's lifespan; opens a fastmcp
+        # Client on the source server for the duration and yields an empty state dict.
         # Preserve source resources across harness MCP reconnects until this
         # bridge stops, just as when serving the source server directly.
         async with Client(mcp_server):
@@ -91,6 +116,10 @@ async def build_bridge_server(mcp_server: Any, renames: dict[str, str]) -> Any:
 
 
 class HarnessMCPBridge:
+    # [CLASS DOC]
+    # Runs an in-process FastMCP server as a uvicorn ASGI app on host (default loopback)
+    # with an OS-assigned ephemeral port, in a daemon thread. Tracks the url, thread,
+    # uvicorn server and any startup error. url is None when not running.
     """
     Serve an in-process FastMCP server over loopback HTTP for harness use.
 
@@ -119,6 +148,9 @@ class HarnessMCPBridge:
     """
 
     def __init__(self, mcp_server: Any, host: str = "127.0.0.1"):
+        # [FUNCTION DOC]
+        # Stores the MCP server and host; initializes url, thread, uvicorn server and
+        # startup error to None. No side effects.
         self._mcp_server = mcp_server
         self._host = host
         self._url: Optional[str] = None
@@ -128,10 +160,23 @@ class HarnessMCPBridge:
 
     @property
     def url(self) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Returns the current MCP endpoint URL, or None when not running.
         """The bridge's MCP endpoint URL, or `None` when not running."""
         return self._url
 
     def start(self, timeout_s: float = 10.0) -> str:
+        # [FUNCTION DOC]
+        # Starts serving and returns the endpoint URL "http://<host>:<port>/mcp".
+        # Idempotent: if the server thread is alive returns the existing URL.
+        # Behavior: binds a socket to (host, 0) with SO_REUSEADDR, builds the server's
+        # http_app(), creates a uvicorn Server (log level warning, lifespan on), runs it in a
+        # daemon thread on that socket, then polls every 10ms until server.started.
+        # Inputs: timeout_s - max seconds to wait for startup (default 10).
+        # Raises: HarnessError if the thread is alive but still stopping; if the server thread
+        # dies or records an exception during startup (state torn down); or on timeout (stop()
+        # is called first).
+        # Side effects: opens a socket, starts a thread, mutates instance state.
         """
         Start serving and return the MCP endpoint URL.
 
@@ -168,6 +213,10 @@ class HarnessMCPBridge:
         self._startup_error = None
 
         def _serve() -> None:
+            # [FUNCTION DOC]
+            # HELPER: Thread target; runs the uvicorn server on the bound socket, records any
+            # exception (including BaseException) in self._startup_error, and always closes the
+            # socket ignoring OSError.
             try:
                 server.run(sockets=[sock])
             except BaseException as exc:  # surfaced to start() below
@@ -196,6 +245,14 @@ class HarnessMCPBridge:
         return self._url
 
     def stop(self, timeout_s: float = 5.0) -> None:
+        # [FUNCTION DOC]
+        # Stops the bridge. Idempotent when never started.
+        # Behavior: sets graceful-shutdown timeout to timeout_s/4 and should_exit; joins the
+        # thread for timeout_s/2; if still alive sets force_exit and joins for the remaining
+        # time to the overall deadline; then clears url/thread/server state.
+        # Inputs: timeout_s - overall budget in seconds (default 5, negatives treated as 0).
+        # Raises: HarnessError if the thread is still alive after the deadline; state is kept
+        # so callers can retry.
         """
         Stop the bridge server.
 
@@ -230,6 +287,8 @@ class HarnessMCPBridge:
         self._teardown()
 
     def _teardown(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Clears url, thread and uvicorn server references (does not stop anything).
         self._url = None
         self._thread = None
         self._uvicorn_server = None

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Source-level handling of submitted SVG: extracts the SVG block from a model reply, parses it
+# safely (size cap, DTD/entity refusal, root must be svg), and inspects it for bad-faith or
+# degenerate constructions (forbidden script/foreignObject, embedded rasters, external references,
+# too many elements, too much text, text naming the subject, too few drawable elements).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Source-level inspection of a submitted SVG.
@@ -65,10 +70,15 @@ _SVG_OPEN = re.compile(r"<svg\b", re.IGNORECASE)
 
 
 class SvgParseError(Exception):
+    # [CLASS DOC]
+    # Exception for responses or sources that cannot be parsed as an SVG document.
     """Raised when the submission cannot be parsed as an SVG document."""
 
 
 class TruncatedSvgError(SvgParseError):
+    # [CLASS DOC]
+    # SvgParseError subtype for a reply that opens an svg element but never closes it (typically a
+    # generation cut off by a token limit).
     """Raised when a submission opens an `<svg>` element but never closes it.
 
     Almost always a generation that ran into its token limit. Worth its own
@@ -80,6 +90,8 @@ class TruncatedSvgError(SvgParseError):
 
 @dataclass(frozen=True)
 class SourceViolation:
+    # [CLASS DOC]
+    # Immutable violation record: machine-readable code and human-readable detail.
     """A single reason the submission is not a good-faith vector drawing.
 
     Attributes:
@@ -95,6 +107,9 @@ class SourceViolation:
 
 @dataclass(frozen=True)
 class SourceReport:
+    # [CLASS DOC]
+    # Immutable inspection result: deduplicated violations, per-tag element counts, number of drawable
+    # elements and concatenated rendered text.
     """Result of inspecting the SVG source.
 
     Attributes:
@@ -115,16 +130,24 @@ class SourceReport:
 
     @property
     def ok(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True when there are no violations.
         """`bool`: Whether the submission cleared every source-level check."""
         return not self.violations
 
     @property
     def codes(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: violation codes in order.
         """`list[str]`: Violation codes, in the order they were raised."""
         return [v.code for v in self.violations]
 
 
 def extract_svg(response: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the last complete svg block (case-insensitive, across lines) in response, stripped.
+    # Raises TruncatedSvgError if an opening svg tag exists without a closing one, SvgParseError if no
+    # svg tag appears. None is treated as empty text.
     """Pull the SVG document out of a raw model response.
 
     Models routinely wrap the answer in a fenced code block or bracket it with
@@ -161,11 +184,16 @@ def extract_svg(response: str) -> str:
 
 
 def strip_namespace(tag: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the tag name with any "{namespace}" prefix removed.
     """Return an element tag without its namespace prefix."""
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
 def parse_svg(source: str) -> ET.Element:
+    # [FUNCTION DOC]
+    # Parses source into an ElementTree root. Raises SvgParseError if the UTF-8 size exceeds 200,000
+    # bytes, a DOCTYPE or ENTITY declaration is present, the XML is malformed, or the root is not svg.
     """Parse SVG source into an element tree.
 
     Args:
@@ -197,6 +225,8 @@ def parse_svg(source: str) -> ET.Element:
 
 
 def _iter_hrefs(element: ET.Element) -> Iterable[str]:
+    # [FUNCTION DOC]
+    # HELPER: Yields the non-empty values of href, namespaced xlink href, src and literal "xlink:href" attributes.
     for attr in _HREF_ATTRS:
         value = element.get(attr)
         if value:
@@ -204,6 +234,8 @@ def _iter_hrefs(element: ET.Element) -> Iterable[str]:
 
 
 def _mentions_any(text: str, terms: Sequence[str]) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns the first term that appears as a whole word (case-insensitive) in text, else None.
     """Return the first term appearing as a whole word in `text`, if any."""
     lowered = text.lower()
     for term in terms:
@@ -213,6 +245,13 @@ def _mentions_any(text: str, terms: Sequence[str]) -> str | None:
 
 
 def inspect_source(source: str, forbidden_terms: Sequence[str] = ()) -> SourceReport:
+    # [FUNCTION DOC]
+    # Parses source (propagating SvgParseError) and inspects every element: counts tags and drawable
+    # elements, flags forbidden tags, image elements and data-image hrefs (embedded_raster), remote
+    # URL hrefs (external_reference), more than 5,000 elements, collects rendered text (text, tspan,
+    # textPath text plus inline tails) and flags over 40 characters (text_heavy) or any forbidden
+    # term (text_label), and fewer than 3 drawable elements. Keeps only the first violation per code.
+    # Returns a SourceReport.
     """Check an SVG submission for degenerate and bad-faith constructions.
 
     Args:

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Integration tests for the BrowserGym server (MiniWoB click-test task)
+# started under gunicorn and driven through the BrowserGymEnv HTTP client.
+# Skipped if gunicorn is missing; prepends repo root to sys.path.
 """Unit tests for BrowserGym environment server."""
 
 import os
@@ -23,6 +27,13 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def server():
+    # [FUNCTION DOC]
+    # Module fixture: launches gunicorn with one Uvicorn worker on port 8010 with
+    # PYTHONPATH and BROWSERGYM_* env vars, polls /health up to 12 times, skips
+    # (after printing logs and killing the process) if never healthy, yields the
+    # base URL, then kills the process. Side effects: subprocess, network, prints.
+    # KNOWN ISSUE: the poll only sleeps on connection errors, so non-200 responses
+    # are retried 12 times with no delay.
     """Starts the BrowserGym environment server as a background process."""
     # Define paths for subprocess environment
     ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -98,6 +109,8 @@ def server():
 
 
 def test_health_endpoint(server):
+    # [FUNCTION DOC]
+    # /health returns 200 with a status field.
     """Test that the health endpoint works."""
     response = requests.get(f"{server}/health")
     assert response.status_code == 200
@@ -105,6 +118,8 @@ def test_health_endpoint(server):
 
 
 def test_reset(server):
+    # [FUNCTION DOC]
+    # reset returns a not-done observation with text, url and a non-empty goal.
     """Test that reset() returns a valid observation."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     result = env.reset()
@@ -120,6 +135,8 @@ def test_reset(server):
 
 
 def test_reset_multiple_times(server):
+    # [FUNCTION DOC]
+    # Repeated resets succeed and produce different episode ids.
     """Test that reset() can be called multiple times."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
 
@@ -138,6 +155,8 @@ def test_reset_multiple_times(server):
 
 
 def test_step(server):
+    # [FUNCTION DOC]
+    # A click action returns an observation, numeric-or-None reward and bool done.
     """Test that step() returns a valid result."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     env.reset()
@@ -152,6 +171,8 @@ def test_step(server):
 
 
 def test_step_multiple_times(server):
+    # [FUNCTION DOC]
+    # Two consecutive steps return observations.
     """Test that step() can be called multiple times."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     env.reset()
@@ -169,6 +190,8 @@ def test_step_multiple_times(server):
 
 
 def test_state_endpoint(server):
+    # [FUNCTION DOC]
+    # State exposes episode_id, step_count, benchmark "miniwob", task "click-test".
     """Test that the state endpoint returns valid state."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     env.reset()
@@ -187,6 +210,8 @@ def test_state_endpoint(server):
 
 
 def test_step_count_increments(server):
+    # [FUNCTION DOC]
+    # step_count goes 0, 1, 2 across steps.
     """Test that step count increments correctly."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     env.reset()
@@ -207,6 +232,8 @@ def test_step_count_increments(server):
 
 
 def test_action_with_metadata(server):
+    # [FUNCTION DOC]
+    # Actions with metadata are accepted.
     """Test that actions with metadata work."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     env.reset()
@@ -220,6 +247,8 @@ def test_action_with_metadata(server):
 
 
 def test_error_handling(server):
+    # [FUNCTION DOC]
+    # A malformed action string still returns an observation.
     """Test that invalid actions are handled gracefully."""
     env = BrowserGymEnv(base_url=server, request_timeout_s=60)
     env.reset()

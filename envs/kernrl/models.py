@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for kernrl: kernel-code action, evaluation observation and
+# episode state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,8 @@ except ImportError:
 
 
 class KernelAction(Action):
+    # [CLASS DOC]
+    # Action carrying non-empty kernel source code.
     """Action for the kernrl environment - kernel code submission."""
 
     code: str = Field(
@@ -33,6 +38,11 @@ class KernelAction(Action):
 
 
 class KernelObservation(Observation):
+    # [CLASS DOC]
+    # Observation: problem id, description, reference PyTorch code, GPU info, turn
+    # and max_turns (default 10), feedback text, and evaluation results
+    # (compilation success/error, correctness pass, max abs difference, speedup
+    # versus the PyTorch baseline).
     """Observation from the kernrl environment - evaluation results."""
 
     problem_id: str = Field(..., description="Unique identifier for the problem")
@@ -63,6 +73,9 @@ class KernelObservation(Observation):
 
 
 class KernelState(State):
+    # [CLASS DOC]
+    # State extended with problem id, turn, max_turns, best speedup so far (>= 0)
+    # and solved flag.
     """State for the kernrl environment."""
 
     problem_id: Optional[str] = Field(default=None, description="Current problem ID")

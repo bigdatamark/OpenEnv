@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Google generateContent dialect: converts Gemini requests (contents, system
+# instruction, generationConfig, tools, toolConfig, both camelCase and snake_case and
+# an optional nested "config" section) into OpenAI chat requests, and converts OpenAI
+# responses and stream chunks back into Gemini response objects (candidates, parts
+# with text/thought/functionCall, usageMetadata, top-level functionCalls).
+# Streaming uses a stateful accumulator so tool-call argument fragments are emitted as
+# complete functionCall parts.
 """Google Generative AI API transformer with tool-call support."""
 
 from __future__ import annotations
@@ -17,15 +25,23 @@ from .reasoning import extract_reasoning_from_gemini_parts, make_google_signatur
 
 @dataclass
 class _GoogleToolCallState:
+    # [CLASS DOC]
+    # HELPER: Mutable accumulator for one streamed tool call: call id, name, argument text.
     call_id: str = ""
     name: str = ""
     arguments: str = ""
 
 
 class _GoogleStreamState:
+    # [CLASS DOC]
+    # HELPER: Per-request streaming state that accumulates OpenAI tool-call deltas (keyed
+    # by index), last finish reason and usage, and emits Gemini stream responses; tracks
+    # whether tool calls and a finish reason were already emitted.
     """Accumulate streamed OpenAI tool-call deltas into Google response parts."""
 
     def __init__(self, transformer: "GoogleTransformer") -> None:
+        # [FUNCTION DOC]
+        # Stores the owning transformer and initializes empty accumulators and flags.
         self._transformer = transformer
         self._tool_calls: dict[int, _GoogleToolCallState] = {}
         self._finish_reason: str | None = None
@@ -39,6 +55,17 @@ class _GoogleStreamState:
         *,
         is_first: bool = False,
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Converts one OpenAI stream chunk into zero or one Gemini stream responses.
+        # Behavior: chunks without choices only update usage. Otherwise records usage; builds
+        # parts from reasoning_content (thought part with generated signature) and content
+        # text; accumulates tool-call id, name and arguments (non-strings JSON-encoded); records
+        # a finish reason. If there are text parts, emits them (with this chunk's finish
+        # reason). Else, once a finish reason is known and tool calls exist and were not yet
+        # emitted, emits all named tool calls as functionCall parts in index order. Else, if
+        # this chunk has a finish reason not yet emitted, emits an empty-parts response
+        # carrying it. is_first is ignored.
+        # Returns: list of Gemini response dicts. Side effects: mutates state.
         del is_first
 
         choices = chunk.get("choices", [])
@@ -144,6 +171,9 @@ class _GoogleStreamState:
         return []
 
     def finalize(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Flushes accumulated tool calls not yet emitted as one Gemini response (with the last
+        # finish reason, if any). Returns [] if there is nothing to flush.
         if self._tool_calls and not self._emitted_tool_calls:
             self._emitted_tool_calls = True
             tool_parts = [
@@ -169,6 +199,10 @@ class _GoogleStreamState:
 
 
 class GoogleTransformer(BaseTransformer):
+    # [CLASS DOC]
+    # Transformer for the Google generateContent dialect. ROLE_MAP maps Gemini roles to
+    # OpenAI roles (model->assistant, developer->system); FINISH_REASON_MAP_REVERSE maps
+    # OpenAI finish reasons to Gemini (length->MAX_TOKENS, content_filter->SAFETY, rest STOP).
     """Transform between Google Generative AI and OpenAI API formats."""
 
     ROLE_MAP = {
@@ -186,6 +220,18 @@ class GoogleTransformer(BaseTransformer):
     }
 
     def transform_request(self, body: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts a Gemini request into an OpenAI chat request.
+        # Behavior: system instruction (from top level or config, either case) becomes a
+        # system message; each content is converted to messages; model copied; generation
+        # config merged from config.generationConfig then top-level generationConfig (falls
+        # back to the whole config section if both absent) and mapped: maxOutputTokens,
+        # temperature, topP, topK, stopSequences, candidateCount->n, presence/frequency
+        # penalties, seed, logprobs->top_logprobs; JSON response formats converted;
+        # thinkingConfig.includeThoughts sets chat_template_kwargs.enable_thinking; tools
+        # converted and, only if non-empty, tool_choice from toolConfig. Then normalized with
+        # _served_model.
+        # Returns: new request dict.
         messages: list[dict[str, Any]] = []
         config = body.get("config")
         config_section = config if isinstance(config, dict) else {}
@@ -272,6 +318,10 @@ class GoogleTransformer(BaseTransformer):
     def _convert_response_format(
         self, gen_config: dict[str, Any]
     ) -> dict[str, Any] | None:
+        # [FUNCTION DOC]
+        # HELPER: Derives an OpenAI response_format from generation config: a
+        # responseFormat.text with JSON mime type, or responseMimeType JSON with
+        # responseJsonSchema/_responseJsonSchema/responseSchema. Returns None if not JSON.
         response_format_cfg = gen_config.get("responseFormat")
         if isinstance(response_format_cfg, dict):
             text_format = response_format_cfg.get("text")
@@ -294,6 +344,9 @@ class GoogleTransformer(BaseTransformer):
 
     @staticmethod
     def _is_json_mime_type(value: Any) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True if value is a string equal to "application/json" (case-insensitive) or
+        # "APPLICATION_JSON".
         if not isinstance(value, str):
             return False
         return (
@@ -301,6 +354,9 @@ class GoogleTransformer(BaseTransformer):
         )
 
     def _chat_response_format_from_schema(self, schema: Any) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a json_schema response format named "google_response" with the
+        # normalized schema when schema is a non-empty dict, else {"type": "json_object"}.
         if isinstance(schema, dict) and schema:
             return {
                 "type": "json_schema",
@@ -312,6 +368,9 @@ class GoogleTransformer(BaseTransformer):
         return {"type": "json_object"}
 
     def _normalize_google_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Recursively lowercases string "type" values in a JSON schema through
+        # properties, items and anyOf/oneOf/allOf; other keys copied as-is. Returns a new dict.
         normalized: dict[str, Any] = {}
         for key, value in schema.items():
             if key == "type" and isinstance(value, str):
@@ -341,6 +400,12 @@ class GoogleTransformer(BaseTransformer):
         response: dict[str, Any],
         original_request: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts an OpenAI chat response into a Gemini response: one candidate per choice
+        # with parts (thought part from reasoning_content, content parts, functionCall parts),
+        # mapped finishReason, index and empty safetyRatings; usageMetadata from usage
+        # (prompt/completion/total, plus cachedContentTokenCount when cached); top-level
+        # functionCalls collected from all candidates when any.
         del original_request
 
         candidates = []
@@ -397,6 +462,11 @@ class GoogleTransformer(BaseTransformer):
         original_request: dict[str, Any],
         is_first: bool = False,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Stateless conversion of one OpenAI stream chunk to a Gemini stream response: per
+        # choice, thought/text parts and one functionCall part per tool-call delta (arguments
+        # parsed per fragment), optional finishReason; usageMetadata when usage present;
+        # functionCalls when any.
         del original_request, is_first
 
         candidates = []
@@ -452,10 +522,14 @@ class GoogleTransformer(BaseTransformer):
     def create_stream_state(
         self, original_request: dict[str, Any]
     ) -> _GoogleStreamState:
+        # [FUNCTION DOC]
+        # Returns a new _GoogleStreamState bound to this transformer.
         del original_request
         return _GoogleStreamState(self)
 
     def is_streaming_request(self, body: dict[str, Any]) -> bool:
+        # [FUNCTION DOC]
+        # Always returns False; Google signals streaming in the URL, which the server inspects instead.
         """Part of the transformer interface, but NOT how the proxy decides.
 
         Google signals streaming in the URL (`:streamGenerateContent`, `?alt=sse`) rather than the
@@ -467,6 +541,16 @@ class GoogleTransformer(BaseTransformer):
         return False
 
     def _convert_content_to_messages(self, content: Any) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts one Gemini content dict into OpenAI messages. Collects text and
+        # image parts, functionCall parts (as tool_calls with JSON-encoded args, id from
+        # id/call_id or ""), and functionResponse parts (as tool messages whose tool_call_id is
+        # id/call_id/name and content is JSON-encoded response). Assistant role: one assistant
+        # message with converted content, reasoning_content from thought parts and tool_calls,
+        # if any of those exist. System role: one system message from text parts. Otherwise: a
+        # user message (if any text/image parts) followed by the tool messages.
+        # Returns: list of messages ([] for non-dict input). functionResponse parts in
+        # assistant/system contents and functionCall parts in user contents are dropped.
         if not isinstance(content, dict):
             return []
 
@@ -550,6 +634,10 @@ class GoogleTransformer(BaseTransformer):
         return messages
 
     def _convert_tools(self, google_tools: list[Any]) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts Gemini tools' functionDeclarations (either case) into OpenAI function
+        # tools, skipping non-dicts and unnamed declarations; parameters from parameters,
+        # parametersJsonSchema or parameters_json_schema, defaulting to an empty object schema.
         openai_tools: list[dict[str, Any]] = []
         for tool in google_tools:
             if not isinstance(tool, dict):
@@ -581,6 +669,10 @@ class GoogleTransformer(BaseTransformer):
         return openai_tools
 
     def _convert_tool_choice(self, tool_config: Any) -> Any | None:
+        # [FUNCTION DOC]
+        # HELPER: Converts toolConfig.functionCallingConfig to an OpenAI tool_choice: mode NONE
+        # -> "none"; ANY/VALIDATED -> a named function choice if exactly one allowed name, else
+        # "required"; otherwise None (also for invalid input).
         if not isinstance(tool_config, dict):
             return None
         function_calling_config = tool_config.get(
@@ -606,6 +698,9 @@ class GoogleTransformer(BaseTransformer):
     def _tool_call_parts_from_message(
         self, message: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts an OpenAI message's tool_calls with a non-empty function name into
+        # Gemini functionCall parts.
         parts: list[dict[str, Any]] = []
         for tool_call in message.get("tool_calls", []) or []:
             if not isinstance(tool_call, dict):
@@ -628,6 +723,8 @@ class GoogleTransformer(BaseTransformer):
     def _tool_call_part(
         self, *, name: str, arguments: Any, call_id: str
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a Gemini functionCall part with name, parsed args and id (if non-empty).
         function_call: dict[str, Any] = {
             "name": name,
             "args": self._parse_arguments(arguments),
@@ -637,6 +734,10 @@ class GoogleTransformer(BaseTransformer):
         return {"functionCall": function_call}
 
     def _parse_arguments(self, arguments: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Normalizes tool arguments: dict/list/number/bool returned as-is; None -> {};
+        # other non-strings -> {"value": x}; blank strings -> {}; JSON strings parsed; invalid
+        # JSON -> {"raw": stripped string}.
         if isinstance(arguments, (dict, list, int, float, bool)) or arguments is None:
             return arguments if arguments is not None else {}
         if not isinstance(arguments, str):
@@ -650,6 +751,9 @@ class GoogleTransformer(BaseTransformer):
             return {"raw": stripped}
 
     def _normalize_tool_call_deltas(self, tool_calls: Any) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Normalizes a tool_calls delta to a list of dicts (list filtered, single dict
+        # wrapped, anything else -> []).
         if isinstance(tool_calls, list):
             return [
                 tool_call for tool_call in tool_calls if isinstance(tool_call, dict)
@@ -665,6 +769,9 @@ class GoogleTransformer(BaseTransformer):
         finish_reason: str | None = None,
         usage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a single-candidate Gemini stream response from parts, optional mapped
+        # finish reason and optional usageMetadata; adds functionCalls when present.
         candidate: dict[str, Any] = {
             "content": {"parts": parts, "role": "model"},
             "index": 0,
@@ -688,6 +795,8 @@ class GoogleTransformer(BaseTransformer):
     def _response_function_calls(
         self, candidates: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Collects every functionCall dict from candidates' content parts.
         function_calls: list[dict[str, Any]] = []
         for candidate in candidates:
             content = candidate.get("content", {})
@@ -702,6 +811,8 @@ class GoogleTransformer(BaseTransformer):
         return function_calls
 
     def _extract_text_from_parts(self, parts: list) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Joins text from dict parts with a "text" key and string parts by newlines.
         texts = []
         for part in parts:
             if isinstance(part, dict) and "text" in part:
@@ -711,6 +822,9 @@ class GoogleTransformer(BaseTransformer):
         return "\n".join(texts)
 
     def _extract_system_instruction_text(self, system_instruction: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Extracts system instruction text from a string, a content dict with parts,
+        # or a list of parts; otherwise "".
         if isinstance(system_instruction, str):
             return system_instruction
         if isinstance(system_instruction, dict):
@@ -720,6 +834,9 @@ class GoogleTransformer(BaseTransformer):
         return ""
 
     def _cached_prompt_tokens(self, usage: dict[str, Any]) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns cached prompt tokens from usage.prompt_tokens_details.cached_tokens
+        # or usage.cached_tokens if an int, else 0.
         details = usage.get("prompt_tokens_details")
         if isinstance(details, dict):
             cached = details.get("cached_tokens")

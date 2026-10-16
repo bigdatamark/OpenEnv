@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: Round-trips model reasoning (reasoning_content) between dialect-specific
+# shapes: Anthropic thinking blocks, Gemini thought parts, Responses reasoning items.
+# Signatures and "encrypted" content are deterministic synthetic tokens (SHA-256 /
+# base64), not real cryptography.
 """Reasoning round-trip helpers shared across API transformers.
 
 SGLang's `--reasoning-parser` (split mode: `qwen3`, `minimax`, `deepseek-r1`,
@@ -23,6 +28,9 @@ from typing import Any
 
 
 def make_signature(reasoning_text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "" for empty text, else "sg_oe_" plus the unpadded URL-safe base64
+    # of the SHA-256 digest of the UTF-8 text.
     """Deterministic synthetic signature for an Anthropic/Gemini thought block."""
     if not reasoning_text:
         return ""
@@ -31,6 +39,9 @@ def make_signature(reasoning_text: str) -> str:
 
 
 def make_google_signature(reasoning_text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns standard padded base64 of the ASCII make_signature marker, for
+    # Gemini's bytes-typed thoughtSignature field.
     """Encode a proxy-local thought marker as Google's JSON bytes field.
 
     This is only for responses synthesized by our OpenAI-to-Google bridge;
@@ -42,6 +53,8 @@ def make_google_signature(reasoning_text: str) -> str:
 
 
 def encrypt_reasoning(reasoning_text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "" for empty text, else "oe:" plus URL-safe base64 of the UTF-8 text.
     """Pack reasoning into Responses-style `encrypted_content`.
 
     Base64-encoded so it survives transport. Decoded by `decrypt_reasoning`
@@ -55,6 +68,9 @@ def encrypt_reasoning(reasoning_text: str) -> str:
 
 
 def decrypt_reasoning(encrypted: str | None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Inverse of encrypt_reasoning; returns "" if input is not a string starting
+    # with "oe:" or decoding fails for any reason.
     """Reverse of `encrypt_reasoning`. Returns empty string on any failure."""
     if not isinstance(encrypted, str) or not encrypted.startswith("oe:"):
         return ""
@@ -67,6 +83,9 @@ def decrypt_reasoning(encrypted: str | None) -> str:
 
 
 def extract_reasoning_from_anthropic_content(content: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Joins (newline) the non-empty "thinking" strings of Anthropic thinking
+    # blocks; "" for non-list input.
     """Extract reasoning_content from Anthropic assistant content blocks."""
     if not isinstance(content, list):
         return ""
@@ -82,6 +101,8 @@ def extract_reasoning_from_anthropic_content(content: Any) -> str:
 
 
 def extract_reasoning_from_gemini_parts(parts: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Joins (newline) non-empty text of Gemini parts with thought true; "" for non-list.
     """Extract reasoning_content from Gemini content parts (thought:true)."""
     if not isinstance(parts, list):
         return ""
@@ -97,6 +118,9 @@ def extract_reasoning_from_gemini_parts(parts: Any) -> str:
 
 
 def extract_reasoning_from_responses_item(item: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Extracts reasoning from a Responses reasoning item: newline-joined
+    # non-empty content[].text, else summary[].text, else decrypted encrypted_content.
     """Extract reasoning_content text from a Responses `reasoning` input item.
 
     Prefers `content[*].text` (full chain), falls back to `summary[*].text`,

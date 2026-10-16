@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: plays the Wildfire environment from a local server with a simple
+# heuristic agent (water or firebreak on a random burning cell) and prints grid renderings
+# and statistics. Adds src/ to sys.path.
 """
 Simple example demonstrating Wildfire Environment usage.
 
@@ -29,6 +33,10 @@ from envs.wildfire_env.client import render_grid
 
 
 def simple_agent_strategy(obs):
+    # [FUNCTION DOC]
+    # Heuristic policy: collects burning cells (grid value 2) from the flattened row-major
+    # grid; returns a wait action if none, otherwise targets a random burning cell with water
+    # if water remains, else a firebreak if breaks remain, else wait. Uses global random.
     """
     Simple firefighting strategy:
     - Target burning cells with water if available
@@ -60,6 +68,12 @@ def simple_agent_strategy(obs):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Entry point: connects to localhost:8000, resets, prints initial info and grid, steps
+    # up to 50 times with the heuristic, printing progress every 5 steps or on done, then a
+    # summary and environment state. Exceptions are caught and printed; the env is always closed.
+    # Side effects: network calls, stdout.
+    # KNOWN ISSUE: the "Water used" summary prints the remaining water, not the amount used.
     """Run a wildfire containment episode."""
     # Connect to the Wildfire environment server
     print("Connecting to Wildfire environment...")

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Vendored CARLA PID controllers: longitudinal (speed -> throttle/brake) and lateral
+# (heading error to a waypoint -> steering), combined into VehiclePIDController.
 # Copyright (c) 2018-2020 CVC.
 #
 # This work is licensed under the terms of the MIT license.
@@ -15,6 +18,9 @@ from carla_env.server.carla_agents.tools.misc import get_speed
 
 
 class VehiclePIDController:
+    # [CLASS DOC]
+    # Combines a longitudinal and a lateral PID controller and applies throttle/brake/steer limits
+    # and steering rate limiting (max change 0.1 per step).
     """
     VehiclePIDController is the combination of two PID controllers
     (lateral and longitudinal) to perform the
@@ -31,6 +37,10 @@ class VehiclePIDController:
         max_brake=0.3,
         max_steering=0.8,
     ):
+        # [FUNCTION DOC]
+        # Inputs: vehicle; args_lateral / args_longitudinal dicts of K_P, K_I, K_D, dt; lateral offset
+        # (positive = right); max throttle 0.75, brake 0.3, steering 0.8. Records current steer as the
+        # previous steering.
         """
         Constructor method.
 
@@ -65,6 +75,11 @@ class VehiclePIDController:
         )
 
     def run_step(self, target_speed, waypoint):
+        # [FUNCTION DOC]
+        # Computes acceleration toward target_speed (km/h) and steering toward the waypoint. Positive
+        # acceleration becomes throttle (capped), negative becomes brake (capped). Steering is limited to
+        # +-0.1 change from the last step and to +-max_steer. Returns a carla.VehicleControl.
+        # KNOWN ISSUE: docstring says it returns a distance; it returns a control.
         """
         Execute one step of control invoking both lateral and longitudinal
         PID controllers to reach a target waypoint
@@ -105,24 +120,34 @@ class VehiclePIDController:
         return control
 
     def change_longitudinal_PID(self, args_longitudinal):
+        # [FUNCTION DOC]
+        # Updates the longitudinal PID parameters (requires K_P, K_I, K_D, dt).
         """Changes the parameters of the PIDLongitudinalController"""
         self._lon_controller.change_parameters(**args_longitudinal)
 
     def change_lateral_PID(self, args_lateral):
+        # [FUNCTION DOC]
+        # Updates the lateral PID parameters (requires K_P, K_I, K_D, dt).
         """Changes the parameters of the PIDLateralController"""
         self._lat_controller.change_parameters(**args_lateral)
 
     def set_offset(self, offset):
+        # [FUNCTION DOC]
+        # Sets the lateral offset.
         """Changes the offset"""
         self._lat_controller.set_offset(offset)
 
 
 class PIDLongitudinalController:
+    # [CLASS DOC]
+    # PID on speed error (km/h) with a 10-sample error buffer.
     """
     PIDLongitudinalController implements longitudinal control using a PID.
     """
 
     def __init__(self, vehicle, K_P=1.0, K_I=0.0, K_D=0.0, dt=0.03):
+        # [FUNCTION DOC]
+        # Stores the vehicle, gains (default K_P 1) and dt (default 0.03 s).
         """
         Constructor method.
 
@@ -140,6 +165,8 @@ class PIDLongitudinalController:
         self._error_buffer = deque(maxlen=10)
 
     def run_step(self, target_speed, debug=False):
+        # [FUNCTION DOC]
+        # Reads current speed (km/h), optionally prints it, and returns the PID output in [-1, 1].
         """
         Execute one step of longitudinal control to reach a given target speed.
 
@@ -155,6 +182,9 @@ class PIDLongitudinalController:
         return self._pid_control(target_speed, current_speed)
 
     def _pid_control(self, target_speed, current_speed):
+        # [FUNCTION DOC]
+        # HELPER: Appends the speed error; derivative and integral (sum of buffer * dt) are used once 2+
+        # samples exist. Returns the clipped weighted sum in [-1, 1].
         """
         Estimate the throttle/brake of the vehicle based on the PID equations
 
@@ -178,6 +208,8 @@ class PIDLongitudinalController:
         )
 
     def change_parameters(self, K_P, K_I, K_D, dt):
+        # [FUNCTION DOC]
+        # Replaces gains and dt.
         """Changes the PID parameters"""
         self._k_p = K_P
         self._k_i = K_I
@@ -186,11 +218,16 @@ class PIDLongitudinalController:
 
 
 class PIDLateralController:
+    # [CLASS DOC]
+    # PID on signed heading angle (radians) between the vehicle forward vector and the vector to the
+    # (optionally laterally offset) target waypoint, with a 10-sample buffer.
     """
     PIDLateralController implements lateral control using a PID.
     """
 
     def __init__(self, vehicle, offset=0, K_P=1.0, K_I=0.0, K_D=0.0, dt=0.03):
+        # [FUNCTION DOC]
+        # Stores the vehicle, offset, gains and dt.
         """
         Constructor method.
 
@@ -211,6 +248,8 @@ class PIDLateralController:
         self._e_buffer = deque(maxlen=10)
 
     def run_step(self, waypoint):
+        # [FUNCTION DOC]
+        # Returns steering in [-1, 1] (negative = left) toward the waypoint from the current transform.
         """
         Execute one step of lateral control to steer
         the vehicle towards a certain waypoin.
@@ -223,10 +262,16 @@ class PIDLateralController:
         return self._pid_control(waypoint, self._vehicle.get_transform())
 
     def set_offset(self, offset):
+        # [FUNCTION DOC]
+        # Sets the lateral offset.
         """Changes the offset"""
         self._offset = offset
 
     def _pid_control(self, waypoint, vehicle_transform):
+        # [FUNCTION DOC]
+        # HELPER: Computes the angle between forward and target vectors in the XY plane (sign from the cross
+        # product), then PID with derivative/integral once 2+ samples exist. Returns clipped value.
+        # KNOWN ISSUE: when either vector has zero length the error is set to 1 radian instead of 0.
         """
         Estimate the steering angle of the vehicle based on the PID equations
 
@@ -274,6 +319,8 @@ class PIDLateralController:
         )
 
     def change_parameters(self, K_P, K_I, K_D, dt):
+        # [FUNCTION DOC]
+        # Replaces gains and dt.
         """Changes the PID parameters"""
         self._k_p = K_P
         self._k_i = K_I

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Server-side Pelican SVG environment. Each episode is one task (animal + vehicle) and one scored
+# submission. Optionally builds a Hugging Face vision judge from environment variables. Rewards
+# come from the rubric tree applied to the scored observation. Also provides a web playground
+# renderer showing the prompt or the submitted SVG with its scores.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """The Pelican SVG environment.
@@ -28,6 +33,11 @@ from .vision_judge import DEFAULT_JUDGE_MODEL, HFVisionClient, VisionJudge
 
 
 def _judge_from_env() -> VisionJudge | None:
+    # [FUNCTION DOC]
+    # HELPER: Builds a VisionJudge from the environment, or returns None (offline mode).
+    # Returns None if PELICAN_SVG_DISABLE_JUDGE is "1"/"true"/"yes", or no token is found in HF_TOKEN,
+    # HUGGING_FACE_HUB_TOKEN or the huggingface_hub stored token. Model name from
+    # PELICAN_SVG_JUDGE_MODEL (default DEFAULT_JUDGE_MODEL). Reads the local token store as a side effect.
     """Build a judge from environment variables, or `None` to run offline.
 
     A missing token is not an error: the environment stays fully usable with
@@ -52,6 +62,10 @@ def _judge_from_env() -> VisionJudge | None:
 class PelicanSvgEnvironment(
     Environment[PelicanSvgAction, PelicanSvgObservation, PelicanSvgState]
 ):
+    # [CLASS DOC]
+    # Environment that samples or pins a drawing task on reset and scores one submission on step.
+    # Holds the judge (or None), pinned subject/vehicle, sampling flags, return_image flag, state,
+    # current task and the last extracted SVG. Supports concurrent sessions.
     """Scores SVG drawings of an animal riding a vehicle.
 
     Args:
@@ -104,6 +118,10 @@ class PelicanSvgEnvironment(
         enable_judge: bool = True,
         return_image: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Configures the judge (None when enable_judge is False; the given judge or one from the
+        # environment otherwise) and initialises the base Environment with a rubric whose weights depend on
+        # whether a judge exists. Stores task options; creates an empty state.
         if not enable_judge:
             self._judge = None
         else:
@@ -120,11 +138,15 @@ class PelicanSvgEnvironment(
 
     @property
     def state(self) -> PelicanSvgState:
+        # [FUNCTION DOC]
+        # Property: current PelicanSvgState.
         """[`PelicanSvgState`]: The current episode state."""
         return self._state
 
     @property
     def task(self) -> Task | None:
+        # [FUNCTION DOC]
+        # Property: current Task, or None before the first reset.
         """[`Task`] or `None`: The task sampled for this episode."""
         return self._task
 
@@ -135,6 +157,13 @@ class PelicanSvgEnvironment(
         vehicle: str | None = None,
         task_id: str | None = None,
     ) -> Task:
+        # [FUNCTION DOC]
+        # HELPER: Chooses the episode task. Priority: explicit task_id (looked up by id); else per-call or
+        # constructor subject/vehicle pins, filling a missing half from the canonical pelican/bicycle pair;
+        # else a random sample when sampling or held_out_only is on (returned directly); else the canonical
+        # pair. Raises ValueError when held_out_only is set and the result is the canonical task or
+        # for an unknown task_id, and KeyError for an unknown subject or vehicle name.
+        # KNOWN ISSUE: the reset docstring promises KeyError for an unknown task_id, but ValueError is raised.
         if task_id:
             task = task_from_ids([task_id])[0]
         else:
@@ -168,6 +197,10 @@ class PelicanSvgEnvironment(
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> PelicanSvgObservation:
+        # [FUNCTION DOC]
+        # Starts an episode: picks a task (seed and optional task_id/subject/vehicle kwargs), clears the
+        # stored SVG, creates a new state with the given episode_id (may be None) and returns the
+        # transformed observation with the prompt and task metadata, done False and reward None.
         """Sample a task and return its prompt.
 
         Args:
@@ -223,6 +256,10 @@ class PelicanSvgEnvironment(
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> PelicanSvgObservation:
+        # [FUNCTION DOC]
+        # Synchronous step: runs step_async in a new event loop and returns its observation.
+        # KNOWN ISSUE: uses a fresh event loop runner, so calling it from inside a running event loop
+        # raises RuntimeError.
         """Score a submission. Synchronous wrapper around [`step_async`]."""
         return asyncio.run(self.step_async(action, timeout_s=timeout_s, **kwargs))
 
@@ -232,6 +269,12 @@ class PelicanSvgEnvironment(
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> PelicanSvgObservation:
+        # [FUNCTION DOC]
+        # Scores the submission: runs the full evaluation (deterministic layers in a worker thread, then
+        # the judge if configured and the gate passed), increments step_count, marks submitted, stores the
+        # SVG, builds a done observation, sets its reward from the rubric (awaited), applies the transform
+        # and returns it. timeout_s is unused. Raises RuntimeError if reset was not called. Further steps
+        # are not blocked and re-score against the same task.
         """Score a submission and end the episode.
 
         Args:
@@ -262,6 +305,10 @@ class PelicanSvgEnvironment(
         return self._apply_transform(observation)
 
     def render_web(self, observation: dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns None without a prompt; on reset (empty breakdown) an HTML box with
+        # the escaped prompt; after a step a box with the stored SVG as a base64 image, reward, gate,
+        # structure and judge lines, judge checklist marks and the feedback text.
         """Draw the task on reset, then the submitted SVG next to its scores."""
         if "prompt" not in observation:
             return None
@@ -308,6 +355,10 @@ class PelicanSvgEnvironment(
         )
 
     def _to_observation(self, evaluation: Evaluation) -> PelicanSvgObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds the done observation from an Evaluation: task fields, feedback, gate flag,
+        # structure and semantic scores, judged flag, violation codes, full breakdown mapping and the
+        # base64 PNG when return_image is enabled and a raster exists. Reward is left unset.
         task = evaluation.task
         image: str | None = None
         if self._return_image and evaluation.gate.png is not None:

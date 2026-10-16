@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Server-side OpenEnv Environment wrapping FinRL's StockTradingEnv (gym-style
+# reset/step) and converting its outputs into FinRLObservation objects.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +34,11 @@ except ImportError as e:
 
 
 def _json_safe(value: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively converts a value into JSON-serializable Python types:
+    # primitives pass through; dicts get string keys; lists/tuples/sets become lists;
+    # numpy arrays/scalars use tolist()/item(); other objects try tolist() then item()
+    # (swallowing exceptions), finally falling back to str(value).
     """Convert library-specific values into JSON-serializable Python types."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -61,6 +69,10 @@ def _json_safe(value: Any) -> Any:
 
 
 class FinRLEnvironment(Environment):
+    # [CLASS DOC]
+    # Environment adapter holding the FinRL env class plus its constructor config;
+    # a fresh FinRL env instance is created on each reset. Tracks episode id and
+    # step count in a State.
     """
     A FinRL stock trading environment wrapper for OpenEnv.
 
@@ -98,6 +110,10 @@ class FinRLEnvironment(Environment):
     """
 
     def __init__(self, finrl_env_class, finrl_env_config: dict):
+        # [FUNCTION DOC]
+        # Stores the FinRL class and config, sets the inner env to None and creates an
+        # initial State with a new UUID episode id and step_count 0. No FinRL instance
+        # is created yet.
         """
         Initialize the FinRL environment wrapper.
 
@@ -113,6 +129,12 @@ class FinRLEnvironment(Environment):
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
     def reset(self) -> FinRLObservation:
+        # [FUNCTION DOC]
+        # Instantiates a new FinRL env from the config, calls its reset (expects a
+        # (state, info) tuple), starts a new State with a fresh UUID, and returns an
+        # observation with the state vector as a list, computed portfolio value, current
+        # date (or ""), done False and reward 0.0.
+        # Side effects: replaces the inner env and State.
         """
         Reset the environment to start a new episode.
 
@@ -143,6 +165,15 @@ class FinRLEnvironment(Environment):
         )
 
     def step(self, action: FinRLAction) -> FinRLObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Validates that the action list length equals config "action_space" (default
+        # 1), steps the FinRL env with the actions as a numpy array (expects a 5-tuple
+        # state, reward, terminal, truncated, info), increments step_count, and returns
+        # an observation with state list, portfolio value, date, done = terminal or
+        # truncated, reward as float, and info converted via the JSON-safe helper as
+        # metadata.
+        # Raises: RuntimeError if reset() was never called; ValueError on dimension
+        # mismatch.
         """
         Execute a trading action in the environment.
 
@@ -197,6 +228,8 @@ class FinRLEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State (episode_id, step_count).
         """
         Get the current environment state metadata.
 
@@ -206,6 +239,10 @@ class FinRLEnvironment(Environment):
         return self._state
 
     def _calculate_portfolio_value(self, state) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Computes portfolio value from a FinRL state vector laid out as
+        # [balance, prices x stock_dim, holdings x stock_dim, ...]: balance plus the sum
+        # of price*holding. Returns 0.0 if no inner env exists. Returns a float.
         """
         Calculate total portfolio value from state.
 
@@ -238,6 +275,9 @@ class FinRLEnvironment(Environment):
         return float(portfolio_value)
 
     def _get_current_date(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the inner env's current date by calling its private
+        # _get_date() as a string; returns "" if no env exists or on any exception.
         """
         Get the current trading date from FinRL environment.
 

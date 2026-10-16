@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER: Client-side, server-independent access to the Snowflake/AgentWorldModel-1K Hugging Face dataset.
+# Downloads (once) the code-verifier JSONL file into a cache directory and builds a lazily initialised, thread-safe
+# in-memory index from normalised scenario name to its verifier entries. Exposes lookups for a task's verifier code
+# and iteration over tasks that have verifiers.
+# Side effects: network download via huggingface_hub, filesystem writes to the cache dir, module-level cached index.
 """Client-side access to the AgentWorldModel-1K dataset.
 
 The verifier-informed expert needs each task's Python verifier source. This module
@@ -27,10 +33,15 @@ _verifier_index: dict[str, list[dict]] | None = None
 
 
 def _cache_dir() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the cache directory: the AWM_DATA_DIR environment variable or ~/.cache/openenv/awm.
     return os.environ.get("AWM_DATA_DIR", os.path.expanduser("~/.cache/openenv/awm"))
 
 
 def normalize_scenario_name(scenario: str) -> str:
+    # [FUNCTION DOC]
+    # Lowercases a scenario name, replaces non [a-z0-9_] characters with underscores, collapses repeated underscores and
+    # strips leading/trailing underscores. Returns the normalised name.
     """Normalise a scenario name the same way the env server does."""
     s = scenario.lower()
     s = re.sub(r"[^a-z0-9_]", "_", s)
@@ -39,6 +50,9 @@ def normalize_scenario_name(scenario: str) -> str:
 
 
 def _ensure_file(filename: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the local path of a dataset file in the cache dir, downloading it from the Hub (creating the directory) if missing.
+    # Raises huggingface_hub errors on download failure.
     path = os.path.join(_cache_dir(), filename)
     if not os.path.exists(path):
         os.makedirs(_cache_dir(), exist_ok=True)
@@ -52,11 +66,16 @@ def _ensure_file(filename: str) -> str:
 
 
 def _load_jsonl(path: str) -> list[dict]:
+    # [FUNCTION DOC]
+    # HELPER: Reads a JSONL file and returns a list of parsed objects, skipping blank lines.
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
 def _verifiers() -> dict[str, list[dict]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the global verifier index (normalised scenario -> list of entries), building it on first use with
+    # double-checked locking. Side effects: may download the dataset file; sets the module-level index.
     global _verifier_index
     if _verifier_index is None:
         with _lock:
@@ -70,6 +89,9 @@ def _verifiers() -> dict[str, list[dict]]:
 
 
 def get_verifier_code(scenario: str, task_idx: int) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the verifier entry's code string for the given scenario and task index (empty string if the entry lacks
+    # code), or None if no entry for that task exists.
     """Return the Python ``code`` verifier for a task, or `None` if absent."""
     for entry in _verifiers().get(normalize_scenario_name(scenario), []):
         if entry.get("task_idx") == task_idx:
@@ -78,6 +100,9 @@ def get_verifier_code(scenario: str, task_idx: int) -> str | None:
 
 
 def iter_verifier_tasks(scenario_prefixes: tuple[str, ...] | None = None):
+    # [FUNCTION DOC]
+    # Generator yielding (normalised scenario, task_idx) pairs for every verifier entry having a task index, optionally
+    # restricted to scenarios whose name starts with any of the given prefixes.
     """Yield `(scenario, task_idx)` for every task that has a code verifier.
 
     Args:
@@ -95,5 +120,7 @@ def iter_verifier_tasks(scenario_prefixes: tuple[str, ...] | None = None):
 
 
 def list_scenarios() -> list[str]:
+    # [FUNCTION DOC]
+    # Returns the sorted list of normalised scenario names present in the verifier index.
     """Return the sorted scenario names that have at least one code verifier."""
     return sorted(_verifiers().keys())

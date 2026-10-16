@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Custom Gradio playground for the Jupyter environment: controls for reset (with
+# setup/verify shell commands), closing the session, running/editing code
+# cells, running shell commands and fetching the notebook summary, plus a live
+# HTML notebook view rendered from environment state. Defines example snippets,
+# default setup/verify commands and dark-theme CSS.
 """
 Custom Gradio UI for the Jupyter Agent environment.
 
@@ -93,14 +99,24 @@ _EMPTY_NB = (
 
 
 def _e(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Escapes &, < and > for HTML text content (quotes are not escaped).
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _lines(value: str) -> List[str]:
+    # [FUNCTION DOC]
+    # HELPER: Splits text into stripped, non-empty lines.
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
 def render_notebook_html(cells: List[Dict[str, Any]]) -> str:
+    # [FUNCTION DOC]
+    # Renders a list of cell dicts as HTML: the style block plus one block per cell
+    # with a colored left border (blue for shell, green for success, red for error),
+    # an "In [n]:" / "Shell [n]:" prompt (with a cross for failed code), the escaped
+    # code, and an output area with escaped output, escaped error and inline PNG
+    # images. Returns the empty-notebook placeholder if there are no cells.
     if not cells:
         return _STYLE + _EMPTY_NB
 
@@ -141,6 +157,8 @@ def render_notebook_html(cells: List[Dict[str, Any]]) -> str:
 
 
 def _closed_notebook_html() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the style block plus a "Session closed" placeholder message.
     return (
         _STYLE
         + "<div style='color:#8b949e;font-style:italic;padding:20px;text-align:center;"
@@ -161,11 +179,25 @@ def jupyter_ui_builder(
     title: str,
     quick_start_md: Optional[str],
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Gradio builder hook called by the web interface. Builds and returns a Blocks
+    # app whose handlers act through web_manager: reset with setup/verify command
+    # lists, close the env in a thread pool, step with the
+    # add_and_execute_code_cell, edit_and_execute_current_cell,
+    # execute_shell_command and get_notebook_state MCP tools, and refresh the
+    # notebook HTML, a summarized state JSON and a status line after each action.
+    # action_fields, metadata, is_chat_env and quick_start_md are unused.
 
     def _cells_from_state() -> List[Dict]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the "cells" list from the web manager's current state.
         return web_manager.get_state().get("cells", [])
 
     def _state_summary() -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Returns a compact dict of the current state: episode id, step count,
+        # sandbox id, last cell success, cell count, number of setup results and verify
+        # commands, last reward.
         s = web_manager.get_state()
         return {
             "episode_id": s.get("episode_id"),
@@ -278,6 +310,11 @@ def jupyter_ui_builder(
         # ── Event handlers ────────────────────────────────────────────────────
 
         async def on_reset(setup_text: str, verify_text: str):
+            # [FUNCTION DOC]
+            # Resets the environment with setup/verify command lists parsed from the text
+            # boxes. Returns (notebook HTML, state summary, status); status is the error or
+            # message from metadata if the reset reported done, otherwise a success line
+            # with command counts.
             result = await web_manager.reset_environment(
                 {
                     "setup": _lines(setup_text),
@@ -305,6 +342,9 @@ def jupyter_ui_builder(
             )
 
         async def on_close():
+            # [FUNCTION DOC]
+            # Closes the environment (releasing the sandbox) via the web manager's thread
+            # pool and returns the closed placeholder, an empty state and a status message.
             await web_manager._run_sync_in_thread_pool(web_manager.env.close)
             return (
                 _closed_notebook_html(),
@@ -313,6 +353,10 @@ def jupyter_ui_builder(
             )
 
         async def on_run_code(code: str):
+            # [FUNCTION DOC]
+            # Runs the code through add_and_execute_code_cell and returns (notebook HTML,
+            # state summary, status based on the last cell's success). Empty code returns
+            # no-op updates and a warning.
             if not code.strip():
                 return gr.update(), gr.update(), "⚠ No code to run."
             action = {
@@ -326,6 +370,9 @@ def jupyter_ui_builder(
             return render_notebook_html(cells), _state_summary(), status
 
         async def on_edit_run(code: str):
+            # [FUNCTION DOC]
+            # Like the run handler but uses edit_and_execute_current_cell to replace the
+            # last cell.
             if not code.strip():
                 return gr.update(), gr.update(), "⚠ No code to run."
             action = {
@@ -343,6 +390,9 @@ def jupyter_ui_builder(
             return render_notebook_html(cells), _state_summary(), status
 
         async def on_shell(command: str):
+            # [FUNCTION DOC]
+            # Runs a shell command through execute_shell_command and returns the refreshed
+            # notebook, state summary and a status line. Empty input returns a warning.
             if not command.strip():
                 return gr.update(), gr.update(), "⚠ No command to run."
             action = {
@@ -354,6 +404,10 @@ def jupyter_ui_builder(
             return render_notebook_html(cells), _state_summary(), f"✓ Shell: {command}"
 
         async def on_get_state():
+            # [FUNCTION DOC]
+            # Calls get_notebook_state and extracts the summary text from the MCP result
+            # (first content item's text, else the result's "data"). Returns (summary or
+            # "(no state yet)", status).
             action = {"tool_name": "get_notebook_state", "arguments": {}}
             result = await web_manager.step_environment(action)
             # Extract text from MCP result
@@ -370,11 +424,15 @@ def jupyter_ui_builder(
             return summary or "(no state yet)", "📋 Notebook state retrieved."
 
         def on_code_example(choice: str):
+            # [FUNCTION DOC]
+            # Returns the selected code example's text, or a no-op update.
             if choice and choice in CODE_EXAMPLES:
                 return CODE_EXAMPLES[choice]
             return gr.update()
 
         def on_shell_example(choice: str):
+            # [FUNCTION DOC]
+            # Returns the selected shell example's text, or a no-op update.
             if choice and choice in SHELL_EXAMPLES:
                 return SHELL_EXAMPLES[choice]
             return gr.update()

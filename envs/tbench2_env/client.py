@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the TB2 environment server: serialises Tbench2Action and parses observation/state payloads.
+# Supports in-repo and standalone imports.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -27,9 +30,14 @@ except ImportError:
 
 
 class Tbench2Env(EnvClient[Tbench2Action, Tbench2Observation, Tbench2State]):
+    # [CLASS DOC]
+    # EnvClient for TB2; implements only the serialisation hooks.
     """HTTP client for the TB2 environment."""
 
     def _step_payload(self, action: Tbench2Action) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a mapping with all action fields: action_type, command, session_id, block, wait_seconds,
+        # file_path, content.
         return {
             "action_type": action.action_type,
             "command": action.command,
@@ -41,6 +49,10 @@ class Tbench2Env(EnvClient[Tbench2Action, Tbench2Observation, Tbench2State]):
         }
 
     def _parse_result(self, payload: dict[str, Any]) -> StepResult[Tbench2Observation]:
+        # [FUNCTION DOC]
+        # Builds a Tbench2Observation from the payload's "observation" sub-mapping with defaults (success True,
+        # empty strings, empty info), reward/done from the envelope, metadata from envelope or observation.
+        # Returns: StepResult with observation, reward, done (default False) and envelope metadata.
         obs_data = payload.get("observation", {})
         observation = Tbench2Observation(
             instruction=obs_data.get("instruction", ""),
@@ -64,6 +76,9 @@ class Tbench2Env(EnvClient[Tbench2Action, Tbench2Observation, Tbench2State]):
         )
 
     def _parse_state(self, payload: dict[str, Any]) -> Tbench2State:
+        # [FUNCTION DOC]
+        # Returns a Tbench2State from the payload with defaults.
+        # KNOWN ISSUE: the server state's session_id field is not copied into the parsed state.
         return Tbench2State(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),

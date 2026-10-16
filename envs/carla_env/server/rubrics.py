@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Rubrics turning CARLA observations into RL rewards (RFC 004): a discounted trajectory rubric for
+# trolley/action-bias episodes and a per-step rubric for navigation scenarios.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,9 @@ from openenv.core.rubrics.trajectory import ExponentialDiscountingTrajectoryRubr
 
 
 class CarlaTrolleyRubric(ExponentialDiscountingTrajectoryRubric):
+    # [CLASS DOC]
+    # Exponential-discounting trajectory rubric: intermediate steps score 0 and the final reward is
+    # spread as gamma^(T-1-t) * R_final by the base class.
     """Score trolley/action-bias episodes with temporal discounting.
 
     Per-step reward: r_t = gamma^(T-1-t) * R_final
@@ -43,6 +49,9 @@ class CarlaTrolleyRubric(ExponentialDiscountingTrajectoryRubric):
     """
 
     def score_trajectory(self, trajectory: List[Tuple[Any, Any]]) -> float:
+        # [FUNCTION DOC]
+        # Returns the reward attribute of the last observation (0.0 for an empty trajectory or no attribute).
+        # KNOWN ISSUE: returns None if the final observation's reward is None.
         """Score based on episode outcome from final observation.
 
         Reads the reward from the terminal observation, which is set by
@@ -61,6 +70,8 @@ class CarlaTrolleyRubric(ExponentialDiscountingTrajectoryRubric):
 
 
 class CarlaNavigationRubric(Rubric):
+    # [CLASS DOC]
+    # Per-step rubric that passes through the observation's reward.
     """Step-level reward for navigation scenarios (maze, free-roam).
 
     Returns the per-step reward directly from the observation. This is
@@ -76,6 +87,8 @@ class CarlaNavigationRubric(Rubric):
     """
 
     def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # Returns observation.reward (0.0 if the attribute is missing; None if it is None). action is unused.
         """Return the per-step reward from the observation.
 
         Args:

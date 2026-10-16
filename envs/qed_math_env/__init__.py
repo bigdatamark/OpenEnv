@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Package entry for the QED Math environment (LLM-graded proof submission). Re-exports the MCP
+# client and the action/observation models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

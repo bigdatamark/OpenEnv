@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# FastAPI app for the SUMO-RL server. At import time reads configuration from env vars (SUMO_NET_FILE,
+# SUMO_ROUTE_FILE, SUMO_NUM_SECONDS, SUMO_DELTA_TIME, SUMO_YELLOW_TIME, SUMO_MIN_GREEN, SUMO_MAX_GREEN,
+# SUMO_REWARD_FN, SUMO_SEED; integer ones are parsed with int and raise ValueError if malformed) and
+# builds the module-level "app" with a per-session environment factory. Relative-import failures fall
+# back to standalone imports; other ImportErrors are re-raised.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,6 +47,8 @@ sumo_seed = int(os.getenv("SUMO_SEED", "42"))
 
 # Factory function to create SumoEnvironment instances
 def create_sumo_environment():
+    # [FUNCTION DOC]
+    # Factory returning a new SumoEnvironment configured from the module-level env-var settings.
     """Factory function that creates SumoEnvironment with config."""
     return SumoEnvironment(
         net_file=net_file,
@@ -63,6 +71,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Serves the app with uvicorn on 0.0.0.0:8000; blocks.
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

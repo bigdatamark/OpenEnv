@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pydantic models and frozen dataclasses for runtime validation: the data-only runtime plan
+# (reset inputs and actions), a launch specification for providers, and the raw evidence records
+# produced by the collector. Also loads and validates the plan JSON sidecar from a package.
+# Limits: plan size 64 KiB, at most 100 actions, JSON depth 32, at most 10,000 JSON nodes.
+
 """Versioned runtime inputs and execution evidence, independent of a provider."""
 
 import json
@@ -25,10 +31,18 @@ MAX_JSON_NODES = 10_000
 
 
 class RuntimePlanError(ValueError):
+    # [CLASS DOC]
+    # ValueError raised when a runtime plan cannot be read safely or fails validation.
     """A public runtime plan cannot be read safely or violates its data contract."""
 
 
 def _check_json(value: Any, *, depth: int = 0, budget: list[int] | None = None) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Recursively verifies a value is pure JSON data: None, bool, int, finite float, str,
+    # dict with str keys, or list (exact types, no subclasses). Decrements a shared node budget
+    # (a single-element list, defaulting to 10,000) per node.
+    # Raises ValueError for non-JSON types, non-string keys, non-finite floats, budget exhaustion, or
+    # depth over 32. Returns None.
     """Reject executable objects, non-finite numbers and excessive nesting."""
     if budget is None:
         budget = [MAX_JSON_NODES]
@@ -56,6 +70,9 @@ def _check_json(value: Any, *, depth: int = 0, budget: list[int] | None = None) 
 
 
 class RuntimeReset(BaseModel):
+    # [CLASS DOC]
+    # Strict, frozen, extra-forbidding model for reset inputs: episode_id (1-128 chars), seed
+    # (0..2^32-1), options (dict of extra JSON reset args).
     """
     Explicit reset inputs for one measured episode.
 
@@ -77,6 +94,9 @@ class RuntimeReset(BaseModel):
     @field_validator("options")
     @classmethod
     def _public_options(cls, value: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Validator for options: raises ValueError if it contains episode_id or seed keys, checks
+        # it is pure JSON, and returns it unchanged.
         if {"episode_id", "seed"} & value.keys():
             raise ValueError("reset options cannot override episode_id or seed")
         _check_json(value)
@@ -84,6 +104,9 @@ class RuntimeReset(BaseModel):
 
 
 class RuntimePlan(BaseModel):
+    # [CLASS DOC]
+    # Strict, frozen, extra-forbidding model: plan_schema_version must be "1", reset (RuntimeReset),
+    # actions (list of 1..100 dicts).
     """
     Bounded, data-only runtime inputs. Capability declarations stay in the manifest.
 
@@ -105,11 +128,15 @@ class RuntimePlan(BaseModel):
     @field_validator("actions")
     @classmethod
     def _data_actions(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Validator ensuring actions are pure JSON; returns them unchanged.
         _check_json(value)
         return value
 
     @model_validator(mode="after")
     def _total_size(self) -> "RuntimePlan":
+        # [FUNCTION DOC]
+        # HELPER: After-validator raising ValueError if the model's JSON serialization exceeds 64 KiB; returns self.
         size = len(self.model_dump_json().encode("utf-8"))
         if size > MAX_PLAN_BYTES:
             raise ValueError(f"runtime plan exceeds {MAX_PLAN_BYTES} bytes")
@@ -117,6 +144,8 @@ class RuntimePlan(BaseModel):
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: JSON object_pairs_hook that builds a dict, raising ValueError on duplicate keys.
     result = {}
     for key, value in pairs:
         if key in result:
@@ -126,6 +155,15 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def load_runtime_plan(root: Path, execution: ExecutionDeclaration) -> RuntimePlan:
+    # [FUNCTION DOC]
+    # Reads <root>/<execution.probe_path>, requiring it to resolve to a regular file inside the
+    # resolved root; reads at most 64 KiB + 1 bytes and rejects oversize; parses JSON with duplicate-key
+    # rejection, checks pure JSON, and validates into RuntimePlan.
+    # Returns the RuntimePlan.
+    # Raises RuntimePlanError: for pydantic validation errors (message lists up to 5 errors with
+    # locations where unknown field names are replaced by "<field>", error type and message, plus a total
+    # count), JSON decode errors (line/column), Unicode errors, OS errors (type name only), and other
+    # ValueError/RecursionError. Side effects: filesystem reads.
     """
     Read a bounded runtime plan without importing any subject code.
 
@@ -187,6 +225,10 @@ def load_runtime_plan(root: Path, execution: ExecutionDeclaration) -> RuntimePla
 
 
 class LaunchSpec(BaseModel):
+    # [CLASS DOC]
+    # Frozen, extra-forbidding model describing a validation-only container launch: image_ref (image
+    # id or digest matching sha256 pattern), resources, network policy, run_id (lowercase DNS-like
+    # label up to 63 chars), startup_timeout_s (0 < x <= 300, default 30), env_vars (at most 64).
     """
     Explicit validation-only launch request; no caller environment is inherited.
 
@@ -217,6 +259,9 @@ class LaunchSpec(BaseModel):
     @field_validator("env_vars")
     @classmethod
     def _explicit_environment(cls, value: dict[str, str]) -> dict[str, str]:
+        # [FUNCTION DOC]
+        # HELPER: Validator: each env var name must be a valid identifier-like name; values must not
+        # contain NUL or exceed 8192 UTF-8 bytes. Raises ValueError otherwise; returns the mapping.
         for name, content in value.items():
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
                 raise ValueError("invalid environment variable name")
@@ -227,6 +272,8 @@ class LaunchSpec(BaseModel):
     @field_validator("resources")
     @classmethod
     def _finite_resources(cls, value: ResourceDeclaration) -> ResourceDeclaration:
+        # [FUNCTION DOC]
+        # HELPER: Validator raising ValueError if resources.cpu or resources.episode_timeout_s is not finite.
         if not math.isfinite(value.cpu) or not math.isfinite(value.episode_timeout_s):
             raise ValueError("runtime resource limits must be finite")
         return value
@@ -234,6 +281,9 @@ class LaunchSpec(BaseModel):
 
 @dataclass(frozen=True)
 class WireExchange:
+    # [CLASS DOC]
+    # Frozen dataclass recording one raw exchange: operation (reset/step/state), request_json and
+    # response_json as the original serialized strings.
     """
     One immutable raw exchange, captured before client defaults or type coercion.
 
@@ -253,6 +303,9 @@ class WireExchange:
 
 @dataclass(frozen=True)
 class RuntimeEvidence:
+    # [CLASS DOC]
+    # Frozen dataclass holding collector output: tuple of exchanges, step observation schema JSON,
+    # optional failure phase and reason, and optional reset observation schema JSON. All default empty/None.
     """
     Collector evidence shared by graders without permitting mutation of the episode.
 

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# End-to-end CLI tests for "openenv catalog build" and "openenv discover".
 # SPDX-License-Identifier: BSD-3-Clause
 
 import json
@@ -13,6 +15,12 @@ from typer.testing import CliRunner
 def test_catalog_build_then_discover_is_a_read_only_metadata_workflow(
     tmp_path: Path, newline: str
 ):
+    # [FUNCTION DOC]
+    # Parametrized over README newline styles: creates a git repo in tmp_path
+    # (via git subprocesses) with an echo_env whose __init__ raises if imported,
+    # builds a catalog with the CLI, then discovers it with --json and checks the
+    # source path, unknown licence, front-matter tags and metadataOnly flag.
+    # Side effects: filesystem writes and git subprocess calls.
     repository = tmp_path / "repository"
     environment = repository / "envs" / "echo_env"
     environment.mkdir(parents=True)
@@ -93,6 +101,8 @@ def test_catalog_build_then_discover_is_a_read_only_metadata_workflow(
 
 
 def test_discover_reports_bad_input_instead_of_empty_success(tmp_path: Path):
+    # [FUNCTION DOC]
+    # discover on an invalid catalog exits 1 with a catalog error, not empty results.
     source = tmp_path / "bad.json"
     source.write_text('{"entries":[{"identifier":"urn:air:example.org:openenv:echo"}]}')
     result = CliRunner().invoke(

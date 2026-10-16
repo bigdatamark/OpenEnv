@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic action/observation models for the Calendar MCP environment: a generic MCPAction wrapper (list tools or
+# call a tool), internal ListToolsAction/ToolCallAction types, MCPObservation, and Calendar-named aliases.
+# The import fallback is a no-op (both branches import the same module).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,6 +27,9 @@ except ImportError:
 
 
 class MCPAction(Action):
+    # [CLASS DOC]
+    # Wrapper action: action_type is "ListToolsAction" or "ToolCallAction" (required); tool_name (required in practice
+    # for tool calls, not validated) and arguments dict (default empty).
     """
     Generic wrapper action for MCP tool access.
 
@@ -43,12 +50,16 @@ class MCPAction(Action):
 
 
 class ListToolsAction(Action):
+    # [CLASS DOC]
+    # Internal action requesting the tool list; no fields.
     """Internal action type for listing tools."""
 
     pass
 
 
 class ToolCallAction(Action):
+    # [CLASS DOC]
+    # Internal action calling tool_name with an arguments dict.
     """Internal action type for calling a tool."""
 
     tool_name: str = Field(..., description="Name of the tool to call")
@@ -58,6 +69,9 @@ class ToolCallAction(Action):
 
 
 class MCPObservation(Observation):
+    # [CLASS DOC]
+    # Observation with success flag (default True), optional error_message, tools_list (for list requests), tool_result
+    # dict (for tool calls), metadata dict, done (default False) and optional reward.
     """
     Observation returned by the MCP environment.
 
@@ -83,12 +97,16 @@ class MCPObservation(Observation):
 
 
 class CalendarAction(MCPAction):
+    # [CLASS DOC]
+    # Calendar-specific alias of MCPAction (no additions).
     """Action type for the Calendar environment."""
 
     pass
 
 
 class CalendarObservation(MCPObservation):
+    # [CLASS DOC]
+    # Calendar-specific alias of MCPObservation (no additions).
     """Observation type for the Calendar environment."""
 
     pass

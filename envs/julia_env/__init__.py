@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Julia environment package: executes agent-written Julia code plus optional
+# Julia unit tests and rewards based on compilation and test results.
+# Re-exports JuliaEnv, JuliaAction, JuliaObservation and JuliaState.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

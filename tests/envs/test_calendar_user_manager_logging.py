@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests that calendar_env's UserManager never logs raw access tokens: it logs
+# a short sha256 fingerprint and only the exception type. The module is loaded
+# directly from its file path. Module constants locate the repo, the calendar
+# server dir and user_manager.py.
 """Tests that calendar_env UserManager does not leak access tokens to logs."""
 
 import hashlib
@@ -15,6 +20,10 @@ USER_MANAGER_PATH = CALENDAR_SERVER / "database" / "managers" / "user_manager.py
 
 
 def _load_user_manager_module():
+    # [FUNCTION DOC]
+    # HELPER: adds the calendar server dir to sys.path (if absent) and executes
+    # user_manager.py as module "calendar_env_user_manager"; returns the module.
+    # Raises whatever the module import raises.
     """Import user_manager.py directly"""
     # Make `from database.x import ...` inside user_manager.py resolve.
     server_path = str(CALENDAR_SERVER)
@@ -31,6 +40,9 @@ def _load_user_manager_module():
 
 @pytest.fixture(scope="module")
 def user_manager_module():
+    # [FUNCTION DOC]
+    # Module fixture: skips if the file is missing or fails to import; otherwise
+    # returns the loaded module.
     if not USER_MANAGER_PATH.exists():
         pytest.skip("calendar_env user_manager.py not present in this checkout")
     try:
@@ -40,6 +52,8 @@ def user_manager_module():
 
 
 def test_token_fingerprint_is_deterministic_short_sha256(user_manager_module):
+    # [FUNCTION DOC]
+    # _token_fingerprint returns the first 8 hex chars of sha256(token).
     """Fingerprint must be the first 8 chars of sha256(token), no exceptions."""
     token = "ya29.A0ARrdaM-k9Vq7GzY2pL4mQf8sN1xT0bR3uHcJWv5yKzP6eF2"
     expected = hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
@@ -52,6 +66,8 @@ def test_token_fingerprint_is_deterministic_short_sha256(user_manager_module):
 
 
 def test_token_fingerprint_handles_empty(user_manager_module):
+    # [FUNCTION DOC]
+    # Empty string and None give "<empty>".
     assert user_manager_module._token_fingerprint("") == "<empty>"
     assert user_manager_module._token_fingerprint(None) == "<empty>"
 
@@ -59,6 +75,10 @@ def test_token_fingerprint_handles_empty(user_manager_module):
 def test_get_user_by_access_token_does_not_log_token(
     user_manager_module, monkeypatch, caplog
 ):
+    # [FUNCTION DOC]
+    # With get_session patched to a session whose query raises, the error is
+    # re-raised, the log contains the fingerprint but not the token, and the
+    # session is closed once.
     """When the DB session raises, the raw token must not appear in logs."""
     UserManager = user_manager_module.UserManager
     token = "ya29.A0ARrdaM-SECRET-TOKEN-VALUE-do-not-leak"
@@ -86,6 +106,9 @@ def test_get_user_by_access_token_does_not_log_token(
 def test_get_user_by_access_token_does_not_leak_token_via_exception_str(
     user_manager_module, monkeypatch, caplog
 ):
+    # [FUNCTION DOC]
+    # An exception whose str contains the token and SQL parameters is logged by
+    # type name only (fingerprint present, token and parameter dump absent).
     """The token must not leak via str(exc) either.
 
     SQLAlchemy StatementError / DBAPIError include the bound parameters dict
@@ -99,7 +122,11 @@ def test_get_user_by_access_token_does_not_leak_token_via_exception_str(
     token = "ya29.A0ARrdaM-SECRET-INSIDE-EXC-STR"
 
     class FakeStatementError(Exception):
+        # [CLASS DOC]
+        # Exception imitating SQLAlchemy errors that embed bound parameters in str.
         def __str__(self) -> str:
+            # [FUNCTION DOC]
+            # Returns an SQL error message including the token as a bound parameter.
             return (
                 "(sqlite3.OperationalError) no such column "
                 "[SQL: SELECT users.* FROM users WHERE users.static_token = ?] "
@@ -132,6 +159,8 @@ def test_get_user_by_access_token_does_not_leak_token_via_exception_str(
 def test_get_user_by_access_token_propagates_original_exception(
     user_manager_module, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # The original ValueError propagates unchanged.
     """Sanity: redacting the log line must not swallow the underlying error."""
     UserManager = user_manager_module.UserManager
 

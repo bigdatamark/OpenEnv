@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic Action, Observation and State models for the TB2 environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -21,6 +23,10 @@ except ImportError:
 
 
 class Tbench2Action(Action):
+    # [CLASS DOC]
+    # Action for a TB2 task session: action_type (default "exec"; others are interpreted by the server, e.g.
+    # write, view, wait, kill, write_file, evaluate, close), shell command, optional terminal session id,
+    # whether to block, optional wait seconds, a file path and file content.
     """Action for interacting with a TB2 task session."""
 
     action_type: str = Field(default="exec")
@@ -33,6 +39,9 @@ class Tbench2Action(Action):
 
 
 class Tbench2Observation(Observation):
+    # [CLASS DOC]
+    # Observation with the task instruction, action output, success flag, error text, task id/path, terminal
+    # session id, the action type handled and an info mapping (e.g. evaluation details).
     """Observation returned from the TB2 environment."""
 
     instruction: str = Field(default="")
@@ -47,6 +56,9 @@ class Tbench2Observation(Observation):
 
 
 class Tbench2State(State):
+    # [CLASS DOC]
+    # State with task id/path, terminal session id, whether a terminal is ready, and the last action type,
+    # command and output.
     """Server-side state for a TB2 task."""
 
     task_id: str = Field(default="")

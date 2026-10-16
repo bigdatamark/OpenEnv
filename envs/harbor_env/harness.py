@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Client-side "loop-owning" session adapter for a deployed harbor_env server,
+# implementing the core harness ResourceSession/ResourceSessionFactory
+# interfaces. A factory maps a prompt to a task (via a hash of the instruction
+# text), and each session runs one complete rollout on the server in a single
+# blocking call, then exposes the reward and captured per-turn token traces
+# for a trainer. Also provides a diagnostic measuring how well a local chat
+# template re-render reproduces the engine's prompt tokens.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -51,6 +59,9 @@ logger = logging.getLogger(__name__)
 
 
 def instruction_id(instruction: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the SHA-1 hex digest of the whitespace-stripped instruction text, used
+    # as a stable task key.
     """Stable id for a task, from its instruction text.
 
     TRL's loop-owning path forwards only `prompt` to the factory — extra dataset columns never arrive,
@@ -62,6 +73,12 @@ def instruction_id(instruction: str) -> str:
 
 
 def _decoded_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a copy of a chat message list where each tool call's
+    # "arguments" (either under "function" or at the call's top level) is parsed
+    # from a JSON string into a mapping. Messages without tool calls, non-string
+    # arguments and non-JSON strings are passed through unchanged. Empty string is
+    # parsed as an empty mapping. Input is not mutated.
     """Tool-call `arguments` as a mapping rather than a JSON string, for chat-template rendering.
 
     The wire format keeps `arguments` as a string, which is what the OpenAI schema specifies. XML-style
@@ -106,6 +123,15 @@ def _decoded_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def measure_prompt_skew(
     result: HarborRolloutResult, tokenizer, **template_kwargs
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # For each non-discarded turn of a rollout result that has engine prompt token
+    # ids and request messages, re-renders the request messages (tool-call
+    # arguments decoded) and tools with the tokenizer's chat template (generation
+    # prompt added, tokenized, extra kwargs forwarded) and compares with the
+    # engine's prompt ids.
+    # Returns: dict with turns (count compared), exact_match_frac (0.0 if none),
+    # worst_common_prefix (minimum shared-prefix length, 0 if none) and
+    # length_deltas (rendered length minus engine length per turn).
     """How exactly a local re-render reproduces the engine's own prompt, per turn.
 
     The number nobody has by default. TRL re-renders prompts because `TraceEntry` carries no prompt
@@ -154,6 +180,11 @@ def measure_prompt_skew(
 
 
 class HarborSession(ResourceSession):
+    # [CLASS DOC]
+    # One server-run Harbor rollout. Holds the client, task coordinates, harness,
+    # sandbox, engine parameters, limits and optional normalized training sampling
+    # policy; result is None until wait_for_completion runs. Exposes no tools (the
+    # agent loops inside the server sandbox).
     """One Harbor rollout, run by the server, read back here.
 
     Created idle rather than already-running: `wait_for_completion` is what starts it. The server call
@@ -180,6 +211,10 @@ class HarborSession(ResourceSession):
         sampling: dict[str, Any] | None = None,
         owns_env: bool = False,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores all parameters; normalizes sampling through training_sampling when
+        # given (may raise on an invalid policy). owns_env controls whether close()
+        # closes the client. Sets result to None.
         self._env = env
         # Whether closing this session should close the client too. True when the factory handed this
         # session a client of its own, which it does for every rollout — see `create`.
@@ -202,13 +237,20 @@ class HarborSession(ResourceSession):
     # --- ResourceSession -----------------------------------------------------
 
     def initial_messages(self) -> list[Message]:
+        # [FUNCTION DOC]
+        # Returns a single user message containing the task instruction.
         return [{"role": "user", "content": self._instruction}]
 
     def list_tools(self) -> list[Tool]:
+        # [FUNCTION DOC]
+        # Returns an empty tool list.
         # The agent owns its own tool loop inside the sandbox; none are exposed to the harness.
         return []
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        # [FUNCTION DOC]
+        # Always returns a ToolResult carrying an error explaining that external tool
+        # calls are not supported.
         return ToolResult(
             error=(
                 "HarborSession does not expose external tool calls; the agent owns its own loop "
@@ -219,6 +261,9 @@ class HarborSession(ResourceSession):
     def verify(
         self, transcript: list[Message], final_state: Any | None = None
     ) -> VerifyResult:
+        # [FUNCTION DOC]
+        # Returns a VerifyResult with done True and env_reward equal to the server's
+        # reported reward, or None if no result exists. Arguments are ignored.
         """The task's own verifier score, as the server reported it.
 
         Never recomputed here, and never defaulted to 0: a rollout that did not run has no grade, and
@@ -229,6 +274,9 @@ class HarborSession(ResourceSession):
         return VerifyResult(env_reward=self.result.reward, done=True)
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # If the session owns its client, closes it (logging, not raising, on failure)
+        # and drops the reference. Idempotent.
         # The server owns the sandbox and tears it down with the trial, so there is nothing to release
         # there. The CLIENT is ours, though: one websocket per session, and leaving it open holds an
         # env session on the server until `max_concurrent_envs` is exhausted.
@@ -242,6 +290,14 @@ class HarborSession(ResourceSession):
     # --- loop-owning extensions ---------------------------------------------
 
     def wait_for_completion(self, timeout_s: float | None = None) -> int:
+        # [FUNCTION DOC]
+        # Calls run_rollout on the client with the stored split, task, harness, sandbox,
+        # engine and limit parameters (sampling only if set; agent timeout is timeout_s
+        # if given, else the stored default) and stores the result.
+        # Returns: 0 if the result is ok, 1 if not ok or if the call raised (result is
+        # then None). Logs warnings on failure; on success checks for oversized rows.
+        # KNOWN ISSUE: the inline comment about using "is not None" rather than "or"
+        # for agent_step_limit is stale; the value is passed through directly.
         """Run the rollout and block until the server is done. Returns a process-style exit code.
 
         `0` means the server reported a usable rollout. Non-zero means it did not, and the reason is on
@@ -299,6 +355,10 @@ class HarborSession(ResourceSession):
     OVERSIZED_TRAINABLE_TOKENS = 250_000
 
     def _warn_if_oversized(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Logs a warning when the result's n_trainable_tokens exceeds
+        # OVERSIZED_TRAINABLE_TOKENS (250000), as a likely cause of later OOMs. No-op
+        # without a result.
         """Name the cause of an OOM that otherwise surfaces in the wrong place.
 
         AsyncGRPO packs every turn of a rollout into ONE training row, and each turn re-sends the
@@ -322,12 +382,19 @@ class HarborSession(ResourceSession):
             )
 
     def fetch_training_trace(self) -> TrainingTrace:
+        # [FUNCTION DOC]
+        # Converts the result into a TrainingTrace via to_training_trace.
+        # Raises: RuntimeError if there is no result.
         """Return producer-validated tokens and masks after the rollout finishes."""
         if self.result is None:
             raise RuntimeError("rollout produced no capture")
         return to_training_trace(self.result)
 
     def fetch_proxy_trace(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns per-turn trace entries (TRL TraceEntry shape) via to_trace_entries.
+        # Returns an empty list if there is no result or the rollout type is not
+        # "train" (logging a warning in the latter case).
         """Per-turn captured records, in TRL's `TraceEntry` shape.
 
         Empty for an eval rollout, and that is the point: an eval endpoint yields a reward and a
@@ -347,6 +414,11 @@ class HarborSession(ResourceSession):
 
 
 class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
+    # [CLASS DOC]
+    # Factory producing HarborSessions against a server URL. Lazily holds a
+    # long-lived client for task metadata, the resolved split, the fetched task list
+    # and an instruction-hash -> task index mapping. Each created session gets its
+    # own fresh client. Picklable (drops the live client).
     """Turns a prompt into a Harbor rollout on a deployed server.
 
     Args:
@@ -401,6 +473,12 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
         indices: list[int] | None = None,
         max_message_size_mb: float = 4096.0,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores configuration (server URL stripped of trailing slash, harness, sandbox,
+        # engine, auth, timeout, step limit, normalized sampling, task count limit,
+        # explicit task indices, websocket message size limit). No network I/O.
+        # Raises: ValueError if indices is an empty list (None means whole split);
+        # sampling normalization may raise on invalid input.
         self.server_url = server_url.rstrip("/")
         self.harness = harness
         self.sandbox = sandbox
@@ -434,6 +512,9 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
         self._tasks: list[dict[str, Any]] = []
 
     def __getstate__(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Pickle hook: returns a copy of the instance dict with the live client set to
+        # None; task list and instruction map are kept.
         """Drop the live client when this factory is pickled.
 
         TRL spawns its rollout loop in a separate process and pickles the factory into it. Building
@@ -451,6 +532,11 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
     # Built lazily so it is created in whichever process actually uses it, and dropped on pickling by
     # `__getstate__` above.
     def _client(self) -> HarborEnv:
+        # [FUNCTION DOC]
+        # HELPER: Lazily creates the shared HarborEnv client; if no split was given,
+        # uses the server's first split name. Returns the client.
+        # Raises: RuntimeError if the server lists no splits.
+        # Side effects: network calls.
         if self._env is None:
             self._env = HarborEnv(base_url=self.server_url)
             if not self._split:
@@ -461,6 +547,9 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
         return self._env
 
     def new_client(self) -> HarborEnv:
+        # [FUNCTION DOC]
+        # Returns a new HarborEnv client for the server with the configured maximum
+        # message size.
         """A fresh client for one rollout. Overridable so a caller can substitute a transport.
 
         Separate from `_client()`, which is the factory's own long-lived connection for task metadata.
@@ -470,6 +559,13 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
         )
 
     def tasks(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Fetches (once, then cached) the task list: either the explicit indices
+        # (range-checked, fetched one by one) or the first num_tasks (or all) via a
+        # range query, normalized to dicts. Builds the instruction-hash -> index map,
+        # keeping the first task on hash collisions and logging how many were shadowed.
+        # Returns the task list.
+        # Raises: IndexError for out-of-range indices; RuntimeError from the client.
         """The tasks this factory can run, fetched once from the server."""
         if not self._tasks:
             env = self._client()
@@ -513,6 +609,9 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
         return self._tasks
 
     def prompt_rows(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns one dataset row per task: prompt (single user message with the
+        # instruction), task_name and task_index.
         """Dataset rows for a trainer: the instruction as the prompt, plus columns worth logging.
 
         All `num_generations` of a group share a row, so they all get the same task and the group
@@ -533,6 +632,11 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> HarborSession:
+        # [FUNCTION DOC]
+        # Resolves the task's instruction text, looks up its index via the instruction
+        # hash (fetching tasks if needed), and returns a new HarborSession with a fresh
+        # owned client and the factory's settings. seed and episode_id are ignored.
+        # Raises: KeyError if the instruction matches no known task.
         instruction = _instruction_of(task)
         self.tasks()  # ensures the instruction -> index map exists
         index = self._by_instruction.get(instruction_id(instruction))
@@ -568,6 +672,9 @@ class HarborSessionFactory(ResourceSessionFactory[HarborSession]):
 
 
 def _as_dict(task: Any) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the task as a plain dict: via model_dump if it is a pydantic
+    # model, otherwise dict(task).
     """A task record as a plain dict, whichever shape the client handed back.
 
     `HarborEnv.get_task` returns a `HarborTaskRef` model and `get_task_range` returns dicts, so code
@@ -580,6 +687,10 @@ def _as_dict(task: Any) -> dict[str, Any]:
 
 
 def _instruction_of(task: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Extracts instruction text from the worker's task argument: the
+    # "content" of the last message if it is a non-empty list ending in a dict;
+    # "instruction" or "content" of a dict; otherwise str(task) ("" for falsy).
     """The instruction text out of whatever the worker passed as `task`."""
     if isinstance(task, list) and task:
         last = task[-1]

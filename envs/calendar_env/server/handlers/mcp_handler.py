@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# JSON-RPC (MCP protocol) request handling for the calendar server's FastAPI /mcp route:
+# dispatches initialize, tools/list, tools/call and stub resources methods.
 """
 MCP Protocol Handler using official MCP library
 """
@@ -24,6 +27,16 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_mcp_request(request: Request) -> Optional[JSONRPCResponse]:
+    # [FUNCTION DOC]
+    # Parses the request JSON body and dispatches by "method". Returns None for
+    # notifications (no id) and for "notifications/initialized" (router turns this into 204).
+    # For requests: initialize, tools/list, tools/call go to dedicated handlers;
+    # resources/list and resources/templates/list return empty lists; unknown methods return a
+    # JSONRPCResponse whose result is {"error": "Method not found: ..."} (not a JSON-RPC error object).
+    # On invalid JSON returns result {"error": "Invalid JSON"} with id None; on other
+    # exceptions re-reads the body to recover the id and returns result {"error": "Internal error: ..."}.
+    # Side effects: logging.
+    # KNOWN ISSUE: errors are reported inside "result" instead of a JSON-RPC "error" member; and the bare except hides failures when re-reading the body.
     """Handle MCP protocol messages from FastAPI Request"""
     try:
         # Parse JSON body from FastAPI Request
@@ -98,6 +111,9 @@ async def handle_mcp_request(request: Request) -> Optional[JSONRPCResponse]:
 
 
 async def handle_initialize(request: JSONRPCRequest) -> JSONRPCResponse:
+    # [FUNCTION DOC]
+    # Returns a JSONRPCResponse with an InitializeResult: protocol "2024-11-05", empty
+    # tools/logging/prompts/resources capabilities, serverInfo "calendar-api-clone-server" 1.0.0.
     """Handle MCP initialize request"""
     result = InitializeResult(
         protocolVersion="2024-11-05",
@@ -110,6 +126,8 @@ async def handle_initialize(request: JSONRPCRequest) -> JSONRPCResponse:
 
 
 async def handle_tools_list(request: JSONRPCRequest) -> JSONRPCResponse:
+    # [FUNCTION DOC]
+    # Returns a JSONRPCResponse whose result is ListToolsResult over MCP_TOOLS_LIST. Logs the count.
     """Handle MCP tools/list request"""
     logger.info(
         f"Tools list request received. Calendar tools: {len(MCP_TOOLS_LIST)} tools"
@@ -125,6 +143,17 @@ async def handle_tools_list(request: JSONRPCRequest) -> JSONRPCResponse:
 async def handle_tools_call(
     request: JSONRPCRequest, fastapi_request: Request
 ) -> JSONRPCResponse:
+    # [FUNCTION DOC]
+    # Executes a tools/call: reads name/arguments from params, requires header
+    # x-database-id, resolves the user from header x-access-token via
+    # UserManager.get_user_by_access_token, or falls back to the first user in the DB when no
+    # token is given. Unknown tools produce a CallToolResult text "Unknown tool: ...".
+    # Otherwise awaits TOOL_HANDLERS[name](name, arguments, database_id, user_id) and wraps its
+    # "text" in a CallToolResult (isError is not propagated to the MCP result).
+    # All exceptions (missing db id, user not found, handler errors) are caught and
+    # returned as a CallToolResult text "Tool execution failed: ...". Always returns a JSONRPCResponse.
+    # Side effects: DB reads/writes via handlers, logging.
+    # KNOWN ISSUE: the CallToolResult never sets isError, so clients cannot distinguish failures from successes except by text.
     """Handle MCP tools/call request"""
     try:
         params = request.params or {}

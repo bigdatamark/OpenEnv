@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# CalendarList operations (Google Calendar API v3 calendarList) over the calendars table:
+# the list entry state (summaryOverride, colors, hidden, selected, reminders,
+# notification settings, soft delete) is stored on the user's own Calendar rows. Also
+# handles calendarList watch channels and opaque page/sync tokens. Defines allowed
+# reminder methods, notification methods and notification types.
 """
 Calendar List Manager - Database operations for calendar list management using SQLAlchemy
 Manages user-specific calendar settings and access in a database-per-user architecture
@@ -35,9 +41,13 @@ ALLOWED_NOTIFICATION_TYPES = {
 
 
 class CalendarListManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id; each public method opens and closes its own session.
     """Manager for calendar list database operations using SQLAlchemy"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id and calls init_database (engine creation only).
         self.database_id = database_id
         # Initialize database on first use
         init_database(database_id)
@@ -52,6 +62,18 @@ class CalendarListManager:
         page_token: Optional[str] = None,
         sync_token: Optional[str] = None,
     ) -> Tuple[List[Dict], Optional[str], Optional[str]]:
+        # [FUNCTION DOC]
+        # Lists the user's own calendars as calendarList entry dicts.
+        # Behavior: an invalid sync_token raises ValueError; with a valid sync token only
+        # calendars updated after its timestamp are returned and deleted/hidden ones are
+        # included; otherwise deleted ones are excluded unless show_deleted. Results are ordered
+        # by calendar_id, offset by page_token (invalid tokens silently reset to 0), and limited
+        # to max_results+1 when max_results is given (0 or negative returns ([], None, None)).
+        # With min_access_role, entries whose ACL-derived role is lower are skipped. Hidden
+        # entries are skipped unless show_hidden.
+        # Returns: (entries, next_page_token or None, next_sync_token = base64 of current UTC
+        # time if any results, else None). Re-raises errors after logging.
+        # KNOWN ISSUE: the extra-row/next-page logic is applied after hidden and min-role filtering, so pages may be short or the next page token may be missed or skip items.
         """List all calendar entries in user's calendar list
 
         Notes:
@@ -166,6 +188,8 @@ class CalendarListManager:
             session.close()
 
     def get_calendar_entry(self, user_id: str, calendar_id: str) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Returns the formatted entry (including hidden) for the user's calendar, or None if missing or soft-deleted.
         """Get a specific calendar entry from user's calendar list"""
         session = get_session(self.database_id)
         try:
@@ -193,6 +217,12 @@ class CalendarListManager:
     def insert_calendar_entry(
         self, user_id: str, calendar_id: str, entry_data: Dict
     ) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # "Inserts" an existing calendar of the user into their list: un-deletes it and applies
+        # provided list fields (summaryOverride, colorId, background/foregroundColor, hidden,
+        # selected, defaultReminders and notificationSettings stored as JSON or None). Commits and
+        # returns the formatted entry, or None if the user does not own such a calendar.
+        # Rolls back and re-raises on errors.
         """Insert an existing calendar into user's calendar list"""
         session = get_session(self.database_id)
         try:
@@ -256,6 +286,11 @@ class CalendarListManager:
     def update_calendar_entry(
         self, user_id: str, calendar_id: str, entry_data: Dict, is_patch: bool = True
     ) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Updates list fields of a non-deleted calendar owned by the user. For PATCH
+        # (is_patch True) only provided keys change; for PUT missing keys are reset (None, or
+        # hidden False / selected True). conferenceProperties is applied only if provided.
+        # Commits and returns the formatted entry, or None if not found/deleted. Rolls back and re-raises.
         """Update a calendar entry in user's calendar list"""
         session = get_session(self.database_id)
         try:
@@ -343,6 +378,10 @@ class CalendarListManager:
             session.close()
 
     def delete_calendar_entry(self, user_id: str, calendar_id: str) -> bool:
+        # [FUNCTION DOC]
+        # Soft-deletes a non-primary calendar from the list (deleted=True). Returns True, or
+        # False if missing/already deleted.
+        # Raises: ValueError for primary calendars; rolls back and re-raises DB errors.
         """Remove a calendar from user's calendar list"""
         session = get_session(self.database_id)
         try:
@@ -376,6 +415,9 @@ class CalendarListManager:
     def _has_acl_role(
         self, user_id: str, calendar: Calendar, allowed_roles: List[str]
     ) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: in its own session, returns True if the user's email has a "user"-scope ACL on
+        # the calendar with a role in allowed_roles; False otherwise (logs warnings).
         """Check if user has required ACL permissions for calendar operations"""
         session = get_session(self.database_id)
         try:
@@ -415,6 +457,9 @@ class CalendarListManager:
     def check_calendar_acl_permissions(
         self, user_id: str, calendar_id: str, allowed_roles: List[str]
     ) -> Calendar:
+        # [FUNCTION DOC]
+        # Returns the Calendar (detached after session close) if it exists and the user has one of allowed_roles.
+        # Raises: HTTPException 404 if the calendar does not exist; PermissionError if roles are lacking.
         """Check if user has required ACL permissions for calendar operations and return calendar"""
         session = get_session(self.database_id)
         try:
@@ -439,6 +484,12 @@ class CalendarListManager:
             session.close()
 
     def watch_calendar_list(self, watch_request: WatchRequest, user_id: str) -> Dict:
+        # [FUNCTION DOC]
+        # Creates a "calendar_list" WatchChannel for the user (resource id
+        # "calendarList-<user>-<8 hex>", uri "/calendars/me/calendarList", expiration now+24h)
+        # and returns an "api#channel" dict with ISO expiration plus "Z".
+        # Raises: ValueError if the channel id already exists; rolls back and re-raises errors.
+        # KNOWN ISSUE: params.ttl is stored but ignored for expiration.
         """Set up watch notifications for calendar list changes"""
 
         session = get_session(self.database_id)
@@ -503,6 +554,9 @@ class CalendarListManager:
             session.close()
 
     def _get_user_access_role(self, user_id: str, calendar: Calendar) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns the highest role name among "user"-scope ACLs matching the user's email
+        # on the calendar, or "none" if the user or ACLs are missing. Uses its own session.
         """Get the user's actual access role for a calendar based on ACL entries"""
         session = get_session(self.database_id)
         try:
@@ -548,6 +602,15 @@ class CalendarListManager:
     def _format_calendar_list_entry(
         self, calendar: Calendar, show_hidden: bool = False, user_id: str = None
     ) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # HELPER: returns None for hidden calendars unless show_hidden; otherwise a
+        # "calendar#calendarListEntry" dict with etag "etag-list-<id>-<updated_at>", id, summary
+        # (override wins), description, location, timeZone, accessRole (ACL-derived when user_id
+        # given, else owner for primary / writer otherwise), primary, hidden, selected, deleted,
+        # optional summaryOverride/colorId/colors, sanitized defaultReminders and
+        # notificationSettings (invalid stored items dropped), and conferenceProperties (parsed
+        # JSON or an empty allowed list default).
+        # KNOWN ISSUE: accessRole may be "none", which is not a valid AccessRole in the response schema.
         """Format calendar model for calendar list API response"""
         # Skip hidden calendars unless explicitly requested
         if calendar.hidden and not show_hidden:
@@ -650,6 +713,8 @@ class CalendarListManager:
         return formatted
 
     def _encode_page_token(self, offset: int) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns base64 of the offset as a string ("" on error).
         """Encode offset as a page token"""
         try:
             token_data = str(offset)
@@ -659,6 +724,9 @@ class CalendarListManager:
             return ""
 
     def _decode_page_token(self, token: str) -> int:
+        # [FUNCTION DOC]
+        # HELPER: accepts a raw digit string (legacy, logged) or a base64 token (padding added)
+        # and returns the integer offset. Raises ValueError for invalid tokens.
         """Decode page token to get offset"""
         try:
             # Handle legacy case where raw numbers might be passed
@@ -682,6 +750,8 @@ class CalendarListManager:
             )
 
     def _encode_sync_token(self, timestamp: datetime) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns base64 of the timestamp's ISO string ("" on error).
         """Encode timestamp as a sync token"""
         try:
             # Use ISO format timestamp for sync token
@@ -692,6 +762,8 @@ class CalendarListManager:
             return ""
 
     def _decode_sync_token(self, token: str) -> datetime:
+        # [FUNCTION DOC]
+        # HELPER: decodes a base64 ISO timestamp token (padding added) into a datetime. Raises ValueError if malformed.
         """Decode sync token to get timestamp"""
         try:
             # Add padding if needed for base64 decoding

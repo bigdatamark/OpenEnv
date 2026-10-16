@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for the maze environment; re-exports MazeEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

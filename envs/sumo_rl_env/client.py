@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Client for the SUMO-RL environment server: serialises SumoAction and parses observation/state payloads.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -20,6 +22,8 @@ from .models import SumoAction, SumoObservation, SumoState
 
 
 class SumoRLEnv(EnvClient[SumoAction, SumoObservation, SumoState]):
+    # [CLASS DOC]
+    # EnvClient for SumoAction / SumoObservation / SumoState; implements only the serialisation hooks.
     """
     Client for SUMO-RL traffic signal control environment.
 
@@ -73,6 +77,8 @@ class SumoRLEnv(EnvClient[SumoAction, SumoObservation, SumoState]):
     """
 
     def _step_payload(self, action: SumoAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a mapping with "phase_id" and "ts_id" from the action.
         """
         Convert SumoAction to JSON payload for HTTP request.
 
@@ -88,6 +94,11 @@ class SumoRLEnv(EnvClient[SumoAction, SumoObservation, SumoState]):
         }
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[SumoObservation]:
+        # [FUNCTION DOC]
+        # Builds a SumoObservation from the payload's "observation" sub-mapping (vector, shape, action mask,
+        # sim_time with empty/zero defaults); done and reward are taken from the envelope, metadata from the
+        # envelope with fallback to the observation's metadata.
+        # Returns: StepResult with observation, reward, done (default False) and envelope metadata.
         """
         Parse step result from HTTP response JSON.
 
@@ -119,6 +130,9 @@ class SumoRLEnv(EnvClient[SumoAction, SumoObservation, SumoState]):
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> SumoState:
+        # [FUNCTION DOC]
+        # Returns a SumoState from the payload, defaulting each config/runtime field to the model's defaults
+        # (e.g. num_seconds 20000, delta_time 5, reward_fn "diff-waiting-time").
         """
         Parse state from HTTP response JSON.
 

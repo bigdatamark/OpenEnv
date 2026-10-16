@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# HELPER: Single chat-completion helper compatible with both reasoning and non-reasoning OpenAI-style models
+# (always uses max_completion_tokens; temperature optional with automatic retry when rejected).
 """A small OpenAI-compatible chat helper that tolerates reasoning models.
 
 Reasoning models (for example the GPT-5 family) reject non-default ``temperature``
@@ -13,6 +16,8 @@ from typing import Any
 
 
 def _is_temperature_unsupported(exc: Exception) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if an exception message mentions "temperature" together with "does not support" or "unsupported value".
     text = str(exc).lower()
     return "temperature" in text and (
         "does not support" in text or "unsupported value" in text
@@ -27,6 +32,11 @@ async def chat_complete(
     max_tokens: int,
     temperature: float | None = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # Calls client.chat.completions.create with model, messages, max_completion_tokens and (if given) temperature. If the
+    # call fails with a temperature-unsupported error, retries once without temperature; other errors are re-raised.
+    # Returns the first choice's content (empty string if None).
+    # Raises: RuntimeError if the content is empty and finish_reason is "length"; any client exception otherwise.
     """Return the assistant text for a chat completion.
 
     Args:

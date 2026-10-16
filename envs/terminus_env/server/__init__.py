@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Terminus server subpackage. Re-exports TerminusEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

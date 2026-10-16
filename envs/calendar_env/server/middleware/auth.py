@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# FastAPI header-based dependencies that identify the caller (database_id + user_id) for multi-user requests.
 """
 Simple middleware for multi-user support
 """
@@ -13,6 +15,13 @@ def authenticate_user_with_token(
     x_database_id: str = Header(alias="x-database-id"),
     x_access_token: str = Header(alias="x-access-token"),
 ) -> tuple[str, str]:
+    # [FUNCTION DOC]
+    # FastAPI dependency: reads "x-database-id" and "x-access-token" headers, looks up the
+    # user by static access token via UserManager for that database, and returns
+    # (database_id, user_id).
+    # Raises: HTTPException 400 if either header is empty, 401 if token unknown or the user
+    # is inactive, 500 on any other error (logged).
+    # Side effects: database read; imports UserManager lazily.
     """
     Authenticate user with access token and return database_id and user_id.
     """
@@ -61,6 +70,10 @@ def get_user_context(
     x_database_id: str = Header(alias="x-database-id"),
     x_user_id: str = Header(alias="x-user-id"),
 ) -> tuple[str, str]:
+    # [FUNCTION DOC]
+    # FastAPI dependency: reads "x-database-id" and "x-user-id" headers and returns them as
+    # a (database_id, user_id) tuple without any verification.
+    # Raises: HTTPException 400 if either is empty, 500 on unexpected errors.
     """
     Extract database_id and user_id from headers for multi-user support.
     """

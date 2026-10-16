@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Adapters that let generic OpenEnv harness code (tool-calling LLM rollouts) drive a BrowserGym client. Defines a
+# fixed tool list (click, fill, send_keys, scroll, noop), converts tool calls to BrowserGym action strings and back,
+# formats prompts/tool results, and builds verification summaries.
 """Harness-oriented BrowserGym session adapters."""
 
 from __future__ import annotations
@@ -72,10 +76,18 @@ _BROWSERGYM_TOOLS = [
 
 
 def _quote(value: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the value as a JSON string literal (double-quoted, non-ASCII preserved).
     return json.dumps(value, ensure_ascii=False)
 
 
 def build_browsergym_action_str(tool_name: str, arguments: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # Converts a tool name and arguments into a BrowserGym action string, e.g. click("bid"), fill("bid", "text"),
+    # send_keys("text"), scroll("direction"), noop(). Argument values are str()-converted and JSON-quoted.
+    # Raises: KeyError for an unsupported tool name or a missing required argument.
+    # KNOWN ISSUE: BrowserGym's built-in scroll action takes numeric x/y deltas; a single direction string is probably
+    # rejected by the BrowserGym action parser.
     """Convert a BrowserGym tool call into the action string the env expects."""
 
     if tool_name == "click":
@@ -95,6 +107,9 @@ def build_browsergym_action_str(tool_name: str, arguments: dict[str, Any]) -> st
 
 
 def _format_browsergym_prompt(observation: Any, task: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the initial user prompt from an observation: goal (or task fallback), previous action error, and page
+    # structure (axtree text, else text), followed by "Choose the next browser action.", joined by blank lines.
     goal = getattr(observation, "goal", "") or (task or "")
     page_text = getattr(observation, "axtree_txt", "") or getattr(
         observation, "text", ""
@@ -115,12 +130,17 @@ def _format_browsergym_prompt(observation: Any, task: Any) -> str:
 def _build_browsergym_tool_result(
     task: Any,
 ):
+    # [FUNCTION DOC]
+    # HELPER: Returns a closure that turns a step result into a ToolResult for the given task.
     def builder(
         tool_name: str,
         arguments: dict[str, Any],
         result: Any,
         state: Any,
     ) -> ToolResult:
+        # [FUNCTION DOC]
+        # HELPER: Produces a ToolResult whose data has tool name, arguments copy, goal (or task), observation text, url, error,
+        # last_action_error, reward and done; done flag from the result; metadata with reward and the dumped state.
         observation = result.observation
         data = {
             "tool_name": tool_name,
@@ -149,6 +169,10 @@ def _build_browsergym_verify(
     last_result: Any | None,
     state: Any,
 ) -> VerifyResult:
+    # [FUNCTION DOC]
+    # HELPER: Builds a VerifyResult from the last step result: env_reward (None if no step), done flag, metrics
+    # (step_count, cum_reward, benchmark, task_name read from state) and artifacts (dumped final state, final rollout
+    # state, transcript length).
     reward = None if last_result is None else last_result.reward
     done = False if last_result is None else bool(last_result.done)
     metrics = {
@@ -171,9 +195,14 @@ def _build_browsergym_verify(
 
 
 class BrowserGymSessionFactory(ResourceSessionFactory):
+    # [CLASS DOC]
+    # Harness session factory: each create() call builds a fresh client from the supplied factory and wraps it in a
+    # StepEnvSessionAdapter configured with the BrowserGym tools and builders above.
     """Create BrowserGym-backed resource sessions from client factories."""
 
     def __init__(self, client_factory, *, default_task: str | None = None):
+        # [FUNCTION DOC]
+        # Stores the client factory callable and an optional default task name.
         self._client_factory = client_factory
         self._default_task = default_task
 
@@ -183,6 +212,11 @@ class BrowserGymSessionFactory(ResourceSessionFactory):
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> StepEnvSessionAdapter:
+        # [FUNCTION DOC]
+        # Creates a session for a task (falls back to the default task). If a task is set it is passed as reset kwarg
+        # "task_name". Returns a StepEnvSessionAdapter with seed, episode_id, tool specs, an action builder producing
+        # BrowserGymAction from tool calls, an initial-prompt builder, tool-result builder and verify builder.
+        # Side effects: calls the client factory (may open a connection).
         session_task = task if task is not None else self._default_task
         client = self._client_factory()
 
@@ -215,6 +249,10 @@ class BrowserGymSessionFactory(ResourceSessionFactory):
 
 
 def _parse_action_call(action_text: str) -> tuple[str, list[Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Parses action text as a single Python call expression with a bare function name and positional literal
+    # arguments. Returns (function name, list of literal values). Raises: ValueError for syntax errors, non-call
+    # expressions, attribute calls, keyword arguments or non-literal arguments. Does not evaluate code.
     try:
         expression = ast.parse(action_text.strip(), mode="eval").body
     except SyntaxError as exc:
@@ -238,12 +276,18 @@ def _parse_action_call(action_text: str) -> tuple[str, list[Any]]:
 
 
 def _expect_str(value: Any, argument_name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the value if it is a str, else raises ValueError naming the argument.
     if not isinstance(value, str):
         raise ValueError(f"BrowserGym {argument_name} argument must be a string")
     return value
 
 
 def build_browsergym_action_tool_call(action_text: str) -> ToolCall:
+    # [FUNCTION DOC]
+    # Parses a textual BrowserGym action (click(bid), fill(bid, text), send_keys(text), scroll("up"/"down"), noop())
+    # into a ToolCall with a fixed id per tool and named string args. Raises: ValueError for unsupported actions, wrong
+    # argument counts, non-string arguments or an invalid scroll direction.
     """Parse a text BrowserGym action into a structured tool call."""
 
     name, args = _parse_action_call(action_text)

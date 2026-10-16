@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Template server-side environment implementation: an echo environment that returns the sent message and
+# a length-based reward. Imports models relatively, falling back to absolute imports when run outside the package.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,6 +26,9 @@ except ImportError:
 
 
 class __ENV_CLASS_NAME__Environment(Environment):
+    # [CLASS DOC]
+    # Single-session echo environment. Holds a State (episode id + step count) and a reset counter.
+    # SUPPORTS_CONCURRENT_SESSIONS is False, signalling the server must not share/parallelize instances.
     """
     A simple echo environment that echoes back messages.
 
@@ -44,6 +50,8 @@ class __ENV_CLASS_NAME__Environment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = False
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates a fresh State with a random UUID episode id and step_count 0; sets reset counter to 0.
         """Initialize the __ENV_NAME__ environment."""
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._reset_count = 0
@@ -51,6 +59,10 @@ class __ENV_CLASS_NAME__Environment(Environment):
     def reset(
         self, seed=None, episode_id=None, **kwargs
     ) -> __ENV_CLASS_NAME__Observation:
+        # [FUNCTION DOC]
+        # Starts a new episode. Inputs: seed (ignored), episode_id (used if given, else a new UUID), extra kwargs ignored.
+        # Returns: observation with a fixed "ready" message, length 0, done False, reward 0.0.
+        # Side effects: replaces internal state and increments the reset counter.
         """
         Reset the environment.
 
@@ -73,6 +85,10 @@ class __ENV_CLASS_NAME__Environment(Environment):
         )
 
     def step(self, action: __ENV_CLASS_NAME__Action) -> __ENV_CLASS_NAME__Observation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Echoes the action's message. Increments step_count.
+        # Returns: observation with the message, its length, done False, reward = min(0.1 * length, 1.0),
+        # and metadata containing the original message and current step number. Episodes never terminate.
         """
         Execute a step in the environment by echoing the message.
 
@@ -100,6 +116,8 @@ class __ENV_CLASS_NAME__Environment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State object (live reference, not a copy).
         """
         Get the current environment state.
 

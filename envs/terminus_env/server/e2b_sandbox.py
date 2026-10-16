@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# HELPER: thin wrapper around the E2B Code Interpreter sandbox for running shell commands. The e2b import is
+# optional; its failure is remembered and reported when a sandbox is created.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -22,6 +25,8 @@ except ImportError as _e2b_import_error:  # pragma: no cover
 
 @dataclass
 class ShellResult:
+    # [CLASS DOC]
+    # Dataclass with a command's stdout, stderr, optional error description and success flag.
     """Normalized result from a command executed in E2B."""
 
     stdout: str
@@ -31,9 +36,14 @@ class ShellResult:
 
 
 class E2BSandbox:
+    # [CLASS DOC]
+    # One E2B sandbox for one episode; exposes its sandbox_id.
     """Manages one E2B sandbox for one OpenEnv episode."""
 
     def __init__(self, api_key: str):
+        # [FUNCTION DOC]
+        # Raises ImportError if e2b-code-interpreter is not installed. Creates a remote sandbox with api_key and
+        # stores its id. Side effects: network call creating a billable sandbox.
         if Sandbox is None:
             raise ImportError(
                 "e2b-code-interpreter is not installed. Install the "
@@ -44,6 +54,10 @@ class E2BSandbox:
         self.sandbox_id: str = self._sbx.sandbox_id
 
     def run_shell(self, command: str, timeout_s: int = 120) -> ShellResult:
+        # [FUNCTION DOC]
+        # Runs command via Python code executed in the sandbox: subprocess.run with shell=True, captured output and
+        # a timeout of timeout_s seconds (default 120); prints stdout/stderr and exits with the return code when
+        # non-zero. Returns the normalised ShellResult (a non-zero exit or timeout shows up as an execution error).
         shell_code = (
             "import subprocess, sys\n"
             f"_result = subprocess.run({command!r}, shell=True, capture_output=True, text=True, timeout={timeout_s})\n"
@@ -56,6 +70,8 @@ class E2BSandbox:
         return _normalize(execution)
 
     def kill(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the sandbox; on failure tries close(); all exceptions are swallowed.
         try:
             self._sbx.kill()
         except Exception:
@@ -66,6 +82,9 @@ class E2BSandbox:
 
 
 def _normalize(execution: Any) -> ShellResult:
+    # [FUNCTION DOC]
+    # HELPER: converts an E2B execution result into a ShellResult: stdout/stderr log chunks joined by newlines,
+    # error formatted as "name: value" plus traceback, success when there is no error.
     stdout = "\n".join(execution.logs.stdout) if execution.logs.stdout else ""
     stderr = "\n".join(execution.logs.stderr) if execution.logs.stderr else ""
     error = None

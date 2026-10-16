@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic data models (action, observation, state) for the Atari environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -19,6 +21,10 @@ from openenv.core.env_server import Action, Observation, State
 
 
 class AtariAction(Action):
+    # [CLASS DOC]
+    # Action with a required integer action_id plus game_name (default "pong"), obs_type ("rgb"/"grayscale"/"ram",
+    # default "rgb") and full_action_space (default False).
+    # NOTE: the server ignores the game/obs/action-space fields; they are fixed at environment construction.
     """
     Action for Atari environments.
 
@@ -36,6 +42,9 @@ class AtariAction(Action):
 
 
 class AtariObservation(Observation):
+    # [CLASS DOC]
+    # Observation with the flattened screen (pixels or 128-byte RAM), its original shape, legal action ids, lives and
+    # episode/total frame numbers, plus base done/reward/metadata.
     """
     Observation from Atari environment.
 
@@ -63,6 +72,9 @@ class AtariObservation(Observation):
 
 
 class AtariState(State):
+    # [CLASS DOC]
+    # State with game configuration: game_name, obs_type, full_action_space, optional mode/difficulty, sticky-action
+    # probability (default 0.0) and frameskip (default 4), plus base episode_id/step_count.
     """
     State for Atari environment.
 

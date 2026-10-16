@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# LLM-driven free-roam driving example for the CARLA environment: an LLM (chosen from config.MODELS) repeatedly picks
+# one of three tools (get_goal_info, control_vehicle, emergency_stop) from a text prompt (optionally with a camera image)
+# to drive toward a random goal in traffic. Tracks distance, reward, collisions and decisions; success means ending
+# within 10 m of the goal. Side effects: sys.path changes, LLM API calls, CARLA server calls, optional image files, stdout.
 """
 LLM Inference: Free-Roam Autonomous Driving
 
@@ -33,6 +38,9 @@ from llm_clients import create_client, build_vision_message
 
 @dataclass
 class FreeRoamResult:
+    # [CLASS DOC]
+    # Dataclass with one free-roam episode's results: model display name, scenario description, distance traveled (m),
+    # final goal distance (m), success flag, steps, summed reward, collision step count and the list of tool names chosen.
     """Result of free-roam navigation episode."""
     model: str
     scenario: str
@@ -58,6 +66,10 @@ def run_free_roam_episode(
     vision: bool = False,
     vision_interval: int = 1,
 ) -> FreeRoamResult:
+    # [FUNCTION DOC]
+    # Resolves the model and scenario configs (KeyError if unknown), disables vision with a warning for non-vision models,
+    # creates the LLM client, and runs the async episode with asyncio.run. Exceptions are printed (verbose) and re-raised.
+    # Returns: FreeRoamResult.
     """Run free-roam navigation episode with LLM decision-making.
 
     Args:
@@ -99,6 +111,17 @@ def run_free_roam_episode(
     llm = create_client(model_config.provider, model_config.model_id)
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async episode. Resets with merged scenario/CLI overrides (CLI wins), optionally saves a start image, then per step
+        # builds a single-turn prompt (speed, goal distance/direction, collision warning, up to 5 nearby actors, last 10 action
+        # summaries) optionally as a vision message every vision_interval steps, asks the LLM (256 tokens), and stops if no tool
+        # call. get_goal_info maps to an observe action; control_vehicle sends throttle (default 0.5) and steer (default 0.0) with
+        # no brake and adds 2D distance moved; emergency_stop brakes; unknown tools only log. Accumulates truthy rewards and
+        # counts steps with collision flags, saves periodic images, prints progress every 20 steps, stops when done. Saves a
+        # final image, computes success (final goal distance below 10 m, falling back to the initial distance or 200 m) and
+        # returns the FreeRoamResult.
+        # KNOWN ISSUE: for an unknown tool name the previous step result is reused for reward/done checks, so its reward is counted again.
+        # KNOWN ISSUE: with max_steps of 0 the loop variable is unbound and the result construction raises NameError.
         env = CarlaEnv(base_url=base_url)
         async with env:
             reset_kwargs = {"scenario_name": scenario_config.scenario_name}
@@ -357,6 +380,10 @@ Make ONE tool call now."""
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry: parses model, scenario, run-all, base url, step/image/vision options and scenario overrides (weather,
+    # max steps, route distance range, camera settings). With --run-all runs every free-roam scenario (errors recorded as
+    # failures) and prints a summary; with --model runs one scenario; otherwise prints help.
     parser = argparse.ArgumentParser(
         description="Run LLM inference on free-roam driving scenarios",
         formatter_class=argparse.RawDescriptionHelpFormatter,

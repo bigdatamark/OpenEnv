@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Rasterises SVG with resvg (self-contained, no external fetches) at a fixed square size and
+# measures ink coverage: the share of pixels whose RGB distance from the modal background colour
+# exceeds a threshold of 32.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Rasterise SVG source and measure how much of the canvas got drawn on.
@@ -31,11 +35,15 @@ INK_DISTANCE_THRESHOLD = 32.0
 
 
 class RenderError(Exception):
+    # [CLASS DOC]
+    # Exception raised when SVG source cannot be rasterised.
     """Raised when the SVG source cannot be rasterised."""
 
 
 @dataclass(frozen=True)
 class ImageStats:
+    # [CLASS DOC]
+    # Immutable raster measurements; currently only ink_fraction (share of ink pixels in [0, 1]).
     """Measurements taken from a rasterised submission.
 
     Attributes:
@@ -46,11 +54,16 @@ class ImageStats:
     ink_fraction: float
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the fields as a plain mapping.
         """Return a JSON-serialisable view of the stats."""
         return asdict(self)
 
 
 def render_png(svg_source: str, size: int = DEFAULT_RENDER_SIZE) -> bytes:
+    # [FUNCTION DOC]
+    # Renders svg_source to PNG bytes at size x size pixels (default 512) using resvg.
+    # Raises RenderError wrapping any renderer exception.
     """Rasterise SVG source to PNG bytes.
 
     Args:
@@ -79,6 +92,8 @@ def render_png(svg_source: str, size: int = DEFAULT_RENDER_SIZE) -> bytes:
 
 
 def _flatten_on_white(png_bytes: bytes) -> np.ndarray:
+    # [FUNCTION DOC]
+    # HELPER: Decodes PNG bytes, composites onto an opaque white canvas and returns an HxWx3 float32 RGB array.
     """Composite a possibly-transparent PNG onto white and return an RGB array."""
     img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
     canvas = Image.new("RGBA", img.size, (255, 255, 255, 255))
@@ -90,6 +105,9 @@ def _flatten_on_white(png_bytes: bytes) -> np.ndarray:
 
 
 def _modal_color(rgb: np.ndarray) -> np.ndarray:
+    # [FUNCTION DOC]
+    # HELPER: Quantises colours to 4 bits per channel, finds the most frequent quantised colour and
+    # returns the mean actual RGB of pixels in that bin as a float32 3-vector.
     """Return the most common colour after coarse quantisation.
 
     Using the modal colour rather than transparency means a submission that
@@ -104,6 +122,9 @@ def _modal_color(rgb: np.ndarray) -> np.ndarray:
 
 
 def image_stats(png_bytes: bytes) -> ImageStats:
+    # [FUNCTION DOC]
+    # Computes ImageStats for PNG bytes: flattens onto white, measures Euclidean distance of each pixel
+    # from the modal colour and returns the fraction above the ink threshold.
     """Measure how much of a rasterised submission differs from its background.
 
     Args:

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Classifies an intercepted request into one of four wire dialects (Anthropic
+# Messages, OpenAI chat-completions, OpenAI Responses, Google generateContent) using
+# path, then headers, then body shape; and extracts the requested model name.
 """Which wire dialect is this request written in?
 
 Four dialects reach the intercept, because coding agents did not agree on one:
@@ -24,6 +28,8 @@ from typing import Any
 
 
 class APIType(str, Enum):
+    # [CLASS DOC]
+    # String enum of supported wire dialects: anthropic, openai_chat, openai_responses, google.
     ANTHROPIC = "anthropic"
     OPENAI_CHAT = "openai_chat"
     OPENAI_RESPONSES = "openai_responses"
@@ -31,6 +37,12 @@ class APIType(str, Enum):
 
 
 def detect(path: str, headers: dict[str, str], body: dict[str, Any]) -> APIType:
+    # [FUNCTION DOC]
+    # Classifies a request. Path checks: "/v1/messages" -> ANTHROPIC,
+    # "/v1/chat/completions" -> OPENAI_CHAT, "/v1/responses" -> OPENAI_RESPONSES,
+    # case-insensitive "generatecontent" -> GOOGLE. Then an anthropic-version header
+    # (case-insensitive) -> ANTHROPIC. Then body: "contents" -> GOOGLE; both "input" and
+    # "instructions" -> OPENAI_RESPONSES. Default OPENAI_CHAT.
     """Classify one request. Defaults to chat-completions, the most common dialect."""
     if "/v1/messages" in path:
         return APIType.ANTHROPIC
@@ -59,6 +71,8 @@ def detect(path: str, headers: dict[str, str], body: dict[str, Any]) -> APIType:
 
 
 def extract_model(api_type: APIType, body: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # Returns body["model"], defaulting to "gemini-pro" for Google and "unknown" otherwise.
     """The model name the client asked for, whatever the dialect calls it."""
     if api_type is APIType.GOOGLE:
         return body.get("model", "gemini-pro")

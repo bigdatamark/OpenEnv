@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Pydantic models for the Git environment: a single multi-purpose action, the
+# observation, and the extended state.
 
 """
 envs/git_env/models.py
@@ -15,6 +18,10 @@ from pydantic import Field
 
 
 class GitAction(Action):
+    # [CLASS DOC]
+    # Unified action. action_type selects the operation ("clone_repo", "list_repos"
+    # (default), "execute_git_command"); repo_name, target_dir (optional), command
+    # and working_dir are used depending on the type.
     """
     Action for Git environment operations.
 
@@ -39,6 +46,9 @@ class GitAction(Action):
 
 
 class GitObservation(Observation):
+    # [CLASS DOC]
+    # Action result: success flag, human message, output text, error text, and a list
+    # of repository info dicts (populated for list_repos).
     """
     Result of executing a Git action.
 
@@ -58,6 +68,9 @@ class GitObservation(Observation):
 
 
 class GitState(State):
+    # [CLASS DOC]
+    # State extended with gitea_ready (server reachable) and workspace_path
+    # (default "/workspace").
     """
     State for Git environment.
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI app for TB2. Chooses the environment class from TB2_MODE ("local" default or "docker") and
+# raises ValueError at import for any other value. Builds the module-level app with env name suffixed by
+# the mode and max concurrent sessions from MAX_CONCURRENT_ENVS (default 8). Any exception from in-repo
+# imports triggers standalone imports.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -85,6 +90,9 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default 8000) from the command line and serves the app with
+    # uvicorn; blocks.
     """
     Entry point for direct execution via uv run or python -m.
 

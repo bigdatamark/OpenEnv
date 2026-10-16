@@ -1,3 +1,10 @@
+# [PACKAGE DOC]
+# Package for token-level capture of agentic rollouts: an OpenAI/Anthropic/Google
+# wire-compatible proxy that records exact prompt/completion token ids and logprobs
+# from the inference engine, links turns by exact token prefix into a rollout graph,
+# and exports training traces. Re-exports the public API (CaptureServer, contract
+# exporters, API detection, RolloutGraph/TurnNode, InferenceClient/UpstreamError,
+# LLM validation helpers). No side effects beyond submodule imports.
 """Token-level capture for agentic rollouts.
 
 An OpenAI-spec proxy that sits between a coding agent and an inference engine, recording the exact

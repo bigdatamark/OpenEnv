@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: Unified tool-calling chat clients for the CARLA examples. Every client exposes chat(messages, tools,
+# max_tokens) taking OpenAI-style messages and function tool definitions and returning a dict with "tool_calls" (list of
+# dicts with "name" and parsed "arguments") and "text". Providers: Anthropic, OpenAI, Qwen (DashScope OpenAI-compatible),
+# Hugging Face router (OpenAI-compatible) and a local transformers model. Also builds provider-specific vision messages.
 """
 Unified LLM client interface for all providers.
 
@@ -16,6 +21,9 @@ from anthropic import Anthropic
 from openai import OpenAI
 
 def build_vision_message(prompt: str, image_base64: str, provider: str) -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a user message whose content is an image part followed by a text part: an Anthropic base64 image source for
+    # provider "anthropic", otherwise an OpenAI image_url data URI (JPEG).
     """Build a user message with image + text, formatted for the provider.
 
     Args:
@@ -45,6 +53,8 @@ def build_vision_message(prompt: str, image_base64: str, provider: str) -> Dict[
 
 
 class LLMClient(ABC):
+    # [CLASS DOC]
+    # Abstract base class defining the chat interface described in the module doc.
     """Base class for LLM clients."""
 
     @abstractmethod
@@ -54,6 +64,8 @@ class LLMClient(ABC):
         tools: List[Dict[str, Any]],
         max_tokens: int = 2048
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Abstract method: sends messages with tools and returns the normalised tool_calls/text dict. No implementation.
         """
         Send chat request with tool calling support.
 
@@ -66,9 +78,13 @@ class LLMClient(ABC):
         pass
 
 class ClaudeClient(LLMClient):
+    # [CLASS DOC]
+    # Anthropic Claude client using the Messages API.
     """Anthropic Claude client."""
 
     def __init__(self, model_id: str):
+        # [FUNCTION DOC]
+        # Reads ANTHROPIC_API_KEY (ValueError if unset) and creates the Anthropic client for the given model id.
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(
@@ -79,6 +95,9 @@ class ClaudeClient(LLMClient):
         self.model_id = model_id
 
     def chat(self, messages, tools, max_tokens=2048):
+        # [FUNCTION DOC]
+        # Converts OpenAI-style tools to Anthropic tool schemas, sends the messages, and returns tool_use blocks as tool calls
+        # and text blocks joined by spaces as text. Side effects: network call; propagates API errors.
         # Convert OpenAI-style tools to Anthropic format
         anthropic_tools = [
             {
@@ -115,9 +134,13 @@ class ClaudeClient(LLMClient):
         }
 
 class OpenAIClient(LLMClient):
+    # [CLASS DOC]
+    # OpenAI chat-completions client.
     """OpenAI client."""
 
     def __init__(self, model_id: str):
+        # [FUNCTION DOC]
+        # Reads OPENAI_API_KEY (ValueError if unset) and creates the OpenAI client for the given model id.
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(
@@ -128,6 +151,9 @@ class OpenAIClient(LLMClient):
         self.model_id = model_id
 
     def chat(self, messages, tools, max_tokens=2048):
+        # [FUNCTION DOC]
+        # Calls chat completions with tools and max_tokens; returns the first choice's tool calls (arguments JSON-decoded, empty
+        # dict if decoding fails) and its text content (empty string if None). Propagates API errors.
         response = self.client.chat.completions.create(
             model=self.model_id,
             max_tokens=max_tokens,
@@ -158,9 +184,13 @@ class OpenAIClient(LLMClient):
         }
 
 class QwenClient(LLMClient):
+    # [CLASS DOC]
+    # Qwen client via the DashScope OpenAI-compatible endpoint.
     """Qwen client (via OpenAI-compatible API)."""
 
     def __init__(self, model_id: str):
+        # [FUNCTION DOC]
+        # Reads QWEN_API_KEY (ValueError if unset) and creates an OpenAI client pointed at DashScope.
         api_key = os.getenv("QWEN_API_KEY")
         if not api_key:
             raise ValueError(
@@ -175,6 +205,8 @@ class QwenClient(LLMClient):
         self.model_id = model_id
 
     def chat(self, messages, tools, max_tokens=2048):
+        # [FUNCTION DOC]
+        # Same behaviour as the OpenAI client's chat, against the Qwen endpoint.
         # Same as OpenAI
         response = self.client.chat.completions.create(
             model=self.model_id,
@@ -205,9 +237,13 @@ class QwenClient(LLMClient):
         }
 
 class HuggingFaceClient(LLMClient):
+    # [CLASS DOC]
+    # Hugging Face Inference Providers router client (OpenAI-compatible), with Qwen3 no-think handling and recovery of malformed tool calls from error messages.
     """Hugging Face Inference API client (OpenAI-compatible)."""
 
     def __init__(self, model_id: str):
+        # [FUNCTION DOC]
+        # Reads HF_TOKEN (ValueError if unset) and creates an OpenAI client pointed at the Hugging Face router.
         api_key = os.getenv("HF_TOKEN")
         if not api_key:
             raise ValueError(
@@ -223,6 +259,10 @@ class HuggingFaceClient(LLMClient):
         self.model_id = model_id
 
     def chat(self, messages, tools, max_tokens=2048):
+        # [FUNCTION DOC]
+        # For Qwen3 model ids, copies the messages, prefixes the last string message with "/no_think" and raises max_tokens to at
+        # least 512. Calls chat completions; on an exception, tries to recover a tool call from the error text and returns it,
+        # else re-raises. Otherwise returns tool calls (arguments JSON-decoded, empty dict on failure) and text.
         import json
         import re
 
@@ -273,6 +313,10 @@ class HuggingFaceClient(LLMClient):
 
     @staticmethod
     def _parse_failed_generation(error: Exception) -> dict | None:
+        # [FUNCTION DOC]
+        # HELPER: If the error text mentions tool_use_failed or failed_generation, extracts the first function-tag pattern with a
+        # name and JSON object, decodes it, prints a recovery note and returns a single-tool-call result dict with empty text.
+        # Returns None if the markers, the pattern or valid JSON are missing.
         """Extract tool call from HF's failed_generation error response.
 
         Some open models emit malformed syntax like:
@@ -305,6 +349,9 @@ class HuggingFaceClient(LLMClient):
         }
 
 class LocalClient(LLMClient):
+    # [CLASS DOC]
+    # Client running a Hugging Face causal LM locally with transformers, using the tokenizer's chat template for tools and
+    # parsing <tool_call> JSON tags from the output.
     """Local model client using transformers (AutoModelForCausalLM + AutoTokenizer).
 
     Loads a Hugging Face model locally on GPU and generates responses with tool calling
@@ -313,6 +360,9 @@ class LocalClient(LLMClient):
     """
 
     def __init__(self, model_id: str):
+        # [FUNCTION DOC]
+        # Loads the tokenizer and model (bfloat16, automatic device map) for the model id and prints the device.
+        # Side effects: model download/GPU memory allocation.
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -327,6 +377,12 @@ class LocalClient(LLMClient):
         print(f"  [LocalClient] Model loaded on {self.model.device}")
 
     def chat(self, messages, tools, max_tokens=2048):
+        # [FUNCTION DOC]
+        # Renders messages with the tool definitions through the chat template (thinking disabled), greedily generates up to
+        # max_tokens new tokens, decodes them keeping special tokens and strips EOS/pad/end markers. Parses every <tool_call>
+        # JSON object (invalid ones skipped) as tool calls and keeps the remaining text; if there are no tags, tries parsing the
+        # whole output as a JSON object with a "name" key, else treats it as text. Returns the tool_calls/text dict.
+        # KNOWN ISSUE: when the untagged output is valid JSON but not an object (e.g. a number), the membership test raises TypeError.
         import json
         import re
 
@@ -414,6 +470,8 @@ class LocalClient(LLMClient):
 
 
 def create_client(provider: str, model_id: str) -> LLMClient:
+    # [FUNCTION DOC]
+    # Factory returning the client class for provider anthropic, openai, qwen, huggingface or local. Raises ValueError for unknown providers.
     """
     Factory function to create LLM client.
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests that BrowserGymEnvironment.reset(task_name=...) rebuilds the gym env
+# for a new task, and keeps the old env if building the new one fails. If
+# gymnasium is missing, a temporary stub module is inserted into sys.modules
+# for the import and removed afterwards; prepends repo root to sys.path.
 """Unit tests for BrowserGym task switching behavior."""
 
 from __future__ import annotations
@@ -29,22 +34,34 @@ if _INSERTED_GYMNASIUM_STUB:
 
 
 class _FakeGymEnv:
+    # [CLASS DOC]
+    # HELPER: fake gym env recording its id, reset kwargs and closed state.
     def __init__(self, env_id: str) -> None:
+        # [FUNCTION DOC]
+        # Stores env_id, closed False and an empty reset-call log.
         self.env_id = env_id
         self.closed = False
         self.reset_calls: list[dict[str, Any]] = []
 
     def reset(self, **kwargs: Any):
+        # [FUNCTION DOC]
+        # Records kwargs; returns an obs dict with a goal naming the env id, and empty info.
         self.reset_calls.append(dict(kwargs))
         return {"goal": f"goal for {self.env_id}", "url": "http://example.test"}, {}
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Marks the env closed.
         self.closed = True
 
 
 def test_reset_rebuilds_browsergym_env_when_task_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # With gym.make and importlib patched, reset to a new task creates the new env
+    # id, closes the old env, updates task_name/state, forwards the seed and
+    # returns the new goal.
     created_envs: list[tuple[str, dict[str, Any], _FakeGymEnv]] = []
 
     monkeypatch.setattr(
@@ -54,6 +71,8 @@ def test_reset_rebuilds_browsergym_env_when_task_changes(
     )
 
     def fake_make(env_id: str, **kwargs: Any) -> _FakeGymEnv:
+        # [FUNCTION DOC]
+        # Creates a _FakeGymEnv and records (id, kwargs, env).
         env = _FakeGymEnv(env_id)
         created_envs.append((env_id, dict(kwargs), env))
         return env
@@ -84,6 +103,10 @@ def test_reset_rebuilds_browsergym_env_when_task_changes(
 def test_failed_task_switch_keeps_previous_browsergym_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # [FUNCTION DOC]
+    # When making the new task's env fails, reset raises ValueError naming the env
+    # id and the previous env/task stay active and open; once making succeeds the
+    # switch happens.
     fail_enter_text = True
     created_envs: list[_FakeGymEnv] = []
 
@@ -94,6 +117,9 @@ def test_failed_task_switch_keeps_previous_browsergym_env(
     )
 
     def fake_make(env_id: str, **_kwargs: Any) -> _FakeGymEnv:
+        # [FUNCTION DOC]
+        # Raises RuntimeError for the enter-text env while the enclosing failure flag
+        # is set; otherwise creates and records a _FakeGymEnv.
         if env_id == "browsergym/miniwob.enter-text" and fail_enter_text:
             raise RuntimeError("task is unavailable")
         env = _FakeGymEnv(env_id)

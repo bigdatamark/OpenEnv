@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Template client module: defines the WebSocket EnvClient subclass for a generated echo-style environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -18,6 +20,9 @@ from .models import __ENV_CLASS_NAME__Action, __ENV_CLASS_NAME__Observation
 class __ENV_CLASS_NAME__Env(
     EnvClient[__ENV_CLASS_NAME__Action, __ENV_CLASS_NAME__Observation, State]
 ):
+    # [CLASS DOC]
+    # Typed EnvClient for the template environment; implements the three serialization hooks the base
+    # client calls (step payload, step result parsing, state parsing). Connection handling is inherited.
     """
     Client for the __ENV_TITLE_NAME__ Environment.
 
@@ -45,6 +50,9 @@ class __ENV_CLASS_NAME__Env(
     """
 
     def _step_payload(self, action: __ENV_CLASS_NAME__Action) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Serializes an action into the JSON payload for a step message.
+        # Returns: a dict with a single "message" key holding the action's message.
         """
         Convert __ENV_CLASS_NAME__Action to JSON payload for step message.
 
@@ -59,6 +67,10 @@ class __ENV_CLASS_NAME__Env(
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[__ENV_CLASS_NAME__Observation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult from a server step/reset response.
+        # Inputs: payload - dict with optional "observation" (echoed_message, message_length, metadata), "reward", "done".
+        # Returns: StepResult wrapping an observation; missing fields default to "", 0, {} and done False; reward may be None.
         """
         Parse server response into StepResult[__ENV_CLASS_NAME__Observation].
 
@@ -84,6 +96,8 @@ class __ENV_CLASS_NAME__Env(
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # HELPER: Builds a State from a state response using "episode_id" (may be None) and "step_count" (default 0).
         """
         Parse server response into State object.
 

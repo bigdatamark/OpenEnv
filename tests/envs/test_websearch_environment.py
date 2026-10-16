@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Live test for the websearch environment. Module is skipped if its dependencies
+# cannot be imported; the test also needs SERPER_API_KEY. Inserts the repo root into
+# sys.path at import time.
 import os
 import sys
 
@@ -28,6 +32,10 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get("SERPER_API_KEY"), reason="SERPER_API_KEY not set"
 )
 def test_websearch_environment():
+    # [FUNCTION DOC]
+    # Resets the env (expects empty contents) then steps with a query; on success expects
+    # 5 web results and query metadata, on error expects empty results and "[ERROR]" in
+    # content. Side effects: real network calls to the Serper API.
     # Create the environment
     env = WebSearchEnvironment()
 

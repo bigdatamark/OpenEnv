@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Converts a HarborRolloutResult into training data: TRL-style trace entries, the strict
+# TrainingTrace API, and a versioned export contract that also audits excluded turns.
+# Refuses eval-only rollouts and captures with fatal findings.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 # Licensed under the BSD-style license in the repository LICENSE file.
@@ -15,6 +19,11 @@ from .models import HarborRolloutResult
 
 
 def _openai_tool_calls(flat: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: converts flat {name, arguments, id?} tool calls into OpenAI nested form
+    # {id, type "function", function {name, arguments}}; ids default to "call_<index>";
+    # already-nested calls pass through; non-dicts and nameless calls are dropped; arguments
+    # are left as captured. Returns the list (empty for None).
     """`{name, arguments}` -> OpenAI's `{id, type, function: {name, arguments}}`.
 
     `HarborTurn.tool_calls` is deliberately flattened: a reward function checking which tool ran should
@@ -56,6 +65,14 @@ def _openai_tool_calls(flat: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def to_trace_entries(result: HarborRolloutResult) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Raises ValueError for rollout_type "eval" or any finding containing "[FATAL". For each
+    # agent turn that is not discarded, is trainable and has completion tokens: uses its
+    # loss_mask or defaults to 0 over prompt and 1 over completion, validates via
+    # validate_training_turn (raises on inconsistency), and builds an entry with request
+    # (messages, tools), an OpenAI-style response (assistant content, tool calls or None,
+    # finish reason), token ids, logprobs, loss mask and metadata (turn, node id, sampling
+    # params, requested params, tool count, finish reason). Returns the list.
     """`HarborRolloutResult` -> TRL `TraceEntry` records, one per trainable turn.
 
     Auxiliary calls and discarded retries are already excluded by the server, so a caller needs no
@@ -133,6 +150,11 @@ def to_trace_entries(result: HarborRolloutResult) -> list[dict[str, Any]]:
 
 
 def to_training_trace(result: HarborRolloutResult) -> TrainingTrace:
+    # [FUNCTION DOC]
+    # Strict variant: requires rollout_type "train" and no fatal findings (ValueError).
+    # Includes every non-discarded agent turn with completion tokens; each must have an
+    # explicit loss_mask and a non-trainable turn must have an all-zero mask (ValueError).
+    # Returns a TrainingTrace of TrainingTurn objects (no token validation here).
     """Return the strict training API; legacy results need explicit producer masks."""
     if result.rollout_type != "train":
         raise ValueError("eval-only rollout has no exact-token training contract")
@@ -181,6 +203,12 @@ def to_training_trace(result: HarborRolloutResult) -> TrainingTrace:
 
 
 def export_training_contract(result: HarborRolloutResult) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds trace entries (same errors as to_trace_entries), requires unique turn ids
+    # (ValueError), and returns a dict: schema_version 1, rollout identity/reward/type fields,
+    # total supervised tokens (sum of entry masks), the trace entries, and a record for every
+    # turn with token ids, logprobs, its mask (all zeros if not selected), finish reason,
+    # discarded/trainable flags and sampling params.
     """Export validated supervision and an explicit audit of excluded turns.
 
     Args:

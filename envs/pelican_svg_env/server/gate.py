@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Deterministic admission gate for submissions: parses and inspects the SVG source for forbidden
+# constructs, renders it, and rejects drawings with too little ink. Defines the ink floor constant
+# (1.5% of pixels) and the GateResult record. Failing submissions skip later scoring layers.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """The deterministic admission check for a submission.
@@ -37,6 +41,9 @@ MIN_INK_FRACTION = 0.015
 
 @dataclass(frozen=True)
 class GateResult:
+    # [CLASS DOC]
+    # Immutable gate outcome: passed flag, list of SourceViolation, optional SourceReport, optional
+    # ImageStats and optional rendered PNG bytes (reused by the vision layer).
     """Outcome of the deterministic admission check.
 
     Attributes:
@@ -61,10 +68,16 @@ class GateResult:
 
     @property
     def codes(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: list of violation code strings in the order raised.
         """`list[str]`: Violation codes, in the order they were raised."""
         return [v.code for v in self.violations]
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a JSON-safe mapping with passed, violations (code/detail pairs), element_counts and
+        # drawable_count from the source report (empty/0 when absent) and image_stats as a mapping or None.
+        # PNG bytes are excluded.
         """Return a JSON-serialisable summary, excluding the raster bytes."""
         return {
             "passed": self.passed,
@@ -82,6 +95,13 @@ def run_gate(
     forbidden_terms: Sequence[str] = (),
     render_size: int = 512,
 ) -> GateResult:
+    # [FUNCTION DOC]
+    # Runs the gate. Inputs: svg_source - extracted SVG text; forbidden_terms - nouns that must not
+    # appear as text; render_size - raster size (default 512).
+    # Steps: inspect source (parse failure gives a failed result with "unparseable" only); collect
+    # source violations; render (failure appends "render_failed" and returns without stats); measure
+    # ink; below the floor append "content_off_canvas" if there are at least 3 drawable elements, else
+    # "blank_canvas". Returns a GateResult that passes only when there are no violations.
     """Run every deterministic check against a submission.
 
     Args:

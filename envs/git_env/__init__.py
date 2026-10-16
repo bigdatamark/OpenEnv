@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Git environment package: agents clone repositories from a shared external
+# Gitea server into an isolated workspace and run git commands. Re-exports the
+# client (GitEnv) and models (GitAction, GitObservation, GitState).
 """
 Git Environment - Git server with Gitea support.
 

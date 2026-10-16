@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic action and observation models for the Sophistry-Bench Sprint advocacy environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -11,6 +13,8 @@ from pydantic import Field
 
 
 class AdvocacyAction(Action):
+    # [CLASS DOC]
+    # Action holding one required string "text": the policy's argument, marked up with claim/cite tags.
     """The policy's one-shot advocacy argument."""
 
     text: str = Field(
@@ -19,6 +23,12 @@ class AdvocacyAction(Action):
 
 
 class AdvocacyObservation(Observation):
+    # [CLASS DOC]
+    # Observation with prompt (full system prompt on reset, empty on step), answer_to_defend, item_id
+    # (QuALITY article id), components (reward component name -> float, a wire-surviving mirror of
+    # metadata) and error (diagnostic text). reward/done/metadata inherited from Observation.
+    # KNOWN ISSUE: the docstring says metadata/components carry all eight components, but the server drops
+    # correctness_reward unless correctness exposure is enabled, so only seven are present by default.
     """Task on reset; scored result on step.
 
     On reset: ``prompt`` holds the full system prompt (passage + question +

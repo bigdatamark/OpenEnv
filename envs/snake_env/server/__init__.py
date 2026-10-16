@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Server subpackage for the Snake environment (FastAPI app and environment implementation). Empty
+# apart from its docstring.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

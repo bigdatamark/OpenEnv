@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Harness adapter for OpenSpiel: exposes an OpenSpiel client as a resource session driven by a
+# single MCP-style tool "play_move" (integer action_id), for use by the core harness rollout code.
+# Also renders tic-tac-toe info states as text boards for prompts and tool results.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -48,6 +52,12 @@ _OPENSPIEL_TOOLS: list[Tool] = [
 
 
 def render_tic_tac_toe_board(info_state: list[float]) -> str:
+    # [FUNCTION DOC]
+    # Renders a 27-float tic-tac-toe info state (three 9-cell planes) as a 3x3 text grid with rows
+    # joined by separator lines. Cells with plane 2 (offset 9) set show "X", plane 3 (offset 18) "O",
+    # otherwise the cell index (doubling as the action id). Returns an empty string if the length is not 27.
+    # KNOWN ISSUE: OpenSpiel's tic-tac-toe planes are ordered empty, nought, cross, so this labels
+    # noughts as "X" and crosses as "O" (the server-side web drawing uses the opposite, correct mapping).
     """Render a TTT ``info_state`` (27 floats, 3 planes) as a 3x3 grid.
 
     OpenSpiel's TTT info_state stores an empty/X/O one-hot for each cell
@@ -75,6 +85,9 @@ def render_tic_tac_toe_board(info_state: list[float]) -> str:
 
 
 def _format_initial_prompt(observation: Any, game_name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the first user prompt text: game name, instructions to call play_move, the legal
+    # actions list and, for tic_tac_toe, the rendered board when available.
     legal = list(getattr(observation, "legal_actions", []) or [])
     info_state = list(getattr(observation, "info_state", []) or [])
     lines = [
@@ -90,12 +103,18 @@ def _format_initial_prompt(observation: Any, game_name: str) -> str:
 
 
 def _build_tool_result(game_name: str) -> Callable[..., ToolResult]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a tool-result builder closure bound to game_name.
     def builder(
         tool_name: str,
         arguments: dict[str, Any],
         result: Any,
         state: Any,
     ) -> ToolResult:
+        # [FUNCTION DOC]
+        # HELPER: Converts a client step result into a ToolResult whose data holds the requested action_id,
+        # legal_actions, reward, done, current_player_id and (for tic_tac_toe) the board text; done is the
+        # step's done flag; metadata holds the reward and the state (dumped to a mapping if it is a model).
         observation = result.observation
         legal = list(getattr(observation, "legal_actions", []) or [])
         info_state = list(getattr(observation, "info_state", []) or [])
@@ -123,6 +142,9 @@ def _build_tool_result(game_name: str) -> Callable[..., ToolResult]:
 
 
 class OpenSpielSessionFactory(ResourceSessionFactory):
+    # [CLASS DOC]
+    # Resource session factory that creates harness sessions over a fresh OpenSpiel client per session
+    # for a fixed game (default "tic_tac_toe").
     """Create OpenSpiel-backed resource sessions for harness rollouts."""
 
     def __init__(
@@ -131,6 +153,8 @@ class OpenSpielSessionFactory(ResourceSessionFactory):
         *,
         game_name: str = "tic_tac_toe",
     ):
+        # [FUNCTION DOC]
+        # Stores the zero-argument client factory callable and the game name.
         self._client_factory = client_factory
         self._game_name = game_name
 
@@ -140,6 +164,12 @@ class OpenSpielSessionFactory(ResourceSessionFactory):
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> StepEnvSessionAdapter:
+        # [FUNCTION DOC]
+        # Creates a new client via the factory and returns a StepEnvSessionAdapter wired with the
+        # play_move tool, an action builder producing OpenSpielAction(action_id as int, game_name), an
+        # initial-messages builder producing one user message with the formatted prompt, and the tool
+        # result builder. Inputs task, seed and episode_id are passed through to the adapter.
+        # Raises KeyError/ValueError at action build time if action_id is missing or not integer-like.
         client = self._client_factory()
         game = self._game_name
 

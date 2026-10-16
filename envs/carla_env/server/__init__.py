@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# CARLA environment server package (FastAPI app, environment, scenarios, vendored navigation
+# agents). No exports.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

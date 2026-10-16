@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Serverless batch driver behind `openenv harbor rollout`: runs startup checks, boots an
+# in-process capture proxy and a public forwarder, runs selected tasks of one dataset
+# sequentially through Harbor, prints per-rollout lines and a summary, and tears down.
+# Re-exports CaptureServer.
 """Drive rollouts without a server: boot capture, run tasks, tear down.
 
 `openenv harbor rollout` uses this. It exists so the whole path (LLM, capture proxy, forwarding,
@@ -45,6 +50,18 @@ async def run_batch(
     provider: str = "openai",
     admin_key: str | None = None,
 ) -> list[HarborRolloutResult]:
+    # [FUNCTION DOC]
+    # Async. Calls prepare() (LLM must be reachable; prints capabilities), takes model and
+    # capture level (default "tokens") from it, resolves api_key, and raises RuntimeError if
+    # the sandbox backend is not available. Resolves dataset task dirs, creates trials_dir
+    # (default /tmp/openenv-harbor-trials), resolves admin_key (argument, env, or random),
+    # starts a CaptureServer on port and a forwarder of type expose (stopping capture if the
+    # forwarder fails). For each index: out-of-range indices are skipped with a message;
+    # otherwise awaits run_rollout with the capture registry/public URL and prints a summary
+    # and up to 3 findings. Always stops forwarder then capture. Prints the batch report and
+    # returns results in order (skipped indices omitted).
+    # KNOWN ISSUE: docstring says "One per index", but out-of-range indices produce no result.
+    # Side effects: network listeners/tunnels, filesystem (trials dir), stdout, sandboxes.
     """Run `task_indices` from `dataset` and print a per-rollout report.
 
     Args:
@@ -179,6 +196,10 @@ async def run_batch(
 
 
 def _summarise(r: HarborRolloutResult) -> str:
+    # [FUNCTION DOC]
+    # HELPER: one-line status for a result: ok/FAILED(type), reward (2dp or None), turns,
+    # roots, multi-turn vs per-turn, trainable tokens (train) or EVAL/<capture level>, ATIF
+    # status, wall seconds, plus an indented truncated error line when present.
     reward = "None" if r.reward is None else f"{r.reward:.2f}"
     mode = "multi-turn" if r.multi_turn else "per-turn"
     status = "ok" if r.ok else f"FAILED ({r.exception_type or 'error'})"
@@ -197,6 +218,10 @@ def _summarise(r: HarborRolloutResult) -> str:
 
 
 def _report(results: list[HarborRolloutResult]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: multi-line batch summary: usable count, solved (reward > 0) of graded, ungraded
+    # count, trainable token/turn totals or an EVAL note when all are eval, and a note that
+    # capture and reward are independent. Returns "no rollouts ran" for an empty list.
     if not results:
         return "no rollouts ran"
     ok = sum(1 for r in results if r.ok)

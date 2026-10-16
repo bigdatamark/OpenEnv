@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Integration tests for the maze_env server: a module-scoped fixture launches it with gunicorn on a
+# free port and the tests drive it through the async MazeEnv client (reset, step, state, step count,
+# metadata). All tests are skipped when gunicorn is not installed. Side effect at import: prepends the
+# repo root to sys.path.
+# KNOWN ISSUE: the module docstring says "OpenSpiel environment server" but the tests target the Maze env.
 """Unit tests for OpenSpiel environment server."""
 
 import asyncio
@@ -25,6 +31,13 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def server():
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture. Picks a free port, starts gunicorn with one uvicorn worker serving
+    # envs.maze_env.server.app:app (PYTHONPATH = repo root and src), and polls /health up to 12 times
+    # (10s sleeps after connection errors). If never healthy, prints logs, kills the process and skips.
+    # Yields the base URL and kills the process afterwards. Side effects: subprocess, network, prints.
+    # KNOWN ISSUE: sets BROWSERGYM_* environment variables that are irrelevant to the maze server
+    # (apparently copied from another env's test); a non-200 health response retries without sleeping.
     """Starts the Maze environment server as a background process."""
     # Define paths for subprocess environment
     ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -102,6 +115,8 @@ def server():
 
 
 def test_health_endpoint(server):
+    # [FUNCTION DOC]
+    # GET /health returns 200 with a "status" key.
     """Test that the health endpoint works."""
     response = requests.get(f"{server}/health")
     assert response.status_code == 200
@@ -109,9 +124,13 @@ def test_health_endpoint(server):
 
 
 def test_reset(server):
+    # [FUNCTION DOC]
+    # reset returns a non-done observation with legal_actions and current/previous positions.
     """Test that reset() returns a valid observation."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test using a MazeEnv context manager.
         async with MazeEnv(base_url=server) as env:
             result = await env.reset()
 
@@ -126,9 +145,13 @@ def test_reset(server):
 
 
 def test_reset_multiple_times(server):
+    # [FUNCTION DOC]
+    # Repeated resets return valid observations and produce different episode ids.
     """Test that reset() can be called multiple times."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test.
         async with MazeEnv(base_url=server) as env:
             result1 = await env.reset()
             result2 = await env.reset()
@@ -148,9 +171,13 @@ def test_reset_multiple_times(server):
 
 
 def test_step(server):
+    # [FUNCTION DOC]
+    # Stepping with the first legal action returns an observation, a numeric or None reward and bool done.
     """Test that step() returns a valid result."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test.
         async with MazeEnv(base_url=server) as env:
             result = await env.reset()
 
@@ -167,9 +194,13 @@ def test_step(server):
 
 
 def test_step_multiple_times(server):
+    # [FUNCTION DOC]
+    # Two consecutive steps (actions 0 and 1) both return observations.
     """Test that step() can be called multiple times."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test.
         async with MazeEnv(base_url=server) as env:
             await env.reset()
 
@@ -189,9 +220,13 @@ def test_step_multiple_times(server):
 
 
 def test_state_endpoint(server):
+    # [FUNCTION DOC]
+    # state after reset has current_position, exit_cell and status.
     """Test that the state endpoint returns valid state."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test.
         async with MazeEnv(base_url=server) as env:
             await env.reset()
 
@@ -207,9 +242,13 @@ def test_state_endpoint(server):
 
 
 def test_step_count_increments(server):
+    # [FUNCTION DOC]
+    # step_count goes 0, 1, 2 across reset and two steps.
     """Test that step count increments correctly."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test.
         async with MazeEnv(base_url=server) as env:
             await env.reset()
 
@@ -232,9 +271,13 @@ def test_step_count_increments(server):
 
 
 def test_action_with_metadata(server):
+    # [FUNCTION DOC]
+    # An action carrying metadata is accepted.
     """Test that actions with metadata work."""
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async body of the test.
         async with MazeEnv(base_url=server) as env:
             await env.reset()
 

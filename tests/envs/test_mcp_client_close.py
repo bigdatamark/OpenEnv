@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Regression tests that MCPClientBase.close stays the synchronous dispatcher inherited from EnvClient
+# and that its async teardown hook (_close_async) disconnects the MCP session then calls the parent
+# teardown.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +35,8 @@ env_client = pytest.importorskip("openenv.core.env_client")
 
 
 def test_close_is_not_an_unawaited_coroutine():
+    # [FUNCTION DOC]
+    # MCPClientBase.close is not a coroutine function.
     """The regression itself: a sync `close()` that returns a coroutine never closes anything."""
     assert not inspect.iscoroutinefunction(mcp_client.MCPClientBase.close), (
         "MCPClientBase.close must stay the inherited SYNC dispatcher; overriding it with an "
@@ -39,16 +45,23 @@ def test_close_is_not_an_unawaited_coroutine():
 
 
 def test_the_async_work_is_still_there_under_the_right_name():
+    # [FUNCTION DOC]
+    # MCPClientBase._close_async is a coroutine function.
     """The cleanup did not disappear — it moved to the hook `close` dispatches to."""
     assert inspect.iscoroutinefunction(mcp_client.MCPClientBase._close_async)
 
 
 def test_close_is_inherited_from_envclient():
+    # [FUNCTION DOC]
+    # MCPClientBase.close is the same object as EnvClient.close.
     """Which is what makes `_dispatch` — and therefore both call styles — apply."""
     assert mcp_client.MCPClientBase.close is env_client.EnvClient.close
 
 
 def test_the_mcp_override_runs_and_then_calls_up(monkeypatch):
+    # [FUNCTION DOC]
+    # With EnvClient._close_async patched to record "parent", a minimal subclass's _close_async records
+    # "disconnect" then "parent".
     """Session teardown must happen AND the parent's socket teardown must still run.
 
     Dropping either half leaks: skipping the MCP part orphans the server-side session, skipping the
@@ -57,16 +70,24 @@ def test_the_mcp_override_runs_and_then_calls_up(monkeypatch):
     order: list[str] = []
 
     class Fake(mcp_client.MCPClientBase):
+        # [CLASS DOC]
+        # HELPER: MCPClientBase subclass skipping real construction.
         def __init__(
             self,
         ):  # deliberately skips real construction; only close is under test
+            # [FUNCTION DOC]
+            # HELPER: Sets the production session id and HTTP client to None.
             self._production_session_id = None
             self._http_client = None
 
         async def _disconnect_async(self):
+            # [FUNCTION DOC]
+            # HELPER: Records "disconnect".
             order.append("disconnect")
 
     async def parent_close(self):
+        # [FUNCTION DOC]
+        # HELPER: Replacement parent teardown recording "parent".
         order.append("parent")
 
     monkeypatch.setattr(

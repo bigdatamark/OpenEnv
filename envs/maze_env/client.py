@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Client for the maze environment. Defines MazeEnv, an EnvClient subclass that serializes
+# MazeAction into the step payload and parses server JSON into MazeObservation/MazeState.
+# Imports models relatively when part of the package, falling back to a top-level "models"
+# import when run standalone.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -24,6 +29,9 @@ except ImportError:
 
 
 class MazeEnv(EnvClient[MazeAction, MazeObservation, MazeState]):
+    # [CLASS DOC]
+    # WebSocket client for one maze session. Implements the three EnvClient hooks: build the step
+    # payload, parse a step/reset response, and parse a state response. All transport is inherited.
     """
     Client for the Maze Environment.
 
@@ -33,6 +41,9 @@ class MazeEnv(EnvClient[MazeAction, MazeObservation, MazeState]):
     """
 
     def _step_payload(self, action: MazeAction) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Builds the step message body.
+        # Inputs: action - a MazeAction. Returns: a mapping with a single key "action" holding the integer action index.
         """
         Convert MazeAction to JSON payload for step message.
 
@@ -47,6 +58,12 @@ class MazeEnv(EnvClient[MazeAction, MazeObservation, MazeState]):
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[MazeObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a server step/reset response into a StepResult.
+        # Inputs: payload - mapping with optional "observation" (holding legal_actions, current_position,
+        # previous_position, metadata), "reward", "done", "metadata".
+        # Returns: StepResult wrapping a MazeObservation; missing lists default to empty, done to False,
+        # reward to None; observation metadata prefers the top-level "metadata" over the nested one.
         """
         Parse server response into StepResult[MazeObservation].
 
@@ -74,6 +91,9 @@ class MazeEnv(EnvClient[MazeAction, MazeObservation, MazeState]):
         )
 
     def _parse_state(self, payload: Dict) -> MazeState:
+        # [FUNCTION DOC]
+        # HELPER: Converts a state response into a MazeState, defaulting step_count to 0, done to False,
+        # position/exit lists to empty and status to "playing".
         """
         Parse server response into State object.
 

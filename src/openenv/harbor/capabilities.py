@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Describes what the Harbor server can run: harness list with trust status (from seams),
+# sandbox backends with working SDK + credentials (via Harbor's own preflight), served
+# datasets, and LLM status; plus a human-readable startup rendering. Defines the set of
+# host-side agents and the advertised sandbox backends.
 """What can this server actually run, right now?
 
 A client should not have to guess. `capabilities()` answers three questions in one call — which
@@ -33,6 +38,8 @@ KNOWN_SANDBOXES = ("docker", "e2b", "modal", "daytona", "hf-sandbox")
 
 @dataclass
 class SandboxStatus:
+    # [CLASS DOC]
+    # Dataclass: sandbox backend name, whether it is usable, and a reason when not.
     name: str
     available: bool
     detail: str = ""
@@ -40,6 +47,9 @@ class SandboxStatus:
 
 @dataclass
 class HarnessStatus:
+    # [CLASS DOC]
+    # Dataclass: harness name, wire dialect, kind ("installed" in sandbox or "base" host-side),
+    # trust status string, whether a subclass is needed, and notes.
     name: str
     dialect: str
     kind: str  # "installed" (runs in the sandbox) | "base" (runs host-side)
@@ -52,12 +62,17 @@ class HarnessStatus:
 
 @dataclass
 class Capabilities:
+    # [CLASS DOC]
+    # Dataclass aggregating harness statuses, sandbox statuses, dataset split descriptors
+    # and the LLM status dict; serializable and renderable.
     harnesses: list[HarnessStatus] = field(default_factory=list)
     sandboxes: list[SandboxStatus] = field(default_factory=list)
     datasets: list[dict[str, Any]] = field(default_factory=list)
     llm: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a plain dict with harnesses and sandboxes as attribute dicts, datasets and llm as-is.
         return {
             "harnesses": [vars(h) for h in self.harnesses],
             "sandboxes": [vars(s) for s in self.sandboxes],
@@ -67,13 +82,25 @@ class Capabilities:
 
     @property
     def available_sandboxes(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: names of available sandboxes, in order.
         return [s.name for s in self.sandboxes if s.available]
 
     @property
     def validated_harnesses(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Property: names of harnesses whose status is "validated".
         return [h.name for h in self.harnesses if h.status == "validated"]
 
     def render(self, *, verbose: bool = False) -> str:
+        # [FUNCTION DOC]
+        # Builds a multi-line report: LLM line with a mark (TRAIN if ok, EVAL ONLY if reachable
+        # but not ok, FAILED if ok is False, else unchecked), URL and auth flag, logprobs mode for
+        # trainable endpoints, an explanation for eval-only endpoints, upstream param fixes and
+        # all non-[INFO] findings (wrapped); sandbox usable counts and per-sandbox lines (detail
+        # truncated); dataset totals and per-split lines; harness counts and names grouped by
+        # dialect (validated only unless verbose; host-side ones starred); and a warning when no
+        # sandbox is usable. Returns the string.
         """Human-readable summary, printed at server start.
 
         Deliberately shows what is NOT available and why, not just what is. A sandbox missing its
@@ -184,6 +211,8 @@ class Capabilities:
 
 
 def _wrap_finding(text: str, width: int = 92, indent: str = " " * 10) -> str:
+    # [FUNCTION DOC]
+    # HELPER: wraps text to width 92 and joins continuation lines with a newline plus a 10-space indent.
     """Wrap one finding to the terminal, keeping the continuation under the same column.
 
     The long ones matter most and are the ones a single line truncates into uselessness.
@@ -195,6 +224,9 @@ def _wrap_finding(text: str, width: int = 92, indent: str = " " * 10) -> str:
 
 
 def _missing_sdk(environment_class: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: inspects the backend class's module for module-level _HAS_<X> flags that are
+    # False; returns an install hint naming those extras, or "" if none (or module not loaded).
     """Report the backend's own verdict on whether its SDK is importable.
 
     Loading the class is not enough. Every Harbor backend guards its provider SDK with a
@@ -231,6 +263,12 @@ def _missing_sdk(environment_class: Any) -> str:
 
 
 def check_sandbox(name: str) -> SandboxStatus:
+    # [FUNCTION DOC]
+    # Returns a SandboxStatus for backend name: unavailable if Harbor is not importable, the
+    # name is not a Harbor EnvironmentType, the backend class fails to load, its SDK flags
+    # report missing extras, or Harbor's run_preflight raises (SystemExit message passed
+    # through, ImportError install hint, any other Exception summarized). Available otherwise.
+    # Never raises for these failures. Side effects: imports backend modules; reads env vars.
     """Ask Harbor whether this backend's credentials are present.
 
     `SystemExit` is caught explicitly: Harbor's preflight raises it as its failure signal, and it
@@ -280,6 +318,9 @@ def check_sandbox(name: str) -> SandboxStatus:
 
 
 def list_harnesses() -> list[HarnessStatus]:
+    # [FUNCTION DOC]
+    # Returns a HarnessStatus for every seam name (sorted): dialect, kind "base" for host-side
+    # agents else "installed", seam status, needs_subclass when the seam has an import path, notes.
     """Every harness with a seam, and how much to trust it."""
     out: list[HarnessStatus] = []
     for name in sorted(set(seams.SEAMS)):
@@ -303,6 +344,11 @@ def capabilities(
     sandboxes: tuple[str, ...] = KNOWN_SANDBOXES,
     llm: dict[str, Any] | None = None,
 ) -> Capabilities:
+    # [FUNCTION DOC]
+    # Builds Capabilities with all harnesses, a check_sandbox result per requested backend,
+    # a copy of llm, and when datasets are given the split list from HarborTaskProvider.
+    # KNOWN ISSUE: docstring says no I/O beyond credential checks, but listing dataset splits
+    # resolves datasets via HarborTaskProvider, which can download/scan them.
     """Full picture. Safe to call on a fresh instance; does no I/O beyond credential checks."""
     result = Capabilities(
         harnesses=list_harnesses(),

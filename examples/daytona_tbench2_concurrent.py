@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example launching N Terminal-Bench 2 (tbench2) environments concurrently as Daytona sandboxes; each runs a reset and
+# one exec command, timings are collected and printed as a table. Exit status is non-zero if any sandbox failed.
+# Requires DAYTONA_API_KEY. Side effects: creates/destroys remote sandboxes, network I/O, stdout.
 """Spawn N environments concurrently on Daytona.
 
 Shows how Daytona scales horizontally — each sandbox is an isolated
@@ -21,6 +25,12 @@ from tbench2_env import Tbench2Action, Tbench2Env
 
 
 async def run_one(env_id: int, image, task_id: str) -> dict:
+    # [FUNCTION DOC]
+    # Starts one sandbox from the image in a thread, waits up to 300 s for readiness, resets to the task and execs a printf
+    # command reporting hostname and 2^env_id. Returns a dict with id, ok flag, phase timings (start, ready, work, total
+    # seconds), truncated instruction and command output; on failure after start returns ok False with the error text.
+    # Always stops the container.
+    # KNOWN ISSUE: an exception from starting the container is outside the try block, so it propagates and aborts the whole gather.
     """Spin up one sandbox, run a reset + step, tear it down."""
     t0 = time.time()
     provider = DaytonaProvider()
@@ -59,6 +69,9 @@ async def run_one(env_id: int, image, task_id: str) -> dict:
 
 
 async def main() -> int:
+    # [FUNCTION DOC]
+    # Parses --n and --task-id, builds a Daytona image from the tbench2 Dockerfile, runs all sandboxes concurrently, prints
+    # a sorted results table and success count. Returns 0 if all succeeded, else 1.
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=10, help="Number of concurrent envs")
     parser.add_argument("--task-id", default="headless-terminal")

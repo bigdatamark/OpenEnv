@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Turns a hosted provider's HTTP 400 error body into a single request edit (drop,
+# rename, or set a parameter) that would make the request acceptable. Defines the
+# protected-field set, a cap on fixes per endpoint (MAX_FIXES), regexes for the
+# provider error phrasings, the set of behaviour-altering params with user-facing
+# warnings, a small legacy-alias table for resolving conflicting param pairs, the
+# ParamFix value object, and diagnose(). Pure functions; no I/O.
 """Turn a provider's 400 into the one edit that would have made the request work.
 
 Hosted providers reject parameters a local vLLM accepts, and they reject them per *model* rather
@@ -113,6 +120,12 @@ BEHAVIOUR_WARNINGS = {
 
 
 def behaviour_warnings(fixes) -> list[str]:
+    # [FUNCTION DOC]
+    # Builds human-readable warnings for fixes that change model behaviour.
+    # Inputs: fixes - iterable of ParamFix (or anything stringifiable), may be None.
+    # For each fix, takes its param attribute (or str(fix)) and, for the first
+    # behaviour-altering name contained as a substring, appends "<name>: <warning>".
+    # Returns: list of warning strings (at most one per fix).
     """Human-readable consequences of any fix that changes model behaviour, not just field names.
 
     Separated from the fix list itself because "renamed max_tokens" and "reasoning turned off" are
@@ -139,6 +152,10 @@ LEGACY_ALIASES = {
 
 @dataclass(frozen=True)
 class ParamFix:
+    # [CLASS DOC]
+    # Immutable description of one edit to a request body. Fields: param (name),
+    # replacement (new name; empty means no rename), value (a value to set; None means
+    # not a set). action is "set" if value is set, else "rename" if replacement, else "drop".
     """One edit to a request body: drop a parameter, rename it, or set it to a demanded value."""
 
     param: str
@@ -147,11 +164,20 @@ class ParamFix:
 
     @property
     def action(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "set", "rename" or "drop" depending on which fields are populated.
         if self.value is not None:
             return "set"
         return "rename" if self.replacement else "drop"
 
     def apply(self, body: dict[str, Any]) -> bool:
+        # [FUNCTION DOC]
+        # Applies the edit to body in place.
+        # Set: if body[param] already equals value returns False, else assigns it (adding the
+        # key if absent) and returns True. Special case: dropping "logprobs" also removes
+        # "top_logprobs"; returns True if either existed. Otherwise returns False if param
+        # is absent; pops it, re-inserts the value under replacement when renaming, returns True.
+        # Side effects: mutates body.
         """Edit `body` in place. Returns whether anything changed.
 
         A rename carries the value across rather than dropping it, because `max_tokens` ->
@@ -180,6 +206,8 @@ class ParamFix:
         return True
 
     def __str__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "set p=v", "renamed p -> r" or "dropped p".
         if self.value is not None:
             return f"set {self.param}={self.value}"
         if self.replacement:
@@ -188,6 +216,19 @@ class ParamFix:
 
 
 def diagnose(body: dict[str, Any] | str | None) -> ParamFix | None:
+    # [FUNCTION DOC]
+    # Infers the single fix requested by a provider 400 body.
+    # Inputs: body - parsed error payload (dict, possibly wrapping an "error" dict) or a
+    # raw string, or None.
+    # Extracts param, message and code; non-dict/non-string error yields None. Checks in
+    # order: exact "not allowed to request logprobs" message -> drop logprobs; a
+    # "Setting 'a' and 'b' ... at the same time" conflict -> drop whichever is the legacy
+    # alias of the other (None for unknown pairs); "set X to 'v'" -> set fix (unless X
+    # protected); "Unrecognized request argument supplied: X" -> fix for X; an
+    # unsupported/unknown parameter code or message prefix -> fix for error.param or the
+    # first quoted name; quoted name followed by "is deprecated/not supported/unsupported"
+    # -> fix for it.
+    # Returns: ParamFix or None when no safe fix can be named.
     """The fix a 400 response body is asking for, or `None` if it is not asking for one.
 
     Args:
@@ -275,6 +316,10 @@ def diagnose(body: dict[str, Any] | str | None) -> ParamFix | None:
 
 
 def _fix(name: str, message: str) -> ParamFix | None:
+    # [FUNCTION DOC]
+    # HELPER: Builds a drop/rename ParamFix for name. Returns None if name is empty or
+    # protected. Uses "Use 'X' instead" from message as replacement only when X differs
+    # from name and is not protected.
     if not name or name in PROTECTED:
         return None
     # Only honour the suggested replacement when it is a *different* field. "Use 'temperature'

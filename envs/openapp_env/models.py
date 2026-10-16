@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for the OpenApp environment: a browser action and a rich browser observation.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -19,6 +21,10 @@ from pydantic import Field
 
 
 class OpenAppAction(Action):
+    # [CLASS DOC]
+    # BrowserGym-style action. action_type (required string: click, fill, select_option, goto, scroll,
+    # send_keys, noop) plus optional bid (element id), text, value, url and direction. No
+    # cross-field validation; the server decides which fields are needed.
     """
     Action for the OpenApp environment.
 
@@ -56,6 +62,10 @@ class OpenAppAction(Action):
 
 
 class OpenAppObservation(Observation):
+    # [CLASS DOC]
+    # Observation of browser/app state: html, url, open_pages_urls, active_page_index (non-negative),
+    # screenshot (base64 string or None), axtree_txt, app_state mapping, task_info mapping or None,
+    # and last_action_error. Inherits done/reward/metadata.
     """
     Observation from the OpenApp environment.
 

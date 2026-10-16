@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Standalone subprocess entry point that runs untrusted AWM verifier code. Reads one JSON payload from stdin
+# (verifier_code, function_name, initial_db_path, final_db_path, final_answer, mode "sql" or "code"), applies
+# POSIX resource limits (CPU 20s, 512 MiB address space, 16 MiB files, 64 open files, no new processes), execs the
+# code with a whitelisted builtins set and an import hook restricted to an allow-list of stdlib modules (os is
+# replaced by a shim exposing only os.path), calls the named verifier function and writes one JSON result to stdout.
+# KNOWN ISSUE: the sandbox is weak - whitelisted builtins such as getattr/setattr/type/vars/globals and allowed
+# modules allow introspection-based escapes; it relies mainly on rlimits and the parent's timeout.
+# KNOWN ISSUE: "print" is whitelisted and writes to the same stdout used for the JSON result, so a verifier that
+# prints corrupts the output the parent parses.
 """
 Out-of-process verifier runner.
 
@@ -211,11 +221,15 @@ import os.path as _stdlib_ospath
 
 
 class _SafeOsShim:
+    # [CLASS DOC]
+    # HELPER: Stand-in for the os module given to verifier code; exposes only the real os.path as attribute "path".
     """Drop-in for ``os`` exposing only ``os.path``."""
 
     path = _stdlib_ospath
 
     def __repr__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a fixed string describing the sandboxed shim.
         return "<sandboxed os shim — only os.path is available>"
 
 
@@ -229,6 +243,14 @@ def _safe_import(
     fromlist: tuple = (),
     level: int = 0,
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Replacement __import__ installed in the verifier's builtins.
+    # Behavior: rejects relative imports (level != 0) with ImportError. If the immediate caller's globals carry the
+    # sandbox marker (i.e. the import comes from verifier code), "os"/"os.*" returns the os shim and any module whose
+    # root name and full name are both outside the allow-list raises ImportError. Otherwise delegates to the real
+    # __import__ with the same arguments.
+    # KNOWN ISSUE: only direct imports from user code are checked; allowed modules may import anything transitively,
+    # and "from os import path" returns the shim (works), but "import os.path as p" binds the shim, not os.path.
     if level != 0:
         raise ImportError("Relative imports are not permitted in verifier code")
 
@@ -246,6 +268,9 @@ def _safe_import(
 
 
 def _build_safe_builtins() -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new dict of the whitelisted builtin names that exist in the real builtins, plus "__import__"
+    # mapped to the restricted import function.
     real = _builtins.__dict__
     safe = {name: real[name] for name in _SAFE_BUILTIN_NAMES if name in real}
     safe["__import__"] = _safe_import
@@ -254,10 +279,16 @@ def _build_safe_builtins() -> dict[str, Any]:
 
 # resource limits
 def _apply_resource_limits() -> None:
+    # [FUNCTION DOC]
+    # HELPER: Sets soft and hard rlimits for CPU, address space, file size, open files and (if available) number of
+    # processes using the module constants. No-op when the resource module is unavailable (Windows). Errors from
+    # unsupported limits are silently ignored. Side effects: permanently lowers limits of the current process.
     if resource is None:
         return  # Windows — fall back to the parent's subprocess timeout.
 
     def _set(which: int, soft: int, hard: int | None = None) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Applies one rlimit (hard defaults to soft); swallows ValueError/OSError/resource.error.
         try:
             resource.setrlimit(which, (soft, hard if hard is not None else soft))
         except (ValueError, OSError, resource.error):
@@ -275,6 +306,10 @@ def _apply_resource_limits() -> None:
 
 
 def _sanitize_for_json(obj: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively converts a value into something JSON-serializable: dicts are rebuilt (tuple keys become
+    # their string form), lists/tuples become lists, bytes are UTF-8 decoded ignoring errors, JSON-serializable
+    # scalars pass through, anything else becomes its str().
     if isinstance(obj, dict):
         return {
             str(k) if isinstance(k, tuple) else k: _sanitize_for_json(v)
@@ -297,6 +332,12 @@ def _call_verifier_func(
     final_db_path: str,
     final_answer: str | None,
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Invokes the verifier with arguments matched to its signature. If it declares any of initial_db_path,
+    # final_db_path, final_answer by name they are passed as keywords (final_answer None becomes ""). If none match and
+    # it takes at least two parameters, passes the two DB paths positionally, plus final_answer ("" if None) when it
+    # takes three or more. Returns whatever the verifier returns; propagates its exceptions.
+    # KNOWN ISSUE: a function with zero or one non-matching parameter is called with no arguments.
     sig = inspect.signature(verify_func)
     params = sig.parameters
 
@@ -318,6 +359,16 @@ def _call_verifier_func(
 
 
 def _run(payload: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Executes the verifier described by the payload and returns the result dict.
+    # Behavior: builds a namespace pre-populated with sqlite3, json, re, the safe builtins, __name__ "__main__" and the
+    # sandbox marker; execs the code; looks up function_name; calls it. Compile/lookup/execution failures return an
+    # error dict ("execution_status" "error" + "error_message", plus "result" "others" in code mode).
+    # Code mode: the return must be a dict with a "result" key, else an error dict; result values other than
+    # "complete"/"others" are coerced to "others"; returns result, "success" status and the sanitized raw result.
+    # SQL mode: returns the verifier's value unchanged if JSON-serializable, else sanitized.
+    # Raises: KeyError if required payload keys are missing.
+    # Side effects: executes arbitrary verifier code (which may read/write the SQLite files).
     mode = payload.get("mode")
     code = payload["verifier_code"]
     function_name = payload["function_name"]
@@ -396,6 +447,10 @@ def _run(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
+    # [FUNCTION DOC]
+    # Entry point: applies resource limits, parses stdin as JSON (bad JSON yields an error dict), runs the verifier,
+    # and writes the JSON result to stdout (non-str values serialized via str; serialization failures yield an error
+    # dict). Always returns exit code 0.
     _apply_resource_limits()
 
     try:

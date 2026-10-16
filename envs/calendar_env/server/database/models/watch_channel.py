@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# SQLAlchemy ORM model for push-notification watch channels (table "watch_channels").
 import json
 from datetime import datetime
 
@@ -7,6 +9,11 @@ from .base import Base
 
 
 class WatchChannel(Base):
+    # [CLASS DOC]
+    # ORM row for a watch subscription: channel id, resource id/uri/type, calendar_id,
+    # user_id, webhook address/token/type, params as JSON text, created/expires/last
+    # notification naive UTC timestamps, is_active stored as the strings "true"/"false",
+    # and an integer notification_count.
     """Database model for storing watch channel subscriptions"""
 
     __tablename__ = "watch_channels"
@@ -49,12 +56,18 @@ class WatchChannel(Base):
     )  # Number of notifications sent
 
     def is_expired(self) -> bool:
+        # [FUNCTION DOC]
+        # Returns False if expires_at is None, otherwise True when current naive UTC time is after expires_at.
         """Check if the channel has expired"""
         if self.expires_at is None:
             return False
         return datetime.utcnow() > self.expires_at
 
     def to_channel_dict(self):
+        # [FUNCTION DOC]
+        # Returns a Google "api#channel" style dict: kind, id, resourceId, resourceUri, token,
+        # expiration (ISO string or None), type, address, params (JSON-decoded or None).
+        # Raises: JSON decode error if params holds invalid JSON.
         """Convert to Channel schema format"""
         return {
             "kind": "api#channel",

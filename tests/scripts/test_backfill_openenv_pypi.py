@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for scripts/backfill_openenv_pypi.py, loaded by file path and registered in
+# sys.modules at import time.
 """Tests for the OpenEnv PyPI backfill helper."""
 
 from __future__ import annotations
@@ -24,6 +27,8 @@ select_versions = backfill_openenv_pypi.select_versions
 
 
 def test_select_versions_defaults_to_backfill_0_2_releases() -> None:
+    # [FUNCTION DOC]
+    # Without explicit versions, selects source releases in [0.2.0, 0.3.0) in order.
     source_releases = {
         "0.1.0": [{}],
         "0.2.0": [{}],
@@ -46,6 +51,8 @@ def test_select_versions_defaults_to_backfill_0_2_releases() -> None:
 
 
 def test_select_versions_refuses_existing_target_release() -> None:
+    # [FUNCTION DOC]
+    # Raises RuntimeError when a requested version already exists on the target.
     with pytest.raises(RuntimeError, match="target release already exists"):
         select_versions(
             source_releases={"0.2.0": [{}]},
@@ -58,6 +65,8 @@ def test_select_versions_refuses_existing_target_release() -> None:
 
 
 def test_numeric_version_key_rejects_non_numeric_versions() -> None:
+    # [FUNCTION DOC]
+    # Pre-release versions like 0.2.0rc1 raise ValueError.
     with pytest.raises(ValueError, match="Only numeric release versions"):
         numeric_version_key("0.2.0rc1")
 
@@ -65,6 +74,9 @@ def test_numeric_version_key_rejects_non_numeric_versions() -> None:
 def test_rewrite_source_tree_renames_project_and_removes_egg_info(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Rewriting a temp tree renames the project in pyproject (incl. extras references) and
+    # README, and deletes the egg-info directory.
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         '[project]\nname = "openenv-core"\nversion = "0.2.0"\n'

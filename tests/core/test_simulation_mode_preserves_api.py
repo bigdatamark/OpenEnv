@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Regression tests that HTTPEnvServer in simulation mode (the default) keeps
+# the full Gym-style HTTP API (/reset, /step, /state), the /ws WebSocket API
+# (including "mcp" messages) and the /mcp WebSocket JSON-RPC endpoint.
+# Side effects: prepends repo src/ and envs/ to sys.path at import time.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -48,12 +53,16 @@ from openenv.core.env_server.types import Action, Observation, State
 
 
 class SimModeTestAction(Action):
+    # [CLASS DOC]
+    # Action carrying a single string "message".
     """Test action for simulation mode testing."""
 
     message: str
 
 
 class SimModeTestObservation(Observation):
+    # [CLASS DOC]
+    # Observation with a "response" string plus reward (default None) and done.
     """Test observation for simulation mode testing."""
 
     response: str
@@ -62,6 +71,8 @@ class SimModeTestObservation(Observation):
 
 
 class SimModeTestState(State):
+    # [CLASS DOC]
+    # State with step_count (default 0) and episode_id (default "test").
     """Test state for simulation mode testing."""
 
     step_count: int = 0
@@ -69,6 +80,9 @@ class SimModeTestState(State):
 
 
 class SimModeTestEnvironment(Environment):
+    # [CLASS DOC]
+    # Minimal echo-style environment supporting concurrent sessions; counts steps
+    # and echoes the action message.
     """
     Test environment for simulation mode API preservation tests.
 
@@ -78,6 +92,8 @@ class SimModeTestEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes step count to 0 and episode id to "sim-test".
         """Initialize the test environment."""
         self._step_count = 0
         self._episode_id = "sim-test"
@@ -85,6 +101,9 @@ class SimModeTestEnvironment(Environment):
     def reset(
         self, seed: int | None = None, episode_id: str | None = None, **kwargs
     ) -> SimModeTestObservation:
+        # [FUNCTION DOC]
+        # Resets the step count, adopts episode_id if truthy; seed is ignored.
+        # Returns an observation with response "reset_complete", no reward, not done.
         """Reset the environment."""
         self._step_count = 0
         if episode_id:
@@ -94,6 +113,9 @@ class SimModeTestEnvironment(Environment):
         )
 
     def step(self, action: SimModeTestAction) -> SimModeTestObservation:
+        # [FUNCTION DOC]
+        # Increments the step count and returns an observation whose response is
+        # "echo: " plus the action message, reward 1.0, not done.
         """Execute an action."""
         self._step_count += 1
         return SimModeTestObservation(
@@ -104,6 +126,9 @@ class SimModeTestEnvironment(Environment):
 
     @property
     def state(self) -> SimModeTestState:
+        # [FUNCTION DOC]
+        # Property returning a SimModeTestState with the current step count and
+        # episode id.
         """Return current state."""
         return SimModeTestState(
             step_count=self._step_count,
@@ -111,11 +136,16 @@ class SimModeTestEnvironment(Environment):
         )
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # No-op cleanup.
         """Cleanup resources."""
         pass
 
 
 class SimModeMCPTestEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment exposing two FastMCP tools (get_step_count, add) and a
+    # trivial Gym-style reset/step.
     """
     Test environment with MCP tools for simulation mode testing.
 
@@ -125,16 +155,23 @@ class SimModeMCPTestEnvironment(MCPEnvironment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates a FastMCP server, registers the nested tools, passes the server to
+        # MCPEnvironment, then sets step count 0 and episode id "sim-mcp-test".
         """Initialize with MCP server and test tools."""
         mcp_server = FastMCP("sim-mode-test-env")
 
         @mcp_server.tool
         def get_step_count() -> int:
+            # [FUNCTION DOC]
+            # MCP tool returning the environment's current step count (closure over self).
             """Get current step count."""
             return self._step_count
 
         @mcp_server.tool
         def add(a: int, b: int) -> int:
+            # [FUNCTION DOC]
+            # MCP tool returning the sum of two integers.
             """Add two numbers."""
             return a + b
 
@@ -145,6 +182,9 @@ class SimModeMCPTestEnvironment(MCPEnvironment):
     def reset(
         self, seed: int | None = None, episode_id: str | None = None, **kwargs
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Resets step count, adopts episode_id if truthy, returns a plain
+        # not-done Observation with no reward.
         """Reset the environment."""
         self._step_count = 0
         if episode_id:
@@ -152,12 +192,17 @@ class SimModeMCPTestEnvironment(MCPEnvironment):
         return Observation(done=False, reward=None)
 
     def _step_impl(self, action: Action, **kwargs) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: handles non-MCP actions by incrementing the step count and returning
+        # a not-done Observation with reward 1.0.
         """Handle non-MCP actions."""
         self._step_count += 1
         return Observation(done=False, reward=1.0)
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning a base State with the episode id and step count.
         """Return current state."""
         return State(
             episode_id=self._episode_id,
@@ -167,6 +212,9 @@ class SimModeMCPTestEnvironment(MCPEnvironment):
 
 @pytest.fixture
 def simulation_mode_app() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture: FastAPI app with routes from HTTPEnvServer for the test environment,
+    # registered without specifying a mode (should default to simulation).
     """
     Create FastAPI app in simulation mode (default).
 
@@ -188,6 +236,9 @@ def simulation_mode_app() -> FastAPI:
 
 @pytest.fixture
 def simulation_mode_app_explicit() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture: same as simulation_mode_app but registers routes with
+    # mode "simulation" explicitly.
     """
     Create FastAPI app with explicit mode='simulation'.
 
@@ -206,6 +257,9 @@ def simulation_mode_app_explicit() -> FastAPI:
 
 @pytest.fixture
 def simulation_mode_mcp_app() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture: FastAPI app serving the MCP test environment with CallToolAction /
+    # CallToolObservation in simulation mode.
     """
     Create FastAPI app in simulation mode with MCP support.
 
@@ -227,9 +281,13 @@ def simulation_mode_mcp_app() -> FastAPI:
 
 
 class TestSimulationModeGymAPIEndpoints:
+    # [CLASS DOC]
+    # HTTP Gym-style endpoint availability tests.
     """Test that simulation mode exposes /reset, /step, /state endpoints."""
 
     def test_simulation_mode_exposes_reset_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # POST /reset returns 200 with observation response "reset_complete".
         """
         Test that /reset endpoint is available in simulation mode.
 
@@ -247,6 +305,8 @@ class TestSimulationModeGymAPIEndpoints:
         assert data["observation"]["response"] == "reset_complete"
 
     def test_simulation_mode_exposes_step_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # POST /step returns 200 and echoes the action message.
         """
         Test that /step endpoint is available in simulation mode.
 
@@ -264,6 +324,8 @@ class TestSimulationModeGymAPIEndpoints:
         assert "echo: test_action" in data["observation"]["response"]
 
     def test_simulation_mode_exposes_state_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # GET /state returns 200 with step_count and episode_id.
         """
         Test that /state endpoint is available in simulation mode.
 
@@ -281,6 +343,8 @@ class TestSimulationModeGymAPIEndpoints:
         assert "episode_id" in data
 
     def test_simulation_mode_reset_with_parameters(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # POST /reset with seed and episode_id returns 200 with an observation.
         """
         Test that /reset accepts optional parameters (seed, episode_id).
 
@@ -304,9 +368,13 @@ class TestSimulationModeGymAPIEndpoints:
 
 
 class TestSimulationModeWebSocketEndpoint:
+    # [CLASS DOC]
+    # /ws WebSocket Gym-style message tests.
     """Test that simulation mode exposes /ws WebSocket endpoint."""
 
     def test_simulation_mode_exposes_websocket_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # A "reset" message over /ws yields an "observation" message containing data.observation.
         """
         Test that /ws WebSocket endpoint is available in simulation mode.
 
@@ -330,6 +398,8 @@ class TestSimulationModeWebSocketEndpoint:
             assert "observation" in response["data"]
 
     def test_simulation_mode_websocket_reset_works(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # Reset over /ws returns response "reset_complete".
         """
         Test that WebSocket reset message works in simulation mode.
 
@@ -349,6 +419,8 @@ class TestSimulationModeWebSocketEndpoint:
             assert response["data"]["observation"]["response"] == "reset_complete"
 
     def test_simulation_mode_websocket_step_works(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # Step over /ws (action fields directly in data) echoes the message.
         """
         Test that WebSocket step message works in simulation mode.
 
@@ -371,6 +443,8 @@ class TestSimulationModeWebSocketEndpoint:
             assert "echo: websocket_test" in response["data"]["observation"]["response"]
 
     def test_simulation_mode_websocket_state_works(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # A "state" message without data returns a "state" message with step_count.
         """
         Test that WebSocket state message works in simulation mode.
 
@@ -397,9 +471,14 @@ class TestSimulationModeWebSocketEndpoint:
 
 
 class TestSimulationModeWebSocketMCPEndpoint:
+    # [CLASS DOC]
+    # Tests "mcp"-typed messages sent over the /ws WebSocket.
     """Test that simulation mode exposes /mcp functionality via WebSocket."""
 
     def test_simulation_mode_websocket_mcp_tools_list(self, simulation_mode_mcp_app):
+        # [FUNCTION DOC]
+        # A JSON-RPC tools/list wrapped in an "mcp" message returns an "mcp" reply
+        # with a tools result.
         """
         Test that WebSocket MCP tools/list works in simulation mode.
 
@@ -428,6 +507,8 @@ class TestSimulationModeWebSocketMCPEndpoint:
             assert "tools" in response["data"]["result"]
 
     def test_simulation_mode_websocket_mcp_tools_call(self, simulation_mode_mcp_app):
+        # [FUNCTION DOC]
+        # A tools/call of "add" over /ws returns an "mcp" reply with a result.
         """
         Test that WebSocket MCP tools/call works in simulation mode.
 
@@ -465,9 +546,15 @@ class TestSimulationModeWebSocketMCPEndpoint:
 
 
 class TestSimulationModeDedicatedMCPEndpoint:
+    # [CLASS DOC]
+    # Tests the dedicated /mcp WebSocket JSON-RPC endpoint.
     """Test that simulation mode exposes WebSocket /mcp endpoint."""
 
     def test_simulation_mode_http_mcp_tools_list(self, simulation_mode_mcp_app):
+        # [FUNCTION DOC]
+        # Raw JSON-RPC tools/list over /mcp returns a tools result.
+        # KNOWN ISSUE: name says "http" but it exercises the WebSocket /mcp endpoint,
+        # not HTTP POST as the module docstring claims.
         """
         Test that WebSocket /mcp tools/list works in simulation mode.
 
@@ -492,6 +579,9 @@ class TestSimulationModeDedicatedMCPEndpoint:
         assert "tools" in response["result"]
 
     def test_simulation_mode_http_mcp_tools_call(self, simulation_mode_mcp_app):
+        # [FUNCTION DOC]
+        # Raw JSON-RPC tools/call of "add" over /mcp returns a result.
+        # KNOWN ISSUE: name says "http" but it uses the WebSocket /mcp endpoint.
         """
         Test that WebSocket /mcp tools/call works in simulation mode.
 
@@ -522,9 +612,13 @@ class TestSimulationModeDedicatedMCPEndpoint:
 
 
 class TestSimulationModeIsDefault:
+    # [CLASS DOC]
+    # Checks that registering without a mode exposes the simulation endpoints.
     """Test that simulation mode is the default when no mode is specified."""
 
     def test_default_mode_exposes_reset(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # POST /reset returns 200 in default mode.
         """
         Test that default mode (no mode parameter) exposes /reset.
 
@@ -539,6 +633,8 @@ class TestSimulationModeIsDefault:
         )
 
     def test_default_mode_exposes_step(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # POST /step returns 200 in default mode.
         """
         Test that default mode (no mode parameter) exposes /step.
 
@@ -553,6 +649,8 @@ class TestSimulationModeIsDefault:
         )
 
     def test_default_mode_exposes_state(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # GET /state returns 200 in default mode.
         """
         Test that default mode (no mode parameter) exposes /state.
 
@@ -569,6 +667,8 @@ class TestSimulationModeIsDefault:
     def test_explicit_simulation_matches_default(
         self, simulation_mode_app, simulation_mode_app_explicit
     ):
+        # [FUNCTION DOC]
+        # Default and explicit simulation apps both return 200 for reset, step and state.
         """
         Test that explicit mode='simulation' behaves identically to default.
 
@@ -606,6 +706,8 @@ class TestSimulationModeIsDefault:
 
 
 class TestSimulationModeFullIntegration:
+    # [CLASS DOC]
+    # End-to-end workflows across HTTP, /ws and /mcp.
     """
     Test that all simulation mode APIs work together correctly.
 
@@ -614,6 +716,9 @@ class TestSimulationModeFullIntegration:
     """
 
     def test_simulation_mode_full_gym_workflow(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # HTTP reset, two steps (each echoed) and state all return 200; does not
+        # check step_count since HTTP endpoints use fresh environment instances.
         """
         Test complete Gym workflow: reset -> step -> step -> state.
 
@@ -642,6 +747,9 @@ class TestSimulationModeFullIntegration:
         # This is expected behavior for stateless HTTP endpoints
 
     def test_simulation_mode_full_websocket_workflow(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # Over one /ws session: reset, step, state (step_count must be 1), then sends
+        # a close message.
         """
         Test complete WebSocket workflow: connect -> reset -> step -> state -> close.
 
@@ -672,6 +780,8 @@ class TestSimulationModeFullIntegration:
             websocket.send_text(json.dumps({"type": "close", "data": {}}))
 
     def test_simulation_mode_mcp_and_gym_coexist(self, simulation_mode_mcp_app):
+        # [FUNCTION DOC]
+        # HTTP /reset succeeds and a tools/list over /mcp returns a result on the same app.
         """
         Test that MCP and Gym-style APIs coexist in simulation mode.
 

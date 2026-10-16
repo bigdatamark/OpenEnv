@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Custom Gradio terminal UI for the Terminus environment: episode controls (setup/verify commands, reset,
+# close), a command runner with examples, final-answer submission, and a terminal-style HTML transcript
+# built from the session state. Defines example commands, default setup/verify commands, CSS and the empty
+# terminal HTML.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -93,14 +98,21 @@ _EMPTY_TERMINAL = (
 
 
 def _escape(value: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: HTML-escapes &, < and > in the string form of value (quotes are not escaped).
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _lines(value: str) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the non-blank lines of value, stripped.
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
 def _extract_tool_text(result: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the tool result text from a step response mapping: the first content item's "text" of
+    # observation.result if present, else its "data" as a string; "" if the shapes are not mappings.
     obs = result.get("observation", {})
     if not isinstance(obs, dict):
         return ""
@@ -116,6 +128,9 @@ def _extract_tool_text(result: dict[str, Any]) -> str:
 
 
 def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns a compact mapping of state for display: episode id, sandbox id, step count, counts of
+    # commands, setup results and verify commands, last reward and last error.
     return {
         "episode_id": state.get("episode_id"),
         "sandbox_id": state.get("sandbox_id"),
@@ -129,6 +144,10 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def render_terminal_html(state: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # Returns styled HTML for the transcript: one entry per setup result and per agent command (status, prompt
+    # line, output, optional error), plus a final-answer box with reward if an answer was submitted; the empty
+    # placeholder if there is nothing to show.
     entries: list[str] = []
 
     for index, item in enumerate(state.get("setup_results", []), start=1):
@@ -172,6 +191,8 @@ def render_terminal_html(state: dict[str, Any]) -> str:
 
 
 def _closed_terminal_html() -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns styled HTML saying the session is closed.
     return (
         _STYLE + "<div class='term-shell'><div class='term-empty'>"
         "Session closed. Reset the sandbox to start a new terminal."
@@ -180,6 +201,8 @@ def _closed_terminal_html() -> str:
 
 
 def _error_html(item: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns an escaped error div for an item with a truthy "error", else "".
     if not item.get("error"):
         return ""
     return f"<div class='term-error'>{_escape(item['error'])}</div>"
@@ -193,7 +216,12 @@ def terminus_ui_builder(
     title: str,
     quick_start_md: Optional[str],
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Gradio builder with the signature expected by create_app. Builds the layout and wires buttons to the web
+    # manager. Only web_manager and title are used. Returns the gr.Blocks.
     def current_state() -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns the web manager's current state mapping, or {} if it raises RuntimeError.
         try:
             return web_manager.get_state()
         except RuntimeError:
@@ -259,6 +287,10 @@ def terminus_ui_builder(
                 )
 
         async def on_reset(setup_text: str, verify_text: str):
+            # [FUNCTION DOC]
+            # Resets via the web manager with setup and verify command lists parsed from the textboxes. Returns
+            # (terminal HTML, state summary, status) where status is the error/message when reset ended done, else a
+            # success message.
             payload = {
                 "setup": _lines(setup_text),
                 "verify": _lines(verify_text),
@@ -276,6 +308,9 @@ def terminus_ui_builder(
             return render_terminal_html(state), _state_summary(state), status
 
         async def on_close():
+            # [FUNCTION DOC]
+            # Closes the environment in the web manager's thread pool (releasing the sandbox; uses a private web manager
+            # method). Returns closed HTML, an empty state and a status message.
             await web_manager._run_sync_in_thread_pool(web_manager.env.close)
             return (
                 _closed_terminal_html(),
@@ -284,6 +319,9 @@ def terminus_ui_builder(
             )
 
         async def on_run(command: str):
+            # [FUNCTION DOC]
+            # Ignores blank commands (no-op updates with a status). Otherwise steps the "terminal" tool with the command
+            # and returns (terminal HTML, state summary, status: the tool's error text or "Command completed.").
             if not command.strip():
                 return gr.update(), gr.update(), "No command provided."
             result = await web_manager.step_environment(
@@ -298,6 +336,9 @@ def terminus_ui_builder(
             return render_terminal_html(state), _state_summary(state), status
 
         async def on_submit(answer: str):
+            # [FUNCTION DOC]
+            # Ignores blank answers. Otherwise steps the "terminal" tool with final_answer and returns (terminal HTML,
+            # state summary, the tool's text or a default status).
             if not answer.strip():
                 return gr.update(), gr.update(), "No final answer provided."
             result = await web_manager.step_environment(
@@ -311,6 +352,8 @@ def terminus_ui_builder(
             return render_terminal_html(state), _state_summary(state), status
 
         def on_example(choice: str):
+            # [FUNCTION DOC]
+            # Returns the example command for a known choice, else a no-op update.
             if choice and choice in COMMAND_EXAMPLES:
                 return COMMAND_EXAMPLES[choice]
             return gr.update()

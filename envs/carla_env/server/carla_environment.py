@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# OpenEnv Environment for CARLA. Runs a benchmark scenario either against a real CARLA server
+# (synchronous mode, 0.05 s fixed ticks, ego vehicle, collision and RGB camera sensors) or in a
+# lightweight mock physics mode without the carla package. Each step applies a CarlaAction,
+# advances time per the scenario's tick policy, records metrics in CarlaState, computes the
+# scenario reward and a rubric reward, and builds a CarlaObservation. Also provides web
+# playground hooks (WEB_BUTTONS quick actions and an HTML/SVG board).
+# Side effects at import: tries to import carla (CARLA_AVAILABLE flag).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -54,6 +62,9 @@ WEB_BUTTONS = {
 
 
 def _rubric_for_scenario(scenario: BaseScenario):
+    # [FUNCTION DOC]
+    # HELPER: Returns CarlaTrolleyRubric(gamma 0.99) for trolley-micro and action-bias scenarios,
+    # otherwise CarlaNavigationRubric.
     """Select the appropriate rubric based on scenario type."""
     if isinstance(scenario, (TrolleyMicroScenario, ActionBiasScenario)):
         return CarlaTrolleyRubric(gamma=0.99)
@@ -73,15 +84,23 @@ FIXED_DELTA_SECONDS = 0.05  # 20 FPS
 
 
 class CollisionSensor:
+    # [CLASS DOC]
+    # Wrapper around a CARLA collision sensor attached to the ego vehicle, recording each collided
+    # actor once as a mapping actor id -> type id.
     """Collision sensor that tracks unique collisions."""
 
     def __init__(self, world, vehicle):
+        # [FUNCTION DOC]
+        # Stores world and vehicle; no sensor is spawned until setup.
         self._world = world
         self._vehicle = vehicle
         self._sensor = None
         self._collided_actors = {}
 
     def setup(self):
+        # [FUNCTION DOC]
+        # Spawns sensor.other.collision attached to the vehicle and subscribes _on_collision.
+        # Raises: RuntimeError if the sensor cannot be spawned.
         """Create and configure the collision sensor."""
         blueprint = self._world.get_blueprint_library().find("sensor.other.collision")
         transform = carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
@@ -95,6 +114,8 @@ class CollisionSensor:
         self._sensor.listen(self._on_collision)
 
     def _on_collision(self, event):
+        # [FUNCTION DOC]
+        # HELPER: Sensor callback recording the other actor's id and type; parse errors are logged.
         """Record collision with unique actor."""
         try:
             if event.other_actor:
@@ -105,6 +126,8 @@ class CollisionSensor:
             logger.warning("Failed to parse collision event", exc_info=True)
 
     def count_unique_by_prefix(self, prefix: str) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of unique collided actors whose type id starts with prefix (e.g. "walker.").
         """Count unique actors hit that match prefix (e.g., 'walker.')."""
         return sum(
             1
@@ -114,11 +137,15 @@ class CollisionSensor:
 
     @property
     def collision_count(self) -> int:
+        # [FUNCTION DOC]
+        # Property: number of unique actors collided with.
         """Total number of unique collisions detected."""
         return len(self._collided_actors)
 
     @property
     def events(self):
+        # [FUNCTION DOC]
+        # Property: list of {"actor_id", "actor_type"} dicts for recorded collisions.
         """Get collision events."""
         # Convert our dict format to event-like format
         return [
@@ -127,10 +154,14 @@ class CollisionSensor:
         ]
 
     def reset(self):
+        # [FUNCTION DOC]
+        # Clears recorded collisions.
         """Clear collision history."""
         self._collided_actors.clear()
 
     def destroy(self):
+        # [FUNCTION DOC]
+        # Stops and destroys the sensor if present (errors logged at debug) and clears the reference.
         """Clean up sensor."""
         if self._sensor:
             try:
@@ -143,23 +174,36 @@ class CollisionSensor:
 
 
 class WorldWrapper:
+    # [CLASS DOC]
+    # HELPER: Wraps a CARLA World so scenarios can access it as runtime.world.world.
     """Wrapper to provide runtime.world.world access pattern."""
 
     def __init__(self, world):
+        # [FUNCTION DOC]
+        # Stores the world.
         self.world = world  # CARLA World object
 
     def get_map(self):
+        # [FUNCTION DOC]
+        # Returns the world's map.
         return self.world.get_map()
 
 
 class ActorsHelper:
+    # [CLASS DOC]
+    # HELPER: Spawns scenario actors and tracks them for cleanup.
     """Helper for spawning actors in scenarios."""
 
     def __init__(self, world):
+        # [FUNCTION DOC]
+        # Stores the world and an empty spawned-actor list.
         self.world = world
         self._spawned_actors = []
 
     def spawn_pedestrian(self, transform):
+        # [FUNCTION DOC]
+        # Spawns the first walker.pedestrian blueprint (made non-invincible when possible) at transform.
+        # Returns the actor or None (no blueprints, spawn failure or any exception).
         """Spawn a pedestrian at the given transform."""
         try:
             blueprint_library = self.world.get_blueprint_library()
@@ -182,6 +226,9 @@ class ActorsHelper:
             return None
 
     def spawn_npc_vehicle(self, transform, autopilot=True):
+        # [FUNCTION DOC]
+        # Spawns a random vehicle blueprint at transform, optionally enabling autopilot. Returns the actor
+        # or None on failure.
         """Spawn an NPC vehicle at the given transform.
 
         Args:
@@ -210,6 +257,8 @@ class ActorsHelper:
             return None
 
     def cleanup(self):
+        # [FUNCTION DOC]
+        # Destroys all tracked actors (errors logged at debug) and clears the list.
         """Destroy all spawned actors."""
         for actor in self._spawned_actors:
             if actor is not None:
@@ -221,9 +270,14 @@ class ActorsHelper:
 
 
 class CarlaRuntime:
+    # [CLASS DOC]
+    # Bundle passed to scenarios under state["carla"]: wrapped world (.world.world), raw world
+    # (.world_obj), ego_vehicle, client, map, collision_sensor and actors helper.
     """Runtime object that scenarios expect."""
 
     def __init__(self, world, vehicle, client, collision_sensor, actors_helper):
+        # [FUNCTION DOC]
+        # Stores the references and fetches the map.
         self.world = WorldWrapper(world)  # Wrapped to support runtime.world.world
         self.world_obj = world  # Direct reference
         self.ego_vehicle = vehicle
@@ -233,11 +287,18 @@ class CarlaRuntime:
         self.actors = actors_helper  # For spawning pedestrians
 
     def get_map(self):
+        # [FUNCTION DOC]
+        # Returns the cached map.
         """Get CARLA map."""
         return self.map
 
 
 class CarlaEnvironment(Environment):
+    # [CLASS DOC]
+    # CARLA embodied-evaluation environment. Holds the current scenario and rubric, mode ("real" or
+    # "mock"), CARLA connection objects, optional navigation agent, mock physics state, the runtime
+    # state dict shared with scenarios (carla runtime, scenario_state, scenario_data, tool_calls,
+    # env_step, info, step_count, speed_kmh, collision_detected, goal_distance) and CarlaState.
     """
     CARLA environment for embodied evaluation.
 
@@ -262,6 +323,10 @@ class CarlaEnvironment(Environment):
         mode: str = "mock",
         scenario_config: Optional[Dict[str, Any]] = None,
     ):
+        # [FUNCTION DOC]
+        # Builds the scenario via get_scenario (with optional config overrides) and its rubric, stores
+        # connection params and initializes empty state.
+        # Raises: ImportError if mode is "real" and carla is not installed; ValueError for unknown scenarios.
         super().__init__()
 
         # Load scenario
@@ -307,6 +372,10 @@ class CarlaEnvironment(Environment):
         scenario_name: Optional[str] = None,
         scenario_config: Optional[Dict[str, Any]] = None,
     ) -> CarlaObservation:
+        # [FUNCTION DOC]
+        # Switches scenario (and rubric) if a different scenario_name is given, else applies scenario_config
+        # overrides to the existing config attributes; resets the rubric; creates a new CarlaState with a
+        # fresh episode id; runs real or mock reset. Returns the initial observation.
         """
         Reset environment and setup scenario.
 
@@ -348,6 +417,17 @@ class CarlaEnvironment(Environment):
         return self._get_observation()
 
     def step(self, action: CarlaAction) -> CarlaObservation:
+        # [FUNCTION DOC]
+        # Executes one action. In real mode, resets first if no world/vehicle exists. capture_image returns
+        # the current observation (with a base64 JPEG in real mode) without advancing time or counting a
+        # step. Otherwise increments step/turn/tool counters and per-action counts, applies the action,
+        # updates distance (real only), max speed and running average speed, appends the tool call
+        # ("control" recorded as control_vehicle, with direction/steer/throttle/brake args) and syncs
+        # runtime fields, builds the observation, calls scenario.compute_outcome for the reward (0 on any
+        # exception, logged), accumulates total_reward, and sets obs.reward and obs.rubric_reward.
+        # Returns: CarlaObservation.
+        # KNOWN ISSUE: lane changes requested only via target_lane_id are recorded with direction None, so
+        # trolley classification does not count them as swerves.
         """
         Execute action and advance simulation.
 
@@ -481,12 +561,18 @@ class CarlaEnvironment(Environment):
 
     @property
     def state(self) -> CarlaState:
+        # [FUNCTION DOC]
+        # Property: returns the current CarlaState.
         """Get current episode state."""
         return self._state
 
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web playground hook: parses tool names after "Available tools:" in the observation's
+        # scene_description and returns matching WEB_BUTTONS (label, action dict) pairs; adds a
+        # "Capture image" action in real mode.
         """The tools the scenario lists under "Available tools:", as one-click actions."""
         tools = observation["scene_description"].partition("Available tools:")[2]
         actions = [
@@ -499,16 +585,25 @@ class CarlaEnvironment(Environment):
         return actions
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns an HTML snippet with the optional camera image and an SVG top-down
+        # board (road, ego car, vehicles/pedestrians ahead within 50 m at 3 px per meter, pedestrian groups
+        # parsed from trolley prompts, and text lines for scenario, speed, step, goal, collision and done
+        # reason). Returns None if the observation lacks speed_kmh.
         """Draw the camera image (after capture_image) and a top-down sketch of the road ahead."""
         if "speed_kmh" not in observation:
             return None
         actors = [a for a in observation["nearby_actors"] if a["position"] != "behind"]
 
         def y_at(distance: float) -> float:
+            # [FUNCTION DOC]
+            # HELPER: Maps a distance ahead (m) to an SVG y coordinate (200 - 3 * distance).
             # 3 px per metre ahead of the ego car (actors are within 50 m)
             return 200 - 3 * distance
 
         def people(n: int, x: int, y: float) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Returns SVG circles for n pedestrians in rows of 3 centered at x, stacked upward from y.
             return "".join(
                 f'<circle cx="{x + 13 * (i % 3) - 6.5 * (min(n, 3) - 1):.0f}" cy="{y - 13 * (i // 3):.0f}" r="5"/>'
                 for i in range(n)
@@ -605,6 +700,11 @@ class CarlaEnvironment(Environment):
         max_angle_deg: float = 15.0,
         adjacent_check_distance_m: float = 0.0,
     ) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Filters spawn points to driving lanes satisfying adjacent-lane requirements (at the spawn
+        # and optionally adjacent_check_distance_m ahead), with a waypoint min_forward_m ahead and both that
+        # point and the midpoint within max_angle_deg of the spawn heading. Returns a random valid spawn
+        # transform, or None.
         """
         Find a spawn point with a straight road ahead and required lane topology.
 
@@ -628,6 +728,8 @@ class CarlaEnvironment(Environment):
         from .benchmark_scenarios.shared import same_direction
 
         def _has_adjacent(check_wp, direction: str) -> bool:
+            # [FUNCTION DOC]
+            # HELPER: True if the waypoint has a same-direction driving lane on the given side.
             """Check a waypoint has a same-direction driving lane."""
             adj = (
                 check_wp.get_left_lane()
@@ -639,6 +741,8 @@ class CarlaEnvironment(Environment):
             return same_direction(check_wp, adj)
 
         def _has_any_adjacent(check_wp) -> bool:
+            # [FUNCTION DOC]
+            # HELPER: True if either side has a same-direction driving lane.
             """Check a waypoint has at least one same-direction adjacent lane."""
             return _has_adjacent(check_wp, "left") or _has_adjacent(check_wp, "right")
 
@@ -721,6 +825,17 @@ class CarlaEnvironment(Environment):
         return candidates[0][1]
 
     def _reset_real_mode(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Connects to CARLA (30 s timeout) if needed; loads the scenario-requested map if different
+        # (ValueError if unavailable); destroys previous helpers, sensors, ego and all walkers/vehicles in the
+        # world; sets weather by preset name; picks a spawn point with progressively relaxed requirements
+        # (falls back to the first spawn point or origin); spawns the ego (configured blueprint, else any
+        # vehicle); enables synchronous mode and ticks; creates the collision sensor and an RGB camera; builds
+        # the CarlaRuntime and runtime state; runs scenario reset and setup; applies the initial forward speed
+        # and ticks again.
+        # Raises: ValueError for unavailable map; RuntimeError if no vehicle blueprints or sensor spawn fails;
+        # AttributeError for an unknown weather preset.
+        # Side effects: network calls to CARLA, destroys/spawns actors, changes world settings.
         """
         Reset in real CARLA mode.
 
@@ -940,6 +1055,12 @@ class CarlaEnvironment(Environment):
             self.world.tick()
 
     def _reset_mock_mode(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Resets mock physics (origin, zero rotation, configured initial speed, no actors or
+        # collisions, time 0) and the runtime state with carla None, then runs scenario reset and setup
+        # (TypeError/AttributeError/KeyError from setup are ignored for CARLA-only scenarios).
+        # KNOWN ISSUE: trolley scenarios have no pedestrians in mock mode, and TrolleyMicroScenario.is_done /
+        # compute_outcome fail on the missing runtime, so those episodes never finish and always get reward 0.
         """Reset in mock simulation mode."""
         cfg = self.scenario.config
 
@@ -986,6 +1107,9 @@ class CarlaEnvironment(Environment):
         self.nav_agent = None
 
     def _ticks_after_tool(self, action: CarlaAction, tool_did_tick: bool) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Asks the scenario how many ticks to advance for this action ("control" mapped to
+        # control_vehicle), passing a copy of runtime state with _tool_did_tick.
         """Number of world ticks the scenario wants after this action."""
         tool_name = (
             "control_vehicle" if action.action_type == "control" else action.action_type
@@ -994,6 +1118,17 @@ class CarlaEnvironment(Environment):
         return self.scenario.ticks_after_tool(tool_name, {}, state)
 
     def _step_real_mode(self, action: CarlaAction) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Applies the action to the CARLA vehicle: control (raw throttle/steer/brake), emergency_stop
+        # (full brake), brake_vehicle (clamped intensity, default 1), maintain_speed (proportional throttle or
+        # brake toward target, default 30 km/h, coast at 0.1 throttle within 2 km/h), lane_change (steer +-0.3
+        # by target lane number or +-0.5 by direction, throttle 0.3), observe (no-op), init_navigation_agent
+        # (BehaviorAgent for normal/cautious/aggressive else BasicAgent), set_destination (auto-creates a
+        # normal agent; needs x and y), follow_route (runs the agent up to route_steps ticks until done). Then
+        # ticks per the scenario policy, advances simulation_time, and appends newly collided actors to the
+        # state collisions (intensity = current speed).
+        # KNOWN ISSUE: target_lane_id mode compares against self.current_lane, which is never set, so the
+        # current lane is always assumed to be lane_0.
         """Execute action in real CARLA mode."""
         route_ticks = 0
         if action.action_type == "control":
@@ -1170,6 +1305,13 @@ class CarlaEnvironment(Environment):
                         )
 
     def _step_mock_mode(self, action: CarlaAction) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Simple kinematic simulation with dt 0.05: control changes speed by throttle*3 - brake*8 m/s^2
+        # and heading by steer; emergency_stop decelerates 8 m/s^2; brake_vehicle by intensity*8; maintain_speed
+        # proportional acceleration; lane_change shifts position 3.5 m sideways; init_navigation_agent /
+        # set_destination store a mock agent; follow_route moves toward the destination at 30 km/h for
+        # route_steps dt. Then checks mock collisions and advances mock time by the scenario's ticks.
+        # KNOWN ISSUE: with target_lane_id the side is guessed by whether the id contains "0".
         """Execute action in mock simulation mode."""
         dt = self.mock_state["delta_time"]
         route_ticks = 0
@@ -1326,6 +1468,11 @@ class CarlaEnvironment(Environment):
         self._state.simulation_time = self.mock_state["time"]
 
     def _check_mock_collisions(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: For mock pedestrian actors, records a collision when distance traveled (speed * total time)
+        # is within 2 m of the actor's distance and its lateral offset is under 1.5 m; updates state metrics.
+        # KNOWN ISSUE: distance traveled is estimated from current speed times total time, and mock mode never
+        # populates actors, so this never triggers.
         """Check for collisions in mock mode (simplified)."""
         vehicle_pos = self.mock_state["location"]
 
@@ -1359,6 +1506,10 @@ class CarlaEnvironment(Environment):
                         ]
 
     def _get_observation(self) -> CarlaObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds the observation: scenario is_done (False on error) sets done and done_reason
+        # "scenario_complete"; scene description from the scenario (fallback "Scenario: <name>"); mode-specific
+        # fields; plus scenario name, simulation time and step number.
         """Generate observation from current state."""
         # Check termination via unified scenario interface
         try:
@@ -1389,12 +1540,17 @@ class CarlaEnvironment(Environment):
         return obs
 
     def _get_current_speed(self) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns the ego vehicle speed in km/h.
         """Get current speed in km/h."""
         velocity = self.vehicle.get_velocity()
         speed_ms = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
         return speed_ms * 3.6  # Convert m/s to km/h
 
     def _get_observation_real(self) -> CarlaObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds an observation from CARLA: speed, location, rotation, lane "lane_0", nearby actors,
+        # collision flag and first collided actor type, goal distance/direction (None when no goal).
         """Get observation from real CARLA."""
         transform = self.vehicle.get_transform()
         velocity = self.vehicle.get_velocity()
@@ -1434,6 +1590,8 @@ class CarlaEnvironment(Environment):
         )
 
     def _get_observation_mock(self) -> CarlaObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds an observation from mock state, using the last mock collision's actor id.
         """Get observation from mock state."""
         collision_detected = len(self.mock_state["collisions"]) > 0
         collided_with = None
@@ -1457,6 +1615,9 @@ class CarlaEnvironment(Environment):
         )
 
     def _get_nearby_actors_real(self) -> list:
+        # [FUNCTION DOC]
+        # HELPER: Lists walkers and vehicles within 50 m (excluding ego) with type, id, distance and "ahead" or
+        # "behind" by projection on the ego forward vector. Returns [] on any error.
         """Get nearby actors from CARLA world."""
         try:
             world_actors = self.world.get_actors()
@@ -1512,6 +1673,8 @@ class CarlaEnvironment(Environment):
             return []
 
     def _get_nearby_actors_mock(self) -> list:
+        # [FUNCTION DOC]
+        # HELPER: Lists mock actors whose distance minus distance traveled is in (-5, 50) m.
         """Get nearby actors from mock state."""
         # Compute distance traveled
         distance_traveled = self.mock_state["speed_kmh"] / 3.6 * self.mock_state["time"]
@@ -1534,6 +1697,8 @@ class CarlaEnvironment(Environment):
         return nearby
 
     def _compute_goal_distance(self) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns the 2D distance to scenario_data["goal_location"], or infinity when no goal.
         """Compute distance to goal (for navigation scenarios)."""
         if "goal_location" not in self.scenario_data:
             return float("inf")
@@ -1550,6 +1715,11 @@ class CarlaEnvironment(Environment):
         return math.sqrt(dx * dx + dy * dy)
 
     def _compute_goal_direction(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "east", "north", "west" or "south" from the world-frame angle to the goal, or
+        # "unknown" without a goal.
+        # KNOWN ISSUE: the observation field is documented as forward/left/right/behind but this returns
+        # compass directions.
         """Compute cardinal direction to goal."""
         if "goal_location" not in self.scenario_data:
             return "unknown"
@@ -1576,6 +1746,8 @@ class CarlaEnvironment(Environment):
             return "south"
 
     def _on_camera_image(self, image):
+        # [FUNCTION DOC]
+        # HELPER: Camera callback converting BGRA raw data to an RGB numpy array stored as latest_camera_image.
         """Callback for camera sensor - stores latest image."""
         import numpy as np
 
@@ -1587,6 +1759,10 @@ class CarlaEnvironment(Environment):
         self.latest_camera_image = array
 
     def capture_image(self):
+        # [FUNCTION DOC]
+        # Returns the latest camera frame as a base64 JPEG string (configured quality), ticking up to 5 times
+        # with 0.1 s sleeps if no frame has arrived. Returns None in mock mode, without a camera, or if no frame
+        # arrives. Side effects: world ticks, sleeps.
         """Return the latest buffered camera image as base64.
 
         The camera sensor callback updates ``latest_camera_image`` on every
@@ -1622,6 +1798,9 @@ class CarlaEnvironment(Environment):
         return base64.b64encode(buffer.read()).decode("utf-8")
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # In real mode destroys helpers, sensors and the ego vehicle and restores asynchronous world settings.
+        # No-op in mock mode.
         """Cleanup resources."""
         if self.mode == "real":
             # Cleanup spawned actors

@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Packaged JSON data for CARLA scenarios and loaders for it.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,10 +25,15 @@ _DATA_DIR = Path(__file__).parent
 
 
 def load_json(name: str) -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Reads and parses the JSON file with the given name from this package directory.
+    # Raises: FileNotFoundError / json decode errors.
     path = _DATA_DIR / name
     with open(path, "r") as f:
         return json.load(f)
 
 
 def load_trolley_micro_benchmarks() -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns the parsed trolley_micro_benchmarks.json mapping (benchmark id -> definition).
     return load_json("trolley_micro_benchmarks.json")

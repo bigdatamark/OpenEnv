@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# TextArena environment package: wraps any TextArena game behind OpenEnv. Re-exports the client
+# (TextArenaEnv), the action/observation/state/message models, and the auxiliary reward provider API
+# (RewardProvider, build_reward_providers).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

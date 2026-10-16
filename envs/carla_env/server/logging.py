@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Logging helpers for the CARLA environment. All loggers are children of "openenv.carla_env";
+# the parent defaults to WARNING. At import, CARLA_ENV_LOG_LEVEL (if set) is applied.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,8 @@ if _pkg_logger.level == logging.NOTSET:
 
 
 def _normalize_level(level: str | int) -> str | int:
+    # [FUNCTION DOC]
+    # HELPER: Converts a level string to an int if numeric, else uppercase; non-strings are returned unchanged.
     """Accept common level formats (e.g. ``"debug"``, ``"10"``)."""
     if isinstance(level, str):
         s = level.strip()
@@ -35,6 +40,10 @@ def _normalize_level(level: str | int) -> str | int:
 
 
 def configure_logging(log_level: str | int | None = None) -> None:
+    # [FUNCTION DOC]
+    # Sets the parent logger level. CARLA_ENV_LOG_LEVEL takes precedence (invalid values are ignored and
+    # fall back to log_level); otherwise uses log_level if given.
+    # Side effects: mutates the global logger level.
     """
     Set the package parent logger level.
 
@@ -53,6 +62,8 @@ def configure_logging(log_level: str | int | None = None) -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
+    # [FUNCTION DOC]
+    # Returns the logger named "openenv.carla_env.<name>".
     """Return a logger namespaced under ``openenv.carla_env``."""
     return logging.getLogger(f"{_LOGGER_BASE}.{name}")
 

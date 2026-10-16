@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# SUMO-RL traffic-signal-control environment package. Re-exports the client (SumoRLEnv) and the
+# SumoAction / SumoObservation / SumoState models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

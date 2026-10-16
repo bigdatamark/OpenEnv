@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Grader contract and registry: the Subject passed to each grader, the Grader protocol,
+# and GraderRegistry which registers graders (directly or via the
+# "openenv.validation.graders" entry-point group) and selects those applicable to a manifest.
 """Grader protocol and registry.
 
 Selection reads the manifest only — the signature never reaches
@@ -22,6 +26,11 @@ ENTRY_POINT_GROUP = "openenv.validation.graders"
 
 @dataclass(frozen=True)
 class Subject:
+    # [CLASS DOC]
+    # Frozen dataclass handed to every grader: package root, normalized manifest, built
+    # image reference (None when build is skipped), running sandbox (None at static level),
+    # output directory for artifacts, and optional runtime evidence collected from the run.
+    # KNOWN ISSUE: the docstring's Attributes list omits runtime_evidence.
     """
     The one argument every grader receives.
 
@@ -48,6 +57,10 @@ class Subject:
 
 @runtime_checkable
 class Grader(Protocol):
+    # [CLASS DOC]
+    # Runtime-checkable protocol for one check: identity, level, required manifest
+    # capability flags, required provider capabilities, dependency check ids, plus
+    # applies_to(manifest) and run(subject) returning a CheckResult (status only, no severity).
     """
     One check. Emits a [`~openenv.validation.report.CheckResult`] with a
     [`~openenv.validation.types.CheckStatus`]; never a severity.
@@ -72,12 +85,20 @@ class Grader(Protocol):
     requires_provider: frozenset[ProviderCapability]
     depends_on: tuple[str, ...]
 
-    def applies_to(self, manifest: NormalizedManifest) -> bool: ...
+    def applies_to(self, manifest: NormalizedManifest) -> bool:
+        # [FUNCTION DOC]
+        # Protocol method: returns whether the check applies to the given manifest.
+        ...
 
-    def run(self, subject: Subject) -> CheckResult: ...
+    def run(self, subject: Subject) -> CheckResult:
+        # [FUNCTION DOC]
+        # Protocol method: executes the check on the subject and returns a CheckResult.
+        ...
 
 
 class GraderRegistry:
+    # [CLASS DOC]
+    # Mutable registry mapping check id to grader instance.
     """
     Holds all known graders and selects the applicable subset per run.
 
@@ -86,9 +107,14 @@ class GraderRegistry:
     """
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Creates an empty check-id -> grader mapping.
         self._graders: dict[str, Grader] = {}
 
     def register(self, grader: Grader) -> None:
+        # [FUNCTION DOC]
+        # Adds a grader under its check_id. Raises ValueError if the id is already registered
+        # or if requires_capabilities names fields not on CapabilitiesSpec. Mutates the registry.
         """
         Register a grader by its check id.
 
@@ -111,6 +137,10 @@ class GraderRegistry:
         self._graders[grader.check_id] = grader
 
     def load_entry_points(self) -> int:
+        # [FUNCTION DOC]
+        # Loads every entry point in the grader group (using select() or the legacy dict API),
+        # instantiating classes with no arguments and registering each result. Returns the count.
+        # Raises whatever loading/instantiation/register raises (e.g. ValueError on duplicates).
         """
         Register third-party graders from the entry-point group.
 
@@ -137,10 +167,16 @@ class GraderRegistry:
         return loaded
 
     def get(self, check_id: str) -> Grader | None:
+        # [FUNCTION DOC]
+        # Returns the grader for check_id or None.
         """Return the registered implementation, or `None` for a reserved check."""
         return self._graders.get(check_id)
 
     def select(self, manifest: NormalizedManifest, max_level: Level) -> list[Grader]:
+        # [FUNCTION DOC]
+        # Returns graders whose level <= max_level, whose required capability fields are all
+        # truthy on manifest.capabilities, and whose applies_to(manifest) is true, sorted by
+        # (level, check_id).
         """
         Select the graders that apply to a manifest, up to a level ceiling.
 

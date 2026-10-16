@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: demonstrates the RLM (recursive language model) loop of repl_env
+# on a toy word-counting task, using HF InferenceClient with a Qwen3.5 model
+# (overridable via REPL_LLM_MODEL env var; HF_TOKEN from env).
 """
 REPL Environment with LLM Integration.
 
@@ -28,10 +32,18 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 
 def create_chat_fn():
+    # [FUNCTION DOC]
+    # Builds the chat callable for the RLM runner.
+    # Returns: function chat_fn(messages, model=None) -> str.
+    # Side effects: creates an InferenceClient (300 s timeout).
     """Create the chat function with Qwen3.5 model card recommended params."""
     client = InferenceClient(model=MODEL_NAME, token=HF_TOKEN, timeout=300)
 
     def chat_fn(messages: list[dict], model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Calls HF chat completions with Qwen3.5 non-thinking sampling params (max_tokens
+        # 2048, temperature 0.6, top_p 0.95, top_k 20, thinking disabled via chat template
+        # kwargs) using model or MODEL_NAME; returns first choice's message content.
         response = client.chat.completions.create(
             model=model or MODEL_NAME,
             messages=messages,
@@ -54,6 +66,10 @@ def create_chat_fn():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Entry point: runs LocalRLMRunner (max depth 3, MAX_ITERATIONS) on a short fixed
+    # context with a word-count task and prints the final answer and iteration count.
+    # Side effects: network calls, stdout.
     print("=" * 60)
     print("REPL Environment with LLM Integration (Qwen)")
     print("=" * 60)

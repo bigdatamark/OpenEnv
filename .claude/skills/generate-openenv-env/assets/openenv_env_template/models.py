@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Template data models (pydantic) for the action and observation of a generated echo-style environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,12 +17,16 @@ from pydantic import Field
 
 
 class __ENV_CLASS_NAME__Action(Action):
+    # [CLASS DOC]
+    # Action carrying a single required string field "message" to be echoed.
     """Action for the __ENV_TITLE_NAME__ environment - just a message to echo."""
 
     message: str = Field(..., description="Message to echo back")
 
 
 class __ENV_CLASS_NAME__Observation(Observation):
+    # [CLASS DOC]
+    # Observation with the echoed message (default "") and its length (default 0), plus base fields done/reward/metadata.
     """Observation from the __ENV_TITLE_NAME__ environment - the echoed message."""
 
     echoed_message: str = Field(default="", description="The echoed message")

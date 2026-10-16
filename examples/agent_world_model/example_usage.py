@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# End-to-end example of an LLM agent driving the Agent World Model (AWM) environment via AWMEnv.
+# Lists all scenarios (asserting 1000 scenarios x 10 tasks), resets into scenario "e_commerce_33" task 0, lists tools,
+# runs a short LLM agent loop over an OpenAI-compatible endpoint using <tool_call> JSON blocks, then calls the verify
+# tool in "code" and "sql" modes and ends the episode with keep_session enabled.
+# Config via environment variables: AWM_BASE_URL, ENDPOINT_URL, OPENAI_API_KEY, AWM_EXAMPLE_AGENT_MODEL, OPENENV_AWM_LLM_*.
+# Side effects: network calls to the AWM server and the LLM endpoint; prints to stdout.
 """
 Complete LLM agent example for AWM environment.
 
@@ -40,6 +47,9 @@ from agent_world_model_env.server.prompts import DEFAULT_SYSTEM_PROMPT
 
 
 def parse_tool_call(content: str) -> dict | None:
+    # [FUNCTION DOC]
+    # Finds the first <tool_call>...</tool_call> block in text and parses its body as JSON. If the JSON is a list, uses
+    # its first element. Returns the resulting dict if it contains a "name" key, otherwise None (also None on no match or invalid JSON).
     """Extract the first <tool_call> block from LLM output."""
     m = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", content, re.DOTALL)
     if not m:
@@ -56,6 +66,9 @@ def parse_tool_call(content: str) -> dict | None:
 
 
 def format_tools(tools) -> str:
+    # [FUNCTION DOC]
+    # Renders a list of MCP tool objects (with name, description, input_schema) as a numbered human-readable text listing
+    # each tool's parameters with type, required marker and description. Returns the joined string.
     """Format Tool objects into a readable string for the LLM."""
     lines = [f"Available MCP Tools ({len(tools)} tools):", "=" * 60]
     for i, t in enumerate(tools, 1):
@@ -77,6 +90,14 @@ def format_tools(tools) -> str:
 
 
 async def main():
+    # [FUNCTION DOC]
+    # Runs the full demo described in the module doc. The agent loop runs up to 5 iterations: the model's reply is parsed
+    # for a tool call; "list_tools" maps to ListToolsAction, "call_tool" maps to CallToolAction with inner arguments
+    # (JSON-decoded if a string, else empty dict), anything else yields an error message; tool output is appended as a user message.
+    # A reply without a tool call ends the loop as the final answer.
+    # Raises: AssertionError if scenario counts differ; KeyError if ENDPOINT_URL/OPENAI_API_KEY are unset.
+    # KNOWN ISSUE: if the first LLM reply is a final answer, the later "result.reward" print is fine, but if MAX_ITERATIONS is
+    # reached "content" is the last tool-calling reply, which is then passed to the verifier as the final answer.
     base_url = os.environ.get("AWM_BASE_URL", "http://localhost:8899")
     print(f"Connecting to AWM server at {base_url}")
     async with AWMEnv(base_url=base_url) as env:

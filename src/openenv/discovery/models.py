@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Pydantic data model of the discovery profile (version "0.1-draft"): Environment Cards
+# (revision-bound declarations about one environment in a GitHub repo), ARD discovery
+# entries wrapping them, and the catalog snapshot with its inventory, issues and digest.
+# Also defines constants (profile version, media type, ARD context, simulation-control
+# names, 16 MiB catalog cap), constrained string types (NonEmpty, Revision = 40/64 hex
+# commit, Publisher = DNS name, RelativePath, MetadataURL) and their validators.
+# All models are strict, frozen and forbid extra keys; cross-field validators enforce
+# the profile's invariants and raise ValueError (surfaced as ValidationError).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """The declaration-only Environment Card and repository snapshot profile."""
@@ -48,6 +57,10 @@ Publisher = Annotated[
 
 
 def relative_path(value: str) -> str:
+    # [FUNCTION DOC]
+    # Validates a normalized repository-relative POSIX path: "." is allowed; otherwise
+    # rejects empty strings, control / line-separator characters, backslashes, absolute paths
+    # and empty, "." or ".." components. Returns the value; raises ValueError. Does not touch the filesystem.
     """Validate a normalized repository-relative locator without resolving it."""
     if value == ".":
         return value
@@ -96,6 +109,10 @@ RelativePath = Annotated[
 
 
 def github_repository(uri: str) -> str:
+    # [FUNCTION DOC]
+    # Validates a GitHub HTTPS clone URI (https, host github.com, no query/fragment/percent
+    # escapes, path ending ".git") and returns its "owner/repo" identity. Raises ValueError
+    # if the URI shape, identity charset, or "."/".." components are invalid.
     """Return the native repository identity of a credential-free GitHub URI."""
     parsed = urlsplit(uri)
     if (
@@ -118,6 +135,9 @@ def github_repository(uri: str) -> str:
 
 
 def metadata_url(value: str) -> str:
+    # [FUNCTION DOC]
+    # Validates a metadata reference URL: must be https with a hostname, no username or
+    # password, and no backslash in the netloc. Returns the value; raises ValueError.
     parsed = urlsplit(value)
     if (
         parsed.scheme != "https"
@@ -134,6 +154,9 @@ MetadataURL = Annotated[NonEmpty, AfterValidator(metadata_url)]
 
 
 class ProfileModel(BaseModel):
+    # [CLASS DOC]
+    # Base pydantic model for all profile types: forbids extra keys, strict typing, frozen
+    # (immutable, hashable), accepts field names or aliases, and disallows inf/NaN.
     model_config = ConfigDict(
         extra="forbid",
         strict=True,
@@ -144,6 +167,8 @@ class ProfileModel(BaseModel):
 
 
 class Owner(ProfileModel):
+    # [CLASS DOC]
+    # Declared source owner: an authority (e.g. github.com) and an id. Not verified.
     """A source-owner declaration, not verification or copyright attribution."""
 
     authority: NonEmpty
@@ -151,6 +176,8 @@ class Owner(ProfileModel):
 
 
 class RepositorySource(ProfileModel):
+    # [CLASS DOC]
+    # A pinned GitHub repository: provider "github", id (owner/repo), clone uri, commit revision.
     provider: Literal["github"]
     id: NonEmpty
     uri: NonEmpty
@@ -158,16 +185,22 @@ class RepositorySource(ProfileModel):
 
     @model_validator(mode="after")
     def consistent_repository(self) -> RepositorySource:
+        # [FUNCTION DOC]
+        # Validator: requires id to equal the identity derived from uri; raises ValueError otherwise.
         if github_repository(self.uri) != self.id:
             raise ValueError("source.id must match the repository URI")
         return self
 
 
 class EnvironmentSource(RepositorySource):
+    # [CLASS DOC]
+    # RepositorySource plus the environment's repository-relative directory path.
     path: RelativePath
 
 
 class GitArtifact(ProfileModel):
+    # [CLASS DOC]
+    # An immutable git artifact locator: kind "git", uri, path and commit revision.
     kind: Literal["git"]
     uri: NonEmpty
     path: RelativePath
@@ -175,11 +208,16 @@ class GitArtifact(ProfileModel):
 
 
 class OrchestrationInterface(ProfileModel):
+    # [CLASS DOC]
+    # Interface descriptor for the OpenEnv orchestration (training/infra) API.
     role: Literal["orchestration"]
     protocol: Literal["openenv"]
 
 
 class AgentToolsInterface(ProfileModel):
+    # [CLASS DOC]
+    # Interface descriptor for declared agent-facing tools: protocol, status "declared" and
+    # the source revision that evidences it.
     role: Literal["agent-tools"]
     protocol: NonEmpty
     status: Literal["declared"]
@@ -192,6 +230,10 @@ Interface = Annotated[
 
 
 class EnvironmentCard(ProfileModel):
+    # [CLASS DOC]
+    # The Environment Card: name, description, owner, source, artifact availability and
+    # artifacts, license (+url), interfaces, optional manifest spec version and openenv
+    # requirement. Its JSON schema extra encodes the conditional rules for schema consumers.
     """A revision-bound source declaration under the experimental 0.1 profile."""
 
     model_config = ConfigDict(
@@ -257,6 +299,9 @@ class EnvironmentCard(ProfileModel):
     @field_validator("license")
     @classmethod
     def declared_license(cls, value: str) -> str:
+        # [FUNCTION DOC]
+        # Validator: keeps "other"/"unknown", otherwise canonicalizes the SPDX expression
+        # (invalid expressions raise).
         if value in {"other", "unknown"}:
             return value
         return str(canonicalize_license_expression(value))
@@ -264,6 +309,9 @@ class EnvironmentCard(ProfileModel):
     @field_validator("framework_requirement")
     @classmethod
     def declared_requirement(cls, value: str | None) -> str | None:
+        # [FUNCTION DOC]
+        # Validator: if set, parses it as a PEP 508 requirement and requires the package name
+        # to be openenv; raises ValueError (or InvalidRequirement) otherwise. Returns value.
         if value is not None:
             requirement = Requirement(value)
             if canonicalize_name(requirement.name) != "openenv":
@@ -274,6 +322,12 @@ class EnvironmentCard(ProfileModel):
 
     @model_validator(mode="after")
     def subject_and_claims(self) -> EnvironmentCard:
+        # [FUNCTION DOC]
+        # Cross-field validator: "resolvable" requires at least one artifact and other
+        # availabilities forbid artifacts; each artifact must equal the source (uri, path,
+        # revision); license "other" requires license_url; exactly one orchestration interface;
+        # every agent-tools interface must match the source revision and protocols must be unique.
+        # Returns self; raises ValueError on any violation.
         if self.artifact_availability == "resolvable" and not self.artifacts:
             raise ValueError("resolvable records require an immutable artifact")
         if self.artifact_availability != "resolvable" and self.artifacts:
@@ -306,6 +360,10 @@ class EnvironmentCard(ProfileModel):
 
 
 class DiscoveryEntry(ProfileModel):
+    # [CLASS DOC]
+    # ARD discovery entry wrapping an EnvironmentCard: JSON-LD @context, urn:air identifier,
+    # displayName, media type, description, tags, capabilities (agent tool names),
+    # representativeQueries and free-form JSON metadata (used for provenance).
     context: Literal["https://agenticresourcediscovery.org/context/v1"] = Field(
         default=ARD_CONTEXT, alias="@context"
     )
@@ -325,6 +383,10 @@ class DiscoveryEntry(ProfileModel):
 
     @model_validator(mode="after")
     def revision_card(self) -> DiscoveryEntry:
+        # [FUNCTION DOC]
+        # Validator: identifier must start with "urn:air:" and end with ":<source revision>";
+        # capabilities must not include simulation controls; non-empty capabilities require an
+        # agent-tools interface on the card. Raises ValueError; returns self.
         if not self.identifier.startswith("urn:air:") or not self.identifier.endswith(
             ":" + self.data.source.revision
         ):
@@ -341,11 +403,15 @@ class DiscoveryEntry(ProfileModel):
 
 
 class Inventory(ProfileModel):
+    # [CLASS DOC]
+    # The scanned inventory: root directory and the environment paths found under it.
     root: RelativePath
     paths: list[RelativePath]
 
     @model_validator(mode="after")
     def direct_children(self) -> Inventory:
+        # [FUNCTION DOC]
+        # Validator: every path must be a direct child of root (not "."). Raises ValueError.
         parent = "" if self.root == "." else self.root
         if any(path == "." or path.rpartition("/")[0] != parent for path in self.paths):
             raise ValueError(
@@ -355,6 +421,8 @@ class Inventory(ProfileModel):
 
 
 class CatalogIssue(ProfileModel):
+    # [CLASS DOC]
+    # A per-environment problem found while building: path, code, message, severity warning/error.
     path: RelativePath
     code: NonEmpty
     message: NonEmpty
@@ -362,11 +430,16 @@ class CatalogIssue(ProfileModel):
 
 
 class Generator(ProfileModel):
+    # [CLASS DOC]
+    # Identifies the producing tool (fixed name "openenv-git-catalog", version "1").
     name: Literal["openenv-git-catalog"] = "openenv-git-catalog"
     version: Literal["1"] = "1"
 
 
 class CatalogSnapshot(ProfileModel):
+    # [CLASS DOC]
+    # A complete catalog: profile version, publisher DNS name, repository source, generator,
+    # inventory, entries, issues, complete flag, and a "sha256:<hex>" content digest.
     schema_version: Literal["0.1-draft"] = PROFILE_VERSION
     publisher: Publisher
     source: RepositorySource
@@ -379,6 +452,11 @@ class CatalogSnapshot(ProfileModel):
 
     @model_validator(mode="after")
     def inventory_accounting(self) -> CatalogSnapshot:
+        # [FUNCTION DOC]
+        # Validator: inventory paths unique; every entry's source matches the snapshot source and
+        # its identifier is under "urn:air:<publisher>:"; identifiers unique; at most one entry
+        # per path; entry paths and error-issue paths are disjoint and together equal the
+        # inventory; complete is true iff there are no error issues. Raises ValueError. Does not check the digest.
         paths = self.inventory.paths
         if len(paths) != len(set(paths)):
             raise ValueError("inventory contains duplicate environment paths")
@@ -409,16 +487,23 @@ class CatalogSnapshot(ProfileModel):
 
 
 class SearchMatch(ProfileModel):
+    # [CLASS DOC]
+    # A search result: an entry and an integer score 0-100.
     entry: DiscoveryEntry
     score: Annotated[int, Field(ge=0, le=100)]
 
 
 class SupersededEntry(ProfileModel):
+    # [CLASS DOC]
+    # A pair of previous/current entries for the same environment path.
     previous: DiscoveryEntry
     current: DiscoveryEntry
 
 
 class CatalogChanges(ProfileModel):
+    # [CLASS DOC]
+    # Diff between two snapshots: added, withdrawn, superseded (new identifier, i.e. new
+    # revision) and corrected (same identifier, different content) entries.
     added: list[DiscoveryEntry]
     withdrawn: list[DiscoveryEntry]
     superseded: list[SupersededEntry]

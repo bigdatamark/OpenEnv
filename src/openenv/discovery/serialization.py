@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Strict JSON parsing, canonical digesting, and bounded load/atomic write of catalog
+# snapshots on the local filesystem. No network access.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Bounded, deterministic catalog serialization without network resolution."""
@@ -17,6 +20,8 @@ from .models import CatalogSnapshot, MAX_CATALOG_BYTES
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    # [FUNCTION DOC]
+    # HELPER: json object_pairs_hook that builds a dict and raises CatalogError on duplicate keys.
     result = {}
     for key, value in pairs:
         if key in result:
@@ -26,10 +31,15 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def _non_json_number(value: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: json parse_constant hook that always raises CatalogError (rejects NaN/Infinity).
     raise CatalogError("JSON contains a non-finite number")
 
 
 def parse_json(data: str) -> object:
+    # [FUNCTION DOC]
+    # Parses JSON text rejecting duplicate keys and non-finite numbers. Returns the value.
+    # Raises CatalogError on invalid JSON or excessive nesting.
     try:
         return json.loads(
             data,
@@ -41,6 +51,9 @@ def parse_json(data: str) -> object:
 
 
 def catalog_digest(snapshot: CatalogSnapshot) -> str:
+    # [FUNCTION DOC]
+    # Computes "sha256:<hex>" over the snapshot dumped in JSON mode by alias, excluding
+    # None fields and the digest field, encoded as compact sorted-key UTF-8 JSON.
     payload = snapshot.model_dump(
         by_alias=True, exclude_none=True, exclude={"digest"}, mode="json"
     )
@@ -55,6 +68,9 @@ def catalog_digest(snapshot: CatalogSnapshot) -> str:
 
 
 def require_complete(snapshot: CatalogSnapshot) -> None:
+    # [FUNCTION DOC]
+    # Raises CatalogError if the snapshot is not complete or its digest does not match
+    # the recomputed digest. Returns None otherwise.
     if not snapshot.complete:
         raise CatalogError("The configured catalog is incomplete")
     if catalog_digest(snapshot) != snapshot.digest:
@@ -62,6 +78,11 @@ def require_complete(snapshot: CatalogSnapshot) -> None:
 
 
 def load_catalog(path: str | Path) -> CatalogSnapshot:
+    # [FUNCTION DOC]
+    # Reads a snapshot file (at most 16 MiB), parses strict JSON, validates as
+    # CatalogSnapshot and requires completeness and a matching digest. Returns it.
+    # Raises CatalogError on read errors, oversize, non-UTF-8, invalid JSON/profile,
+    # incomplete or digest mismatch.
     """
     Read one complete, versioned local metadata snapshot.
 
@@ -86,6 +107,11 @@ def load_catalog(path: str | Path) -> CatalogSnapshot:
 
 
 def write_catalog(snapshot: CatalogSnapshot, path: str | Path) -> None:
+    # [FUNCTION DOC]
+    # Writes the snapshot as indented sorted-key JSON plus newline. Requires a matching
+    # digest (incomplete snapshots are allowed) and size <= 16 MiB, else CatalogError.
+    # Writes to a temp file in the destination directory, fsyncs, then atomically replaces
+    # the destination; removes the temp file on failure. OSError -> CatalogError.
     """
     Atomically write a snapshot, including explicitly incomplete build reports.
 

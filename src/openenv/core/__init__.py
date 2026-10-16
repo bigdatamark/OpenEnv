@@ -1,3 +1,9 @@
+# [PACKAGE DOC]
+# Public entry point of openenv.core. Eagerly imports and re-exports everything
+# from env_server (its __all__), and lazily exposes client-side classes
+# (EnvClient, SyncEnvClient, GenericEnvClient/GenericAction, MCP clients, LLM
+# clients) through a module-level attribute hook, so importing the package does
+# not pull in client dependencies until those names are used.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Core components for agentic environments."""
@@ -57,6 +63,12 @@ _LAZY_ATTRS = {
 
 
 def __getattr__(name: str):
+    # [FUNCTION DOC]
+    # Module attribute hook. For names in the lazy table, imports the target
+    # submodule, caches the attribute in module globals and returns it. Otherwise
+    # returns (and caches) the attribute of env_server.
+    # Raises: AttributeError if neither provides the name; ImportError from lazy
+    # submodule imports propagates.
     if name in _LAZY_ATTRS:
         module_path, attr_name = _LAZY_ATTRS[name]
         module = import_module(module_path, __name__)
@@ -74,4 +86,6 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
+    # [FUNCTION DOC]
+    # Returns the sorted union of module globals and __all__.
     return sorted(set(globals().keys()) | set(__all__))

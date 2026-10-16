@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic wire models for the CARLA environment: the action schema (ActionType literal of
+# supported action kinds), the per-step observation, and the episode state with metrics.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -32,6 +35,12 @@ ActionType = Literal[
 
 
 class CarlaAction(Action):
+    # [CLASS DOC]
+    # Agent action. action_type (default "observe") selects behavior; remaining fields are
+    # parameters for specific types: throttle/steer/brake (control, range-checked), lane_direction
+    # (deprecated) and target_lane_id (lane_change), target_speed_kmh 0-200 (maintain_speed),
+    # brake_intensity 0-1 (brake_vehicle), navigation_behavior (init_navigation_agent, default
+    # "normal"), destination_x/y/z (set_destination), route_steps >= 1 (follow_route, default 1).
     """
     Action for CARLA vehicle control.
 
@@ -100,6 +109,11 @@ class CarlaAction(Action):
 
 
 class CarlaObservation(Observation):
+    # [CLASS DOC]
+    # Per-step observation: text scene description, ego speed/location/rotation, optional goal
+    # distance and direction, current lane, nearby actors list, collision flag/intensity/actor,
+    # scenario name, simulation time, step number, done_reason, optional rubric_reward, and an
+    # optional base64 JPEG camera_image (only after capture_image). Inherits done/reward/metadata.
     """
     Observation from CARLA environment.
 
@@ -169,6 +183,10 @@ class CarlaObservation(Observation):
 
 
 class CarlaState(State):
+    # [CLASS DOC]
+    # Episode state: scenario name, town (default Town10HD_Opt), weather, distance, cumulative
+    # reward, simulation time, turn/tool-call counters and per-action counts, truncation flag,
+    # average/max speed, collision list/count/intensity sum, and free-form scenario_data.
     """
     Episode state for CARLA environment.
     """

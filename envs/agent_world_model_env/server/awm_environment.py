@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Server-side AWM environment. Each instance serves one session: reset() builds a fresh SQLite DB for the chosen
+# scenario in a temp session dir, snapshots it, and starts the scenario's FastAPI app as a subprocess; step() proxies
+# MCP list/call tool actions to it and handles the special tools "verify", "done" and "__list_scenarios__".
+# Rewards are looked up by reward-type label in a per-episode reward config. Tool error messages are classified by
+# keyword into tool_not_found / invalid_args / timeout / server_error.
 """
 AWM Environment wraps 1,000 Agent World Model sub-environments into a single OpenEnv
 environment. Each sub-environment is launched as a subprocess on demand
@@ -51,6 +57,9 @@ _TIMEOUT_KEYWORDS = ["timeout", "timed out"]
 
 
 def _classify_tool_error(error_msg: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Case-insensitive keyword match on an error message. Returns "tool_not_found", "invalid_args", "timeout"
+    # (checked in that order) or "server_error" by default.
     """Classify a tool call error into a reward_type string."""
     lower = error_msg.lower()
     if any(kw in lower for kw in _TOOL_NOT_FOUND_KEYWORDS):
@@ -63,6 +72,10 @@ def _classify_tool_error(error_msg: str) -> str:
 
 
 def _run_async_oneshot(coro: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Runs a coroutine to completion on a brand-new event loop, closes the loop and returns the result.
+    # Raises: whatever the coroutine raises; RuntimeError if called from a thread with a running loop is not raised
+    # (new loop) but blocking happens on the calling thread.
     """Run an async coroutine from sync context (one-shot, for LLM judge etc.)."""
     loop = asyncio.new_event_loop()
     try:
@@ -72,6 +85,11 @@ def _run_async_oneshot(coro: Any) -> Any:
 
 
 class AWMEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment for AWM supporting concurrent sessions (one instance per session). Holds the data loader
+    # (shared when supplied), a ScenarioProcess, episode State, scenario/task/verifier availability, session paths, LLM
+    # judge config, a cached tool list, the action trajectory, keep-session flag, reward config and its id in the global
+    # session registry.
     """
     Lifecycle:
         1. reset(scenario="...", task_idx=...) -> starts a sub-env subprocess
@@ -85,6 +103,9 @@ class AWMEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self, data_loader: AWMDataLoader | None = None):
+        # [FUNCTION DOC]
+        # Initializes all fields: given or new data loader, a fresh ScenarioProcess, State with no episode id, empty
+        # trajectory and a copy of the default reward config. No I/O.
         super().__init__()
 
         self._data_loader = data_loader or AWMDataLoader()
@@ -130,6 +151,19 @@ class AWMEnvironment(Environment):
         llm_model: str | None = None,
         **kwargs: Any,
     ) -> AWMObservation:
+        # [FUNCTION DOC]
+        # Starts a new episode for a scenario.
+        # Inputs: scenario (required, normalized), optional task_idx, custom task text (takes precedence over task_idx for
+        # the task text), reward_config (copied; default config otherwise), llm_base_url/api_key/model (fall back to the
+        # OPENENV_AWM_LLM_* environment variables), episode_id (else random UUID); seed and kwargs ignored.
+        # Behavior: returns a reset_error observation if scenario is missing/unknown, task_idx out of range, DB creation or
+        # subprocess start fails. Otherwise cleans the previous session, determines verifier availability per mode when
+        # task_idx is given, creates a temp session dir with <scenario>.db and <scenario>_initial.db snapshot, starts the
+        # sub-env, registers in the session registry, lists tools into the cache.
+        # Returns: observation with reward_type "reset_ok" (with num_tools) or "reset_warning" if no tools were found,
+        # plus scenario, task, task_idx, has_verifier. Never done; reward None.
+        # Side effects: temp files, subprocess, registry registration.
+        # KNOWN ISSUE: on DB or subprocess failure the newly created session dir is left until the next reset/close.
         self._reset_ok = False
         self._episode_done = False
 
@@ -297,6 +331,11 @@ class AWMEnvironment(Environment):
         timeout_s: float | None = None,
         **kwargs: Any,
     ) -> AWMObservation | AWMListToolsObservation:
+        # [FUNCTION DOC]
+        # Dispatches one action. If the episode is done returns an "episode_already_done" observation (done True). Otherwise
+        # increments step_count, touches the registry, then routes ListToolsAction to the tool lister and CallToolAction by
+        # tool_name ("done", "verify", "__list_scenarios__", else proxied with optional timeout_s). Other action types return
+        # an "invalid_action" observation with the format-error reward.
         if self._episode_done:
             return AWMObservation(
                 done=True,
@@ -332,6 +371,10 @@ class AWMEnvironment(Environment):
             )
 
     def _handle_list_tools(self) -> AWMListToolsObservation:
+        # [FUNCTION DOC]
+        # HELPER: Returns the sub-env tools as an AWMListToolsObservation, using the cache when present, else fetching and
+        # caching. Returns an empty list with error when the subprocess is not running or listing fails. Appends a
+        # "list_tools" record to the trajectory in all cases.
         """Return tools from the sub-environment (cached)."""
         if not self._process.is_running:
             obs = AWMListToolsObservation(
@@ -404,6 +447,10 @@ class AWMEnvironment(Environment):
     def _handle_call_tool(
         self, action: CallToolAction, timeout_s: float | None = None
     ) -> AWMObservation:
+        # [FUNCTION DOC]
+        # HELPER: Proxies a tool call (default timeout 30s). If the subprocess is not running or the call raises, returns a
+        # "server_error" observation (not recorded in the trajectory). Otherwise records the call in the trajectory and returns
+        # "tool_call_ok" with the tool result, or a classified error type with its reward and message.
         """Proxy a tool call to the sub-environment subprocess."""
         if not self._process.is_running:
             return AWMObservation(
@@ -462,6 +509,9 @@ class AWMEnvironment(Environment):
         )
 
     def _get_reward(self, reward_type: str) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Maps a reward type to a float: format-error types (tool_not_found, invalid_args, invalid_action) use the
+        # "format_error" entry (default -1.0); others use their own entry or 0.0.
         """Get reward value for a reward type using the configured reward config."""
         # Map format error types to format_error
         if reward_type in FORMAT_ERROR_TYPES:
@@ -470,6 +520,17 @@ class AWMEnvironment(Environment):
         return self._reward_config.get(reward_type, 0.0)
 
     def _handle_verify(self, action: CallToolAction) -> AWMObservation:
+        # [FUNCTION DOC]
+        # HELPER: Runs the task verifier without ending the episode. Arguments: verifier_mode (default "code") and optional
+        # final_answer. Returns server_error if reset did not succeed, no_verifier if there is no task/task_idx or no verifier
+        # for the mode, invalid_args for an unknown mode. Otherwise runs the verifier against initial vs current DB; in "sql"
+        # mode (unless the verifier errored) also runs the LLM judge with the trajectory and the verifier entry's raw_response
+        # reasoning/criteria, storing the judge output under "llm_judge" (or the error under "llm_judge_error"); the judge's
+        # classification becomes the reward type. Appends a "verify" record to the trajectory.
+        # Returns: observation with reward, reward_type, verify_result, scenario, task, task_idx, steps_taken; done False.
+        # KNOWN ISSUE: the client docstring says verifier_mode defaults to "sql", but this handler defaults to "code".
+        # KNOWN ISSUE: in sql mode a verifier returning a non-dict value makes the result-key assignments raise, and the
+        # second assignment inside the exception handler raises again, propagating out of step().
         """Handle the `verify` tool — run verifier with specified mode."""
         if not self._reset_ok or self._scenario is None:
             return AWMObservation(
@@ -591,6 +652,12 @@ class AWMEnvironment(Environment):
         )
 
     def _handle_done(self, action: CallToolAction) -> AWMObservation:
+        # [FUNCTION DOC]
+        # HELPER: Ends the episode. If reset did not succeed, marks done and returns server_error (done True). Otherwise
+        # writes trajectory.json (scenario, task, task_idx, steps, trajectory) to the session dir when there is a trajectory
+        # (write errors swallowed), marks the episode done, stops the subprocess and records keep_session from the arguments.
+        # Returns: done observation with reward 0.0, reward_type "episode_done", steps_taken, trajectory_path, and
+        # session_dir only when keep_session is true. The session dir itself is deleted later on cleanup unless kept.
         """Handle the `done` tool — end episode and destroy environment (no verification).
 
         Accepts optional arguments:
@@ -662,6 +729,9 @@ class AWMEnvironment(Environment):
         )
 
     def _handle_list_scenarios(self) -> AWMObservation:
+        # [FUNCTION DOC]
+        # HELPER: Returns an observation listing all scenarios (scenarios, total) with reward_type "tool_call_ok" and reward
+        # None, or a server_error observation if loading fails.
         """Handle the `__list_scenarios__` tool — return all scenario info."""
         try:
             all_scenarios = self._data_loader.list_scenarios()
@@ -682,12 +752,20 @@ class AWMEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Releases all session resources (see _cleanup_session).
         self._cleanup_session()
 
     def _cleanup_session(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Unregisters from the session registry, stops the subprocess, deletes the session dir unless keep-session
+        # is set, and resets paths, tool cache, trajectory and episode/verifier flags. Also called by the registry's idle
+        # cleanup thread. Idempotent.
         """Stop subprocess and clean up session temp files.
 
         If ``_keep_session`` is True (set by ``done(keep_session=True)``),

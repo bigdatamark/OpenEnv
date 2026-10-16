@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI app for the Terminus environment. At import, loads KEY=VALUE pairs from the environment's .env
+# file into os.environ (without overriding existing vars), enables the web interface by default, and builds
+# the module-level app with MCP call-tool action/observation, a plain Observation for reset, max concurrent
+# sessions from MAX_CONCURRENT_ENVS (default 4) and the custom Gradio UI builder.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -24,6 +29,10 @@ except ImportError:  # pragma: no cover
 
 
 def _load_env_file() -> None:
+    # [FUNCTION DOC]
+    # HELPER: reads the .env file in the environment's root dir if it exists; for each non-empty, non-comment
+    # line containing "=", sets the key (stripped) to the value (stripped of whitespace and surrounding quotes)
+    # unless already set. Side effects: mutates os.environ.
     candidate = Path(__file__).resolve().parents[1] / ".env"
     if not candidate.exists():
         return
@@ -53,6 +62,8 @@ app = create_app(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default 8000) and serves the app with uvicorn; blocks.
     import argparse
 
     import uvicorn

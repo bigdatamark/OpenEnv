@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Snake environment package: re-exports the client (SnakeEnv) and the action/observation
+# models (SnakeAction, SnakeObservation) as the public API. No side effects beyond importing.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

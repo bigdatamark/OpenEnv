@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# RuntimeProvider that launches an environment's ASGI app as a local
+# subprocess with "uv run --isolated --project <path> -- uvicorn ...". The
+# project may be a local directory or a "git+<url>" spec that is shallow-cloned
+# into a temporary directory at start time (and deleted on stop/restart).
+# Readiness is checked by polling the /health endpoint.
 """Providers for launching ASGI applications via ``uv run``."""
 
 from __future__ import annotations
@@ -18,6 +24,9 @@ GIT_URL_PREFIX = "git+"
 
 
 def _check_uv_installed() -> None:
+    # [FUNCTION DOC]
+    # HELPER: Runs "uv --version"; raises RuntimeError if the uv executable is not
+    # found. (A non-zero exit raises CalledProcessError.)
     try:
         subprocess.check_output(["uv", "--version"])
     except FileNotFoundError as exc:
@@ -27,6 +36,11 @@ def _check_uv_installed() -> None:
 
 
 def _clone_git_project(git_url: str, timeout_s: float) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Strips the "git+" prefix and runs "git clone --depth 1 <url>" into a
+    # new temp directory with the given timeout. Returns the directory path.
+    # Raises: RuntimeError if git is missing, the clone fails (includes stderr) or
+    # times out; the temp directory is removed in those cases.
     """Clone a `git+<url>` spec to a temp dir and return its local path.
 
     `uv run --project` only discovers a project in a local directory (per
@@ -63,6 +77,8 @@ def _clone_git_project(git_url: str, timeout_s: float) -> str:
 
 
 def _find_free_port() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Returns an OS-assigned free TCP port (released before use, so racy).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("", 0))
         sock.listen(1)
@@ -78,6 +94,10 @@ def _create_uv_command(
     app: str,
     project_path: str,
 ) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Builds the argument list "uv run --isolated --project <project_path>
+    # -- uvicorn <app> --host <host> --port <port> --workers <workers>" plus
+    # "--reload" when requested.
     command: list[str] = ["uv", "run", "--isolated", "--project", project_path]
 
     command.append("--")
@@ -101,6 +121,10 @@ def _create_uv_command(
 
 
 def _poll_health(health_url: str, timeout_s: float) -> None:
+    # [FUNCTION DOC]
+    # HELPER: GETs health_url repeatedly (per-request timeout = min(remaining
+    # time, 2 s)) with 0.5 s sleeps until a 200 response. Raises TimeoutError after
+    # timeout_s.
     """Poll a health endpoint until it returns HTTP 200 or times out."""
 
     deadline = time.time() + timeout_s
@@ -123,6 +147,11 @@ def _poll_health(health_url: str, timeout_s: float) -> None:
 
 
 class UVProvider(RuntimeProvider):
+    # [CLASS DOC]
+    # RuntimeProvider managing one uv/uvicorn subprocess for a project. Stores the
+    # project path (absolute for local paths, verbatim for git specs), app import
+    # path, host, reload flag, default env vars and readiness timeout; tracks the
+    # process, base URL and any clone directory.
     """
     RuntimeProvider implementation backed by ``uv run``.
 
@@ -162,6 +191,9 @@ class UVProvider(RuntimeProvider):
         env_vars: Optional[Dict[str, str]] = None,
         context_timeout_s: float = 60.0,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration (resolving local project paths to absolute) and checks
+        # that uv is installed (RuntimeError otherwise). No process is started.
         """Initialize the UVProvider."""
         # `os.path.abspath` would mangle a `git+<url>` spec (e.g. collapsing
         # `https://` to `https:/`) and is meaningless for one anyway -- only
@@ -188,6 +220,16 @@ class UVProvider(RuntimeProvider):
         workers: int = 1,
         **_: Dict[str, str],
     ) -> str:
+        # [FUNCTION DOC]
+        # Starts the server subprocess and returns its base URL.
+        # Raises RuntimeError if the previous process is still alive. Uses port or a
+        # free port; removes any leftover clone dir; clones git specs (RuntimeError on
+        # failure); builds the uv command with workers; environment is the current
+        # process env updated with constructor env vars then call env vars. Launches
+        # with Popen (output inherited); on OSError removes the clone and raises
+        # RuntimeError. Base URL host is 127.0.0.1 when binding to 0.0.0.0 or "::",
+        # else the configured host. Extra kwargs are ignored. Does not wait for
+        # readiness.
         """
         Start the environment via `uv run`.
 
@@ -252,6 +294,12 @@ class UVProvider(RuntimeProvider):
         return self._base_url
 
     def wait_for_ready(self, timeout_s: float | None = None) -> None:
+        # [FUNCTION DOC]
+        # Uses the provider's context_timeout_s if timeout_s is None. Raises
+        # RuntimeError if the process has already exited; then polls <base_url>/health
+        # (TimeoutError on deadline).
+        # KNOWN ISSUE: process exit is only checked once before polling, so a crash
+        # during startup is reported as a timeout rather than an early error.
         """
         Wait for the environment to become ready.
 
@@ -274,6 +322,9 @@ class UVProvider(RuntimeProvider):
         _poll_health(f"{self._base_url}/health", timeout_s=timeout_s)
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Terminates the process if alive (waits 10 s, then kills and waits 5 s),
+        # clears process and base URL, and deletes any clone directory.
         """
         Stop the environment.
         """
@@ -295,6 +346,8 @@ class UVProvider(RuntimeProvider):
 
     @property
     def base_url(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the base URL; raises RuntimeError if not started.
         """
         The base URL of the environment.
 

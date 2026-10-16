@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Implements the "openenv push" CLI command (a Typer sub-app). It validates an
+# environment directory (openenv.yaml plus expected layout), then either builds
+# and pushes a Docker image to a custom registry, or stages a filtered copy of the
+# directory (Dockerfile moved to root, optional web interface env var, README
+# Space frontmatter) and uploads it to one or more Hugging Face Docker Spaces,
+# then sets Space variables/secrets. Ignore patterns are gitignore-like globs
+# (no negation support). Module globals: the Typer app and the default ignore list
+# (hidden files, __pycache__, .pyc, build/, .egg-info).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Push an OpenEnv environment to Hugging Face Spaces."""
@@ -24,6 +33,9 @@ DEFAULT_PUSH_IGNORE_PATTERNS = [".*", "__pycache__", "*.pyc", "build/", "*.egg-i
 
 
 def _format_kv_entry_for_error(entry: str, *, flag: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the text used to show a KEY=VALUE entry in an error message:
+    # the literal "<redacted>" when flag is "--secret", otherwise the repr of entry.
     """Redact secret values from CLI parse errors."""
     if flag == "--secret":
         return "<redacted>"
@@ -31,6 +43,14 @@ def _format_kv_entry_for_error(entry: str, *, flag: str) -> str:
 
 
 def _parse_kv_pairs(raw_pairs: list[str], *, flag: str) -> dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: Parses a list of "KEY=VALUE" strings into a dict of str to str.
+    # Splits on the first "=", strips whitespace from the key only; later duplicate
+    # keys override earlier ones.
+    # Inputs: raw_pairs - list of strings; flag - CLI flag name used in error text.
+    # Returns: the parsed dict.
+    # Raises: typer.BadParameter if an entry has no "=" or the key is empty (secret
+    # entries are redacted in the message).
     """Parse a list of 'KEY=VALUE' strings into a dict.
 
     Splits only on the first '=', so values can contain '='. Later entries
@@ -59,6 +79,12 @@ def _apply_space_variables_and_secrets(
     secrets: dict[str, str],
     api: HfApi,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: For each variables item calls api.add_space_variable, then for each
+    # secrets item calls api.add_space_secret on repo_id (overwriting existing keys).
+    # Prints a success line per key (never the secret value).
+    # Raises: typer.Exit(1) on the first API failure (after printing the error).
+    # Side effects: network calls to the Hugging Face Hub, console output.
     """Configure Space-level variables and secrets on a deployed repo.
 
     Idempotent: add_space_variable/secret with the same key overwrites.
@@ -81,6 +107,15 @@ def _apply_space_variables_and_secrets(
 
 
 def _path_matches_pattern(relative_path: Path, pattern: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Decides whether a relative path matches one ignore pattern.
+    # Pattern is stripped; patterns starting with "!" (negation) or empty after
+    # removing leading "./" and one leading "/" never match. A leading "**/" also
+    # tries the pattern without it (root match). Patterns ending in "/" are directory
+    # patterns: match the directory itself or anything directly matched by
+    # "<dir>/*" (fnmatch "*" crosses slashes, so nested files match too). Other
+    # patterns match against the full POSIX relative path or the basename.
+    # Returns: bool.
     """Return True if a relative path matches an exclude pattern."""
     normalized_pattern = pattern.strip()
     if normalized_pattern.startswith("!"):
@@ -121,6 +156,9 @@ def _path_matches_pattern(relative_path: Path, pattern: str) -> bool:
 
 
 def _should_exclude_path(relative_path: Path, ignore_patterns: list[str]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the relative path matches any of the ignore patterns
+    # (per _path_matches_pattern).
     """Return True when the path should be excluded from staging/upload."""
     return any(
         _path_matches_pattern(relative_path, pattern) for pattern in ignore_patterns
@@ -128,6 +166,11 @@ def _should_exclude_path(relative_path: Path, ignore_patterns: list[str]) -> boo
 
 
 def _read_ignore_file(ignore_path: Path) -> tuple[list[str], int]:
+    # [FUNCTION DOC]
+    # HELPER: Reads an ignore file line by line, skipping blank lines and "#"
+    # comments, and counting (but discarding) lines starting with "!".
+    # Returns: tuple (list of stripped patterns, number of skipped negations).
+    # Raises: OSError if the file cannot be read.
     """Read ignore patterns from a file and return (patterns, ignored_negations)."""
     patterns: list[str] = []
     ignored_negations = 0
@@ -145,11 +188,22 @@ def _read_ignore_file(ignore_path: Path) -> tuple[list[str], int]:
 
 
 def _load_ignore_patterns(env_dir: Path, exclude_file: str | None) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Builds the ignore pattern list: defaults plus, if exclude_file is
+    # given, the patterns from that file (relative paths resolved against env_dir).
+    # Duplicates are removed preserving order. Prints how many patterns were loaded
+    # and a warning if negated patterns were skipped.
+    # Returns: list of pattern strings.
+    # Raises: typer.BadParameter if exclude_file does not exist or is not a file.
     """Load ignore patterns from defaults and an optional ignore file."""
     patterns = list(DEFAULT_PUSH_IGNORE_PATTERNS)
     ignored_negations = 0
 
     def _merge_ignore_file(ignore_path: Path, *, source_label: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Reads ignore_path, appends its patterns to the enclosing list,
+        # adds its negation count to the enclosing counter (nonlocal mutation) and prints
+        # a confirmation mentioning source_label.
         nonlocal ignored_negations
         file_patterns, skipped_negations = _read_ignore_file(ignore_path)
         patterns.extend(file_patterns)
@@ -184,9 +238,16 @@ def _load_ignore_patterns(env_dir: Path, exclude_file: str | None) -> list[str]:
 
 
 def _copytree_ignore_factory(env_dir: Path, ignore_patterns: list[str]):
+    # [FUNCTION DOC]
+    # HELPER: Returns a callback suitable as shutil.copytree's ignore argument that
+    # excludes entries whose path relative to env_dir matches ignore_patterns.
     """Build a shutil.copytree ignore callback from path-based patterns."""
 
     def _ignore(path: str, names: list[str]) -> set[str]:
+        # [FUNCTION DOC]
+        # HELPER: copytree ignore callback. For each name in directory path, computes
+        # its path relative to env_dir and returns the set of names to skip. Names not
+        # under env_dir are never excluded.
         current_dir = Path(path)
         ignored: set[str] = set()
 
@@ -207,6 +268,12 @@ def _copytree_ignore_factory(env_dir: Path, ignore_patterns: list[str]):
 
 
 def _validate_openenv_directory(directory: Path) -> tuple[str, dict]:
+    # [FUNCTION DOC]
+    # HELPER: Validates the environment structure via validate_env_structure
+    # (printing its warnings) and loads openenv.yaml with yaml.safe_load.
+    # Returns: tuple (env name from the manifest "name" field, manifest dict).
+    # Raises: typer.BadParameter if the structure is invalid (FileNotFoundError),
+    # the YAML cannot be read/parsed, is not a mapping, or lacks a non-empty "name".
     """
     Validate that the directory is an OpenEnv environment.
 
@@ -245,6 +312,20 @@ def _rewrite_dockerfile_for_space(
     base_image: str | None,
     enable_interface: bool,
 ) -> tuple[str, list[str]]:
+    # [FUNCTION DOC]
+    # HELPER: Rewrites Dockerfile text for a Space deployment (pure function).
+    # If base_image is given, the first line starting with "FROM" is replaced by
+    # "FROM <base_image>" (or one is prepended if none exists). If enable_interface
+    # and the text does not already mention ENABLE_WEB_INTERFACE, a line
+    # "ENV ENABLE_WEB_INTERFACE=true" is inserted before the first CMD line that is
+    # not on a line right after a HEALTHCHECK instruction (i.e. not "HEALTHCHECK ...
+    # CMD" continuation), or appended at the end if no CMD qualifies.
+    # Returns: tuple (new content, list of change labels "updated base image" /
+    # "enabled web interface").
+    # KNOWN ISSUE: the HEALTHCHECK continuation check only looks at the previous
+    # non-blank line's first token, so a multi-line HEALTHCHECK whose CMD is on the
+    # second continuation line or later is not recognized. Also "updated base
+    # image" is not reported when the FROM line was prepended rather than replaced.
     """Rewrite deployment Dockerfile content and return printed change labels."""
     lines = dockerfile_content.split("\n")
     new_lines = []
@@ -298,6 +379,13 @@ def _rewrite_dockerfile_for_space(
 
 
 def _get_hf_username() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Calls huggingface_hub whoami and extracts the username, printing an
+    # "Authenticated as" line.
+    # Returns: username string.
+    # Raises: ValueError if no username can be extracted; any whoami error
+    # (e.g. not logged in) propagates.
+    # Side effects: network call to the Hub.
     """Return the authenticated Hugging Face username from whoami()."""
     username = _extract_hf_username(whoami())
     if not username:
@@ -308,6 +396,11 @@ def _get_hf_username() -> str:
 
 
 def _ensure_hf_authenticated() -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the HF username; if the first lookup fails for any reason,
+    # runs the interactive huggingface_hub login and retries once.
+    # Raises: typer.BadParameter if login or the retry fails.
+    # Side effects: network calls, may prompt the user interactively.
     """
     Ensure user is authenticated with Hugging Face.
 
@@ -339,6 +432,22 @@ def _prepare_staging_directory(
     base_image: str | None = None,
     enable_interface: bool = True,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Builds the upload directory staging_dir from env_dir.
+    # Copies each top-level item not excluded by ignore_patterns (directories via
+    # copytree with the same filtering). Uses a root Dockerfile if present,
+    # otherwise moves server/Dockerfile to the root; rewrites it with
+    # _rewrite_dockerfile_for_space (base_image, enable_interface). If
+    # enable_interface and README.md lacks "base_path: /web": with existing YAML
+    # frontmatter, inserts "base_path: /web" before the closing "---"; otherwise
+    # prepends a generated Space frontmatter (title from env_name, docker sdk,
+    # app_port 8000, base_path /web, openenv tag). Prints warnings when no
+    # Dockerfile or README exists.
+    # Returns: None. Side effects: filesystem writes/moves, console output.
+    # KNOWN ISSUE: the frontmatter loop treats every later "---" line (not just the
+    # closing one) as end of frontmatter; it only inserts once because it checks for
+    # "base_path:" in the accumulated text, so a "base_path:" anywhere earlier would
+    # suppress insertion. The _in_frontmatter variable is unused.
     """
     Prepare files for deployment.
 
@@ -446,6 +555,11 @@ def _create_hf_space(
     private: bool = False,
     hardware: str | None = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Creates the Docker Space repo_id via api.create_repo with
+    # exist_ok, the given privacy and optional space hardware. Any exception is only
+    # printed as a warning (not raised).
+    # Side effects: network call, console output.
     """Create a Hugging Face Space if it doesn't exist."""
     console.print(f"[bold cyan]Creating/verifying space: {repo_id}[/bold cyan]")
 
@@ -477,6 +591,13 @@ def _upload_to_hf_space(
     commit_message: str | None = None,
     delete_patterns: list[str] | None = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Uploads staging_dir to the Space with api.upload_folder, passing
+    # ignore_patterns, delete_patterns (remote files to delete in the same commit),
+    # create_pr and optional commit_message. Prints success, the PR URL (when
+    # create_pr and the result has pr_url) and the Space URL.
+    # Raises: typer.Exit(1) if the upload fails.
+    # KNOWN ISSUE: the private parameter is accepted but unused.
     """Upload files to Hugging Face Space."""
     if create_pr:
         console.print(
@@ -615,6 +736,33 @@ def push(
         ),
     ] = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # Typer command "openenv push". Steps:
+    # 1. Rejects count > 1 with registry or create_pr, and both --interface and
+    # --no-interface (typer.Exit(1)).
+    # 2. Web interface enabled: no_interface -> False; explicit interface -> its
+    # value; registry given -> False; else True.
+    # 3. Resolves directory (default cwd); requires it to exist and contain
+    # openenv.yaml (BadParameter / Exit(1)); validates via
+    # _validate_openenv_directory.
+    # 4. Variables: manifest "variables" mapping (must be a dict, else
+    # BadParameter) merged with --env-var pairs (CLI wins); secrets only from
+    # --secret. Env vars/secrets are rejected with --registry or --create-pr; yaml
+    # variables only trigger a warning in those modes.
+    # 5. Registry mode: builds image "<registry>/<env_name>" via the build
+    # command's helpers (ENABLE_WEB_INTERFACE build arg if enabled), pushes it,
+    # exits 1 on failure, and returns.
+    # 6. Hub mode: loads ignore patterns, ensures HF auth, defaults repo_id to
+    # "<username>/<env_name>", prefixes bare names with username, rejects more than
+    # one "/". Stages files in a temp dir; with count > 1 deploys
+    # "<repo_id>-1".."<repo_id>-N" (create, upload, set vars/secrets each);
+    # otherwise creates the Space (unless create_pr), uploads, and sets
+    # vars/secrets (unless create_pr).
+    # Side effects: filesystem temp dirs, Docker subprocesses, Hub network calls,
+    # console output.
+    # KNOWN ISSUE: the docstring example "openenv push my-org/my-env --create-pr"
+    # passes the repo id as the positional argument, which is actually the
+    # directory argument, so it would fail as a non-existent directory.
     """
     Push an OpenEnv environment to Hugging Face Spaces or a custom Docker registry.
 

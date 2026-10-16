@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Package entry for the OpenSpiel environment integration. Re-exports the client and the
+# action, observation and state models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

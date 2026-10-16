@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Parser protocol and registry mapping a detected package SignatureKind to the parser
+# that turns that format into a NormalizedManifest.
 """Parser protocol and registry.
 
 A parser owns everything format-specific; after `parse()` returns, the format has left
@@ -15,6 +18,9 @@ from ..types import SignatureKind
 
 @runtime_checkable
 class Parser(Protocol):
+    # [CLASS DOC]
+    # Runtime-checkable protocol: a signature attribute and parse(package_root) returning a
+    # NormalizedManifest without executing package code.
     """
     Parses one package format into the normalized manifest.
 
@@ -23,10 +29,15 @@ class Parser(Protocol):
 
     signature: SignatureKind
 
-    def parse(self, package_root: Path) -> NormalizedManifest: ...
+    def parse(self, package_root: Path) -> NormalizedManifest:
+        # [FUNCTION DOC]
+        # Protocol method: reads the package at package_root and returns its normalized manifest.
+        ...
 
 
 class ParserRegistry:
+    # [CLASS DOC]
+    # Mutable mapping from SignatureKind to parser.
     """
     Maps detected signatures to registered parsers.
 
@@ -36,9 +47,13 @@ class ParserRegistry:
     """
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Creates an empty registry.
         self._parsers: dict[SignatureKind, Parser] = {}
 
     def register(self, parser: Parser) -> None:
+        # [FUNCTION DOC]
+        # Registers parser under its signature, replacing any previous one.
         """
         Register a parser for its signature.
 
@@ -50,6 +65,9 @@ class ParserRegistry:
         self._parsers[parser.signature] = parser
 
     def parser_for(self, signature: SignatureKind) -> Parser:
+        # [FUNCTION DOC]
+        # Returns the parser for signature; raises UnsupportedPackageError
+        # ("parser-not-implemented") if none is registered.
         """
         Return the parser registered for a detected signature.
 

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# LLM-free baseline for the CARLA environment: drives a maze or free-roam scenario using CARLA's built-in navigation
+# agent (init_navigation_agent, set_destination, repeated follow_route), tracking distance traveled and optionally
+# saving camera images. Side effects: sys.path changes, network calls to the CARLA env server, image files, stdout.
 """
 Autopilot Navigation (no LLM required).
 
@@ -53,6 +57,11 @@ def run_autopilot(
     image_interval: int = 10,
     scenario_config_overrides: Optional[Dict] = None,
 ):
+    # [FUNCTION DOC]
+    # Looks up the scenario config (KeyError if unknown), optionally creates the image directory, then runs the async
+    # episode via asyncio.run. Exceptions are printed (when verbose) and re-raised. Returns None.
+    # Inputs: scenario key, server URL, behavior, ticks per follow_route, max steps, verbosity, image saving options,
+    # optional scenario config overrides merged over the scenario's own overrides.
     """Run a scenario using CARLA's built-in navigation agent.
 
     Args:
@@ -80,6 +89,11 @@ def run_autopilot(
         print("=" * 70)
 
     async def _run():
+        # [FUNCTION DOC]
+        # HELPER: Async episode: reset with scenario name and merged overrides, initialise the navigation agent, set the
+        # destination from the observation's goal_location if present, then up to max_steps follow_route steps accumulating
+        # 2D distance, capturing/saving a JPEG every image_interval steps, printing progress every 20 steps, stopping when done;
+        # finally prints summary stats.
         env = CarlaEnv(base_url=base_url)
         async with env:
             # 1. Reset
@@ -177,6 +191,8 @@ def run_autopilot(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry: parses scenario, behavior, route steps, base url, max steps, image options and camera overrides, then calls run_autopilot.
     parser = argparse.ArgumentParser(
         description="Run CARLA autopilot navigation (no LLM needed)",
         formatter_class=argparse.RawDescriptionHelpFormatter,

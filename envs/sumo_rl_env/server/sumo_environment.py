@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# OpenEnv wrapper around sumo_rl.SumoEnvironment in single-agent, headless mode.
+# Side effects at import: sets SUMO_HOME to /usr/share/sumo if unset; raises ImportError with an install
+# hint if sumo_rl is missing.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -40,6 +44,10 @@ except ImportError as e:
 
 
 def _json_safe(value: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: recursively converts values to JSON-serialisable types: primitives pass through, dict keys
+    # become strings, list/tuple/set become lists, objects with a working tolist() or item() use it
+    # (exceptions swallowed), otherwise str(value).
     """Convert library-specific values into JSON-serializable Python types."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -66,6 +74,9 @@ def _json_safe(value: Any) -> Any:
 
 
 class SumoEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment controlling one traffic signal in a SUMO simulation. Holds config attributes, the
+    # underlying sumo_rl env (self.env), a SumoState and the last info mapping.
     """
     SUMO-RL Environment wrapper for OpenEnv.
 
@@ -106,6 +117,11 @@ class SumoEnvironment(Environment):
         reward_fn: str = "diff-waiting-time",
         sumo_seed: int = 42,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration and creates the sumo_rl environment with no GUI, single_agent True, warnings off,
+        # no CSV output, system info on and per-agent info off. Initialises SumoState with the config values.
+        # Side effects: constructs the sumo_rl environment (which uses SUMO's binaries / network files).
+        # KNOWN ISSUE: sumo_seed is not recorded in SumoState.
         """Initialize SUMO traffic signal environment."""
         super().__init__()
 
@@ -159,6 +175,10 @@ class SumoEnvironment(Environment):
         self._last_info = {}
 
     def reset(self) -> Observation:
+        # [FUNCTION DOC]
+        # Resets the SUMO simulation, assigns a fresh UUID episode id, zeroes step_count and sim_time, stores info.
+        # Returns: observation built with reward None and done False.
+        # KNOWN ISSUE: runtime metrics (vehicles, waiting times, speed) in state are not cleared on reset.
         """
         Reset the environment and return initial observation.
 
@@ -179,6 +199,11 @@ class SumoEnvironment(Environment):
         return self._make_observation(obs, reward=None, done=False, info=info)
 
     def step(self, action: Action) -> Observation:
+        # [FUNCTION DOC]
+        # Inputs: SumoAction. Raises ValueError if the action is not a SumoAction or phase_id is outside
+        # [0, number of phases). Steps the simulation; done is terminated or truncated. Updates state step_count
+        # and, from info, sim_time ("step"), total_vehicles ("system_total_running"), total/mean waiting time and
+        # mean speed. Stores info. Returns: the built observation with the step reward and done flag.
         """
         Execute agent's action and return resulting observation.
 
@@ -222,12 +247,18 @@ class SumoEnvironment(Environment):
 
     @property
     def state(self) -> SumoState:
+        # [FUNCTION DOC]
+        # Property returning the current SumoState.
         """Get current environment state."""
         return self._state
 
     def _make_observation(
         self, obs: Any, reward: float, done: bool, info: Dict
     ) -> SumoObservation:
+        # [FUNCTION DOC]
+        # HELPER: converts the raw observation to a list (via tolist() if available), sets shape to its length,
+        # action mask to all phase indices, sim_time from info "step", and metadata with the number of green
+        # phases plus all "system_"-prefixed info entries made JSON-safe. Returns the SumoObservation.
         """
         Create SumoObservation from SUMO environment output.
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# SQLAlchemy ORM models for events and their related tables: attendees, attachments,
+# office locations, working location properties, conference data, birthday properties,
+# extended properties, reminders and recurring event series, plus related enums and a
+# before_update listener that makes Event.eventType immutable.
 """
 Event database model
 """
@@ -25,11 +30,15 @@ from .base import Base
 
 
 class ExtendedPropertyScope(enum.Enum):
+    # [CLASS DOC]
+    # Enum of extended property scopes: private, shared.
     private = "private"
     shared = "shared"
 
 
 class EventTypeEnum(enum.Enum):
+    # [CLASS DOC]
+    # Enum of Google event types: birthday, default, focusTime, fromGmail, outOfOffice, workingLocation.
     birthday = "birthday"
     default = "default"
     focusTime = "focusTime"
@@ -39,11 +48,15 @@ class EventTypeEnum(enum.Enum):
 
 
 class ReminderMethodEnum(enum.Enum):
+    # [CLASS DOC]
+    # Enum of reminder methods: email, popup.
     email = "email"
     popup = "popup"
 
 
 class RecurrenceFrequency(enum.Enum):
+    # [CLASS DOC]
+    # Enum of RFC 5545 RRULE FREQ values (SECONDLY .. YEARLY).
     """RRULE frequency values from RFC 5545"""
 
     SECONDLY = "SECONDLY"
@@ -56,6 +69,8 @@ class RecurrenceFrequency(enum.Enum):
 
 
 class RecurrenceWeekday(enum.Enum):
+    # [CLASS DOC]
+    # Enum of RRULE BYDAY weekday codes MO..SU.
     """Days of the week for RRULE BYDAY parameter"""
 
     MO = "MO"  # Monday
@@ -68,6 +83,10 @@ class RecurrenceWeekday(enum.Enum):
 
 
 class Attendees(Base):
+    # [CLASS DOC]
+    # ORM row (table "attendees") for an event attendee: attendees_id PK, comment,
+    # displayName, additionalGuests, optional/resource flags, responseStatus (default
+    # "needsAction"), event_id FK (cascade delete), optional user_id FK; relationships to Event and User.
     """Attendees database model"""
 
     __tablename__ = "attendees"
@@ -90,6 +109,8 @@ class Attendees(Base):
 
 
 class Attachment(Base):
+    # [CLASS DOC]
+    # ORM row (table "attachments") linking a file URL (up to 2000 chars) to an event.
     """Attachment model for storing file URLs linked to events"""
 
     __tablename__ = "attachments"
@@ -104,10 +125,15 @@ class Attachment(Base):
     event = relationship("Event", back_populates="attachments")
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with attachment_id, event_id and file_url.
         return f"<Attachment(attachment_id='{self.attachment_id}', event_id='{self.event_id}', file_url='{self.file_url}')>"
 
 
 class OfficeLocation(Base):
+    # [CLASS DOC]
+    # ORM row (table "office_locations") describing an office place: id, optional building,
+    # desk, floor and floor section ids, required label; one-to-one back reference to WorkingLocationProperties.
     __tablename__ = "office_locations"
 
     id = Column(String(255), primary_key=True, nullable=False)
@@ -123,6 +149,10 @@ class OfficeLocation(Base):
 
 
 class WorkingLocationProperties(Base):
+    # [CLASS DOC]
+    # ORM row (table "working_location_properties") for a workingLocation event: id, event_id
+    # FK, type ("homeOffice", "officeLocation" or "customLocation"), homeOffice JSON,
+    # customLocationLabel, unique optional officeLocationId FK; relationships to OfficeLocation and Event.
     """Working location properties model for events"""
 
     __tablename__ = "working_location_properties"
@@ -160,10 +190,15 @@ class WorkingLocationProperties(Base):
     event = relationship("Event", back_populates="workingLocationProperties")
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with working_location_id, event_id and type.
         return f"<WorkingLocationProperties(working_location_id='{self.working_location_id}', event_id='{self.event_id}', type='{self.type}')>"
 
 
 class ConferenceData(Base):
+    # [CLASS DOC]
+    # ORM row (table "conference_data", one per event): solution type/name/icon, create
+    # request id/type/status code, entry points JSON, notes, signature, legacy meeting_uri and label.
     __tablename__ = "conference_data"
 
     id = Column(String(50), primary_key=True, nullable=False)
@@ -202,6 +237,8 @@ class ConferenceData(Base):
 
 
 class BirthdayProperties(Base):
+    # [CLASS DOC]
+    # ORM row (table "birthday_properties", one per event) with a type string (default "birthday").
     __tablename__ = "birthday_properties"
 
     id = Column(String(50), primary_key=True, nullable=False)
@@ -218,6 +255,8 @@ class BirthdayProperties(Base):
 
 
 class ExtendedProperty(Base):
+    # [CLASS DOC]
+    # ORM row (table "extended_properties"): id, event_id FK, scope (private/shared) and properties JSON.
     __tablename__ = "extended_properties"
 
     id = Column(String(255), primary_key=True, nullable=False)
@@ -231,6 +270,8 @@ class ExtendedProperty(Base):
 
 
 class Reminder(Base):
+    # [CLASS DOC]
+    # ORM row (table "reminders"): id, event_id FK, method (email/popup), minutes before the event, use_default flag (default True).
     __tablename__ = "reminders"
 
     id = Column(String(255), primary_key=True, nullable=False)
@@ -250,6 +291,17 @@ class Reminder(Base):
 
 
 class Event(Base):
+    # [CLASS DOC]
+    # ORM row (table "events"): event_id PK, calendar_id FK, owner user_id FK, organizer
+    # fields, optional recurring_event_id FK, summary, description, location, naive
+    # start/end datetimes with optional timezone names, recurrence text (RRULE/JSON), status
+    # (default "confirmed"), visibility (default "default"), color_id, eventType (default
+    # "default", immutable), focusTime/outOfOffice/source JSON, guest permission flags,
+    # sequence, transparency (default "opaque"), iCalUID, privateCopy, locked, hangoutLink,
+    # originalStartTime date/dateTime/timeZone, timestamps, and cascading relationships to
+    # attendees, attachments, conference data, birthday properties, extended properties
+    # (eager joined), reminders and working location properties.
+    # KNOWN ISSUE: color_id is a string palette id (e.g. "1") but the foreign key points to colors.id, the autoincrement integer key, not colors.color_id.
     """Event database model"""
 
     __tablename__ = "events"
@@ -434,10 +486,15 @@ class Event(Base):
     )
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with event_id, user_id, summary and calendar_id.
         return f"<Event(event_id='{self.event_id}', user_id='{self.user_id}', summary='{self.summary}', calendar_id='{self.calendar_id}')>"
 
 
 class RecurringEvent(Base):
+    # [CLASS DOC]
+    # ORM row (table "recurring_events") for a recurring series: recurring_event_id PK,
+    # original_recurrence text, and event_instances relationship (cascade delete).
     """
     RecurringEvent database model
     """
@@ -460,6 +517,11 @@ class RecurringEvent(Base):
 
 @event.listens_for(Event, "before_update", propagate=True)
 def prevent_event_type_update(mapper, connection, target):
+    # [FUNCTION DOC]
+    # SQLAlchemy before_update listener on Event: reads the stored eventType from the DB via
+    # the target's session and raises IntegrityError if the new value differs (compared as
+    # enum value strings). No-op if the object has no session or no stored type.
+    # Side effects: issues a SELECT during flush.
     """Ensure eventType is immutable after creation"""
     session = object_session(target)
 

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for env_server enums (ServerMode, HealthStatus, WSErrorCode,
+# JsonRpcErrorCode, McpMethod) and JSON-RPC Pydantic models (JsonRpcError,
+# JsonRpcRequest, JsonRpcResponse), plus HTTPEnvServer accepting ServerMode
+# enums or strings and /health reporting "healthy".
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -43,24 +48,34 @@ from pydantic import ValidationError
 
 
 class TestServerModeEnum:
+    # [CLASS DOC]
+    # ServerMode enum tests.
     """Tests for ServerMode enum."""
 
     def test_server_mode_values(self):
+        # [FUNCTION DOC]
+        # Values are "simulation" and "production".
         """Test ServerMode enum has expected values."""
         assert ServerMode.SIMULATION.value == "simulation"
         assert ServerMode.PRODUCTION.value == "production"
 
     def test_server_mode_from_string(self):
+        # [FUNCTION DOC]
+        # Construction from the lowercase string yields the member.
         """Test ServerMode can be created from string."""
         assert ServerMode("simulation") == ServerMode.SIMULATION
         assert ServerMode("production") == ServerMode.PRODUCTION
 
     def test_server_mode_invalid_string_raises(self):
+        # [FUNCTION DOC]
+        # Unknown string raises ValueError.
         """Test invalid string raises ValueError."""
         with pytest.raises(ValueError):
             ServerMode("invalid")
 
     def test_server_mode_is_str_subclass(self):
+        # [FUNCTION DOC]
+        # Members compare equal to their string values; .value gives the raw string.
         """Test ServerMode values work as strings for comparison."""
         # Equality comparison works with strings
         assert ServerMode.SIMULATION == "simulation"
@@ -74,6 +89,8 @@ class TestServerModeEnum:
         assert ServerMode.SIMULATION.value == "simulation"
 
     def test_server_mode_case_sensitive(self):
+        # [FUNCTION DOC]
+        # Upper/mixed-case strings raise ValueError.
         """Test ServerMode is case-sensitive (lowercase required)."""
         with pytest.raises(ValueError):
             ServerMode("SIMULATION")
@@ -87,15 +104,21 @@ class TestServerModeEnum:
 
 
 class TestHealthStatusEnum:
+    # [CLASS DOC]
+    # HealthStatus enum and HealthResponse serialization tests.
     """Tests for HealthStatus enum."""
 
     def test_health_status_values(self):
+        # [FUNCTION DOC]
+        # Values are healthy, unhealthy, degraded.
         """Test HealthStatus enum has expected values."""
         assert HealthStatus.HEALTHY.value == "healthy"
         assert HealthStatus.UNHEALTHY.value == "unhealthy"
         assert HealthStatus.DEGRADED.value == "degraded"
 
     def test_health_response_serialization(self):
+        # [FUNCTION DOC]
+        # model_dump renders status as the string value.
         """Test HealthResponse serializes status enum correctly."""
         response = HealthResponse(status=HealthStatus.HEALTHY)
         data = response.model_dump()
@@ -103,6 +126,8 @@ class TestHealthStatusEnum:
         assert data["status"] == "healthy"
 
     def test_health_response_json_serialization(self):
+        # [FUNCTION DOC]
+        # model_dump_json renders status as the string value.
         """Test HealthResponse JSON serialization."""
         response = HealthResponse(status=HealthStatus.DEGRADED)
         json_str = response.model_dump_json()
@@ -117,9 +142,13 @@ class TestHealthStatusEnum:
 
 
 class TestWSErrorCodeEnum:
+    # [CLASS DOC]
+    # WSErrorCode enum tests.
     """Tests for WSErrorCode enum."""
 
     def test_ws_error_code_values(self):
+        # [FUNCTION DOC]
+        # Each member's value equals its name.
         """Test WSErrorCode enum has expected values."""
         assert WSErrorCode.INVALID_JSON.value == "INVALID_JSON"
         assert WSErrorCode.UNKNOWN_TYPE.value == "UNKNOWN_TYPE"
@@ -130,6 +159,8 @@ class TestWSErrorCodeEnum:
         assert WSErrorCode.SESSION_ERROR.value == "SESSION_ERROR"
 
     def test_ws_error_response_with_enum(self):
+        # [FUNCTION DOC]
+        # WSErrorResponse dumps type "error" and the code as its string value.
         """Test WSErrorResponse correctly serializes enum code."""
         response = WSErrorResponse(
             data={
@@ -149,9 +180,13 @@ class TestWSErrorCodeEnum:
 
 
 class TestJsonRpcErrorCodeEnum:
+    # [CLASS DOC]
+    # JsonRpcErrorCode enum tests.
     """Tests for JsonRpcErrorCode enum with standard JSON-RPC 2.0 codes."""
 
     def test_standard_error_codes(self):
+        # [FUNCTION DOC]
+        # Codes match the JSON-RPC 2.0 spec (-32700, -32600..-32603, -32000).
         """Test standard JSON-RPC 2.0 error codes are correct."""
         # Per https://www.jsonrpc.org/specification#error_object
         assert JsonRpcErrorCode.PARSE_ERROR.value == -32700
@@ -162,6 +197,8 @@ class TestJsonRpcErrorCodeEnum:
         assert JsonRpcErrorCode.SERVER_ERROR.value == -32000
 
     def test_error_codes_are_negative(self):
+        # [FUNCTION DOC]
+        # Every member value is negative.
         """Test all JSON-RPC error codes are negative integers."""
         for code in JsonRpcErrorCode:
             assert code.value < 0
@@ -173,14 +210,20 @@ class TestJsonRpcErrorCodeEnum:
 
 
 class TestMcpMethodEnum:
+    # [CLASS DOC]
+    # McpMethod enum tests.
     """Tests for McpMethod enum."""
 
     def test_mcp_method_values(self):
+        # [FUNCTION DOC]
+        # Values are "tools/list" and "tools/call".
         """Test McpMethod enum has expected MCP method names."""
         assert McpMethod.TOOLS_LIST.value == "tools/list"
         assert McpMethod.TOOLS_CALL.value == "tools/call"
 
     def test_mcp_method_string_comparison(self):
+        # [FUNCTION DOC]
+        # Members compare equal to plain strings.
         """Test McpMethod values work as strings for comparison."""
         assert McpMethod.TOOLS_LIST == "tools/list"
         assert McpMethod.TOOLS_CALL == "tools/call"
@@ -192,9 +235,13 @@ class TestMcpMethodEnum:
 
 
 class TestJsonRpcError:
+    # [CLASS DOC]
+    # JsonRpcError model tests.
     """Tests for JsonRpcError Pydantic model."""
 
     def test_error_creation(self):
+        # [FUNCTION DOC]
+        # Direct construction keeps code/message; data defaults to None.
         """Test basic JsonRpcError creation."""
         error = JsonRpcError(code=-32600, message="Invalid Request")
 
@@ -203,6 +250,8 @@ class TestJsonRpcError:
         assert error.data is None
 
     def test_error_with_data(self):
+        # [FUNCTION DOC]
+        # Optional data is stored.
         """Test JsonRpcError with additional data."""
         error = JsonRpcError(
             code=-32602, message="Invalid params", data={"field": "name"}
@@ -211,6 +260,8 @@ class TestJsonRpcError:
         assert error.data == {"field": "name"}
 
     def test_from_code_factory(self):
+        # [FUNCTION DOC]
+        # from_code fills the standard message ("Parse error").
         """Test JsonRpcError.from_code factory method."""
         error = JsonRpcError.from_code(JsonRpcErrorCode.PARSE_ERROR)
 
@@ -218,6 +269,8 @@ class TestJsonRpcError:
         assert error.message == "Parse error"
 
     def test_from_code_with_custom_message(self):
+        # [FUNCTION DOC]
+        # from_code honours a custom message.
         """Test from_code with custom message."""
         error = JsonRpcError.from_code(
             JsonRpcErrorCode.INTERNAL_ERROR, message="Custom error message"
@@ -227,6 +280,8 @@ class TestJsonRpcError:
         assert error.message == "Custom error message"
 
     def test_from_code_with_data(self):
+        # [FUNCTION DOC]
+        # from_code stores extra data.
         """Test from_code with additional data."""
         error = JsonRpcError.from_code(
             JsonRpcErrorCode.INVALID_PARAMS, data={"missing": ["name", "args"]}
@@ -241,9 +296,13 @@ class TestJsonRpcError:
 
 
 class TestJsonRpcRequest:
+    # [CLASS DOC]
+    # JsonRpcRequest validation tests.
     """Tests for JsonRpcRequest Pydantic model."""
 
     def test_valid_request(self):
+        # [FUNCTION DOC]
+        # Valid request; params default to an empty mapping.
         """Test valid JSON-RPC request parsing."""
         request = JsonRpcRequest(jsonrpc="2.0", method="tools/list", id=1)
 
@@ -253,6 +312,8 @@ class TestJsonRpcRequest:
         assert request.params == {}
 
     def test_request_with_params(self):
+        # [FUNCTION DOC]
+        # Params and a string id are kept.
         """Test request with params."""
         request = JsonRpcRequest(
             jsonrpc="2.0",
@@ -265,16 +326,22 @@ class TestJsonRpcRequest:
         assert request.id == "req-123"
 
     def test_request_requires_jsonrpc_2_0(self):
+        # [FUNCTION DOC]
+        # jsonrpc other than "2.0" raises ValidationError.
         """Test request must have jsonrpc='2.0'."""
         with pytest.raises(ValidationError):
             JsonRpcRequest(jsonrpc="1.0", method="test", id=1)
 
     def test_request_requires_method(self):
+        # [FUNCTION DOC]
+        # Missing method raises ValidationError.
         """Test request must have method."""
         with pytest.raises(ValidationError):
             JsonRpcRequest(jsonrpc="2.0", id=1)
 
     def test_request_id_can_be_string_or_int(self):
+        # [FUNCTION DOC]
+        # Integer and string ids accepted.
         """Test request ID can be string or integer."""
         req1 = JsonRpcRequest(jsonrpc="2.0", method="test", id=42)
         req2 = JsonRpcRequest(jsonrpc="2.0", method="test", id="string-id")
@@ -283,6 +350,8 @@ class TestJsonRpcRequest:
         assert req2.id == "string-id"
 
     def test_request_id_can_be_none(self):
+        # [FUNCTION DOC]
+        # Omitted id is None (notification).
         """Test request ID can be None (notification)."""
         request = JsonRpcRequest(jsonrpc="2.0", method="test")
 
@@ -295,9 +364,13 @@ class TestJsonRpcRequest:
 
 
 class TestJsonRpcResponse:
+    # [CLASS DOC]
+    # JsonRpcResponse construction and result-XOR-error serialization tests.
     """Tests for JsonRpcResponse Pydantic model."""
 
     def test_success_response(self):
+        # [FUNCTION DOC]
+        # success() sets result and id, no error.
         """Test success response creation."""
         response = JsonRpcResponse.success(result={"tools": []}, request_id=1)
 
@@ -306,6 +379,8 @@ class TestJsonRpcResponse:
         assert response.id == 1
 
     def test_error_response(self):
+        # [FUNCTION DOC]
+        # error_response() sets an error with the code and no result.
         """Test error response creation."""
         response = JsonRpcResponse.error_response(
             JsonRpcErrorCode.METHOD_NOT_FOUND,
@@ -319,6 +394,8 @@ class TestJsonRpcResponse:
         assert response.id == 2
 
     def test_model_dump_excludes_result_on_error(self):
+        # [FUNCTION DOC]
+        # Dumped error responses omit "result".
         """Test model_dump excludes 'result' when there's an error (JSON-RPC compliance)."""
         response = JsonRpcResponse.error_response(
             JsonRpcErrorCode.PARSE_ERROR, request_id=3
@@ -331,6 +408,8 @@ class TestJsonRpcResponse:
         assert data["id"] == 3
 
     def test_model_dump_excludes_error_on_success(self):
+        # [FUNCTION DOC]
+        # Dumped success responses omit "error".
         """Test model_dump excludes 'error' when there's a result (JSON-RPC compliance)."""
         response = JsonRpcResponse.success(result="ok", request_id=4)
         data = response.model_dump()
@@ -340,6 +419,8 @@ class TestJsonRpcResponse:
         assert data["result"] == "ok"
 
     def test_model_dump_json(self):
+        # [FUNCTION DOC]
+        # JSON dump has jsonrpc, result, id and no error.
         """Test model_dump_json produces valid JSON."""
         response = JsonRpcResponse.success(result={"value": 42}, request_id=5)
         json_str = response.model_dump_json()
@@ -351,6 +432,8 @@ class TestJsonRpcResponse:
         assert "error" not in data
 
     def test_success_with_null_result(self):
+        # [FUNCTION DOC]
+        # A null result is still included in the dump for success.
         """Test success response with null result is still valid."""
         response = JsonRpcResponse.success(result=None, request_id=6)
         data = response.model_dump()
@@ -361,6 +444,8 @@ class TestJsonRpcResponse:
         assert "error" not in data
 
     def test_response_preserves_string_id(self):
+        # [FUNCTION DOC]
+        # String request ids are preserved.
         """Test response preserves string request ID."""
         response = JsonRpcResponse.success(result={}, request_id="test-uuid-123")
         data = response.model_dump()
@@ -368,6 +453,8 @@ class TestJsonRpcResponse:
         assert data["id"] == "test-uuid-123"
 
     def test_response_with_none_id(self):
+        # [FUNCTION DOC]
+        # None id is dumped as None.
         """Test response with None ID (notification response)."""
         response = JsonRpcResponse.success(result={}, request_id=None)
         data = response.model_dump()
@@ -381,9 +468,14 @@ class TestJsonRpcResponse:
 
 
 class TestEnumIntegrationWithHTTPServer:
+    # [CLASS DOC]
+    # HTTPEnvServer integration with ServerMode; each test defines its own local
+    # action/observation/environment classes.
     """Tests for enum integration with HTTPEnvServer."""
 
     def test_register_routes_accepts_enum(self):
+        # [FUNCTION DOC]
+        # Registering with ServerMode.SIMULATION adds /reset and /step routes.
         """Test register_routes accepts ServerMode enum."""
         from fastapi import FastAPI
         from openenv.core.env_server.http_server import HTTPEnvServer
@@ -391,25 +483,39 @@ class TestEnumIntegrationWithHTTPServer:
         from openenv.core.env_server.types import Action, Observation, State
 
         class TestAction(Action):
+            # [CLASS DOC]
+            # Local action with a required string message.
             message: str
 
         class TestObservation(Observation):
+            # [CLASS DOC]
+            # Local observation with a required string response.
             response: str
 
         class TestEnvironment(Environment):
+            # [CLASS DOC]
+            # Local concurrent-safe environment returning fixed observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # Returns observation response "reset", not done.
                 return TestObservation(response="reset", done=False)
 
             def step(self, action):
+                # [FUNCTION DOC]
+                # Returns observation response "step", not done.
                 return TestObservation(response="step", done=False)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # Property returning State with step_count 0.
                 return State(step_count=0)
 
             def close(self):
+                # [FUNCTION DOC]
+                # No-op.
                 pass
 
         app = FastAPI()
@@ -424,6 +530,8 @@ class TestEnumIntegrationWithHTTPServer:
         assert "/step" in routes
 
     def test_register_routes_accepts_string(self):
+        # [FUNCTION DOC]
+        # Registering with the string "production" omits /reset and /step but keeps /health.
         """Test register_routes still accepts string (backwards compatibility)."""
         from fastapi import FastAPI
         from openenv.core.env_server.http_server import HTTPEnvServer
@@ -431,25 +539,39 @@ class TestEnumIntegrationWithHTTPServer:
         from openenv.core.env_server.types import Action, Observation, State
 
         class TestAction(Action):
+            # [CLASS DOC]
+            # Local action with a required string message.
             message: str
 
         class TestObservation(Observation):
+            # [CLASS DOC]
+            # Local observation with a required string response.
             response: str
 
         class TestEnvironment(Environment):
+            # [CLASS DOC]
+            # Local concurrent-safe environment returning fixed observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # Returns observation response "reset", not done.
                 return TestObservation(response="reset", done=False)
 
             def step(self, action):
+                # [FUNCTION DOC]
+                # Returns observation response "step", not done.
                 return TestObservation(response="step", done=False)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # Property returning State with step_count 0.
                 return State(step_count=0)
 
             def close(self):
+                # [FUNCTION DOC]
+                # No-op.
                 pass
 
         app = FastAPI()
@@ -465,6 +587,8 @@ class TestEnumIntegrationWithHTTPServer:
         assert "/health" in routes
 
     def test_health_endpoint_returns_enum_value(self):
+        # [FUNCTION DOC]
+        # GET /health returns 200 with status "healthy".
         """Test /health endpoint returns correct enum value as string."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
@@ -473,25 +597,39 @@ class TestEnumIntegrationWithHTTPServer:
         from openenv.core.env_server.types import Action, Observation, State
 
         class TestAction(Action):
+            # [CLASS DOC]
+            # Local action with a required string message.
             message: str
 
         class TestObservation(Observation):
+            # [CLASS DOC]
+            # Local observation with a required string response.
             response: str
 
         class TestEnvironment(Environment):
+            # [CLASS DOC]
+            # Local concurrent-safe environment returning fixed observations.
             SUPPORTS_CONCURRENT_SESSIONS = True
 
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # Returns observation response "reset", not done.
                 return TestObservation(response="reset", done=False)
 
             def step(self, action):
+                # [FUNCTION DOC]
+                # Returns observation response "step", not done.
                 return TestObservation(response="step", done=False)
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # Property returning State with step_count 0.
                 return State(step_count=0)
 
             def close(self):
+                # [FUNCTION DOC]
+                # No-op.
                 pass
 
         app = FastAPI()

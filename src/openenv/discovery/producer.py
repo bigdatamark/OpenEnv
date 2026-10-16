@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Builds a CatalogSnapshot from a local git repository: enumerates environment
+# directories (direct children of a root containing openenv.yaml) at one pinned commit,
+# reads their metadata from git objects (never importing code), projects each into an
+# EnvironmentCard/DiscoveryEntry with provenance, records per-environment failures as
+# issues, and stamps the snapshot digest.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """A deterministic repository inventory projected into revision-bound ARD entries."""
@@ -43,6 +49,10 @@ from .serialization import catalog_digest
 def _field(
     documents: list[tuple[dict[str, Any], str]], key: str
 ) -> tuple[object | None, str | None]:
+    # [FUNCTION DOC]
+    # HELPER: returns the first non-None value of key across (document, origin) pairs in
+    # priority order, with a provenance locator "<origin>#key" (or ".key" if origin already
+    # has a "#"). Returns (None, None) if no document has it.
     for document, origin in documents:
         if key in document and document[key] is not None:
             separator = "." if "#" in origin else "#"
@@ -58,6 +68,15 @@ def _license(
     readme: dict[str, Any],
     root_project: dict[str, Any],
 ) -> tuple[str, str | None, str | None, list[CatalogIssue]]:
+    # [FUNCTION DOC]
+    # HELPER: resolves an environment's license. Returns (expression, url, origin, issues).
+    # Precedence: explicit discovery.json license (its evidence file, license_source or
+    # discovery.json, must exist; url None when "unknown"); else env pyproject and README
+    # declarations - if they disagree (or the first is "other" without text and there are
+    # two) returns "unknown" with a license_conflict warning; else the first known one;
+    # else the repo-root pyproject license, using the first tracked license-files entry
+    # as origin (read to verify) or "pyproject.toml". "unknown" if nothing declared.
+    # Raises: MetadataError if a required evidence file is missing/invalid.
     if declaration.license is not None:
         evidence = declaration.license_source or f"{path}/discovery.json"
         source.read(evidence, required=True)
@@ -126,6 +145,17 @@ def _entry(
     namespace: str,
     root_project: dict[str, Any],
 ) -> tuple[DiscoveryEntry, list[CatalogIssue]]:
+    # [FUNCTION DOC]
+    # HELPER: builds one DiscoveryEntry for environment directory path.
+    # Reads required openenv.yaml, optional pyproject, README frontmatter and discovery.json.
+    # Name comes from manifest then pyproject; description from discovery.json, manifest,
+    # pyproject, README in order; both must be non-blank strings. Resolves license, builds
+    # an EnvironmentSource and (if availability is resolvable) a GitArtifact for the same
+    # subject, an orchestration interface, and when agent_tools are declared (evidence file
+    # must be inside the env dir and exist) an agent-tools interface and capabilities.
+    # Tags come from discovery.json or README frontmatter. Records field provenance in
+    # metadata. Identifier is urn:air:<publisher>:<namespace>:<sha256(uri\npath)>:<revision>.
+    # Returns (entry, warning issues). Raises MetadataError or pydantic ValidationError.
     manifest_path = f"{path}/openenv.yaml"
     manifest_text = source.read(manifest_path, required=True)
     if manifest_text is None:
@@ -247,6 +277,13 @@ def build_catalog(
     revision: str = "HEAD",
     root: str = "envs",
 ) -> CatalogSnapshot:
+    # [FUNCTION DOC]
+    # Validates publisher (DNS name) and namespace ([A-Za-z0-9._-]+), raising CatalogError
+    # otherwise; opens a GitMetadataSource (resolves revision, lists tree); reads root
+    # pyproject; builds an entry per environment, converting MetadataError/ValidationError
+    # into an error CatalogIssue for that path; assembles a CatalogSnapshot with
+    # complete = no errors, then returns a copy with the real digest.
+    # Side effects: runs git subprocesses against the repository.
     """
     Produce a metadata snapshot from tracked files at one source revision.
 

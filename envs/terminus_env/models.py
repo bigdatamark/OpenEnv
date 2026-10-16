@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for the Terminus environment: a per-command result and the per-session state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -13,6 +15,9 @@ from pydantic import BaseModel, Field
 
 
 class CommandResult(BaseModel):
+    # [CLASS DOC]
+    # Result of one shell command in the sandbox: the command, formatted output, optional error text and a
+    # success flag.
     """Outcome of one shell command run inside the E2B sandbox."""
 
     command: str
@@ -22,6 +27,10 @@ class CommandResult(BaseModel):
 
 
 class TerminusState(State):
+    # [CLASS DOC]
+    # Session state: sandbox id, setup command results, registered verify commands and their results, the
+    # history of agent commands, the submitted final answer, the last computed reward, the reason a reward
+    # override was ignored (if any) and the last error.
     """Per-session state for the single-tool Terminus environment."""
 
     sandbox_id: str | None = None

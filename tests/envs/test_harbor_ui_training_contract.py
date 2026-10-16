@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Tests for the Harbor web UI and its deployment surface: training-contract and typed training-trace
+# downloads matching the trainer path, run pages and download grants, endpoint validation and
+# connection, live run views, UI settings (local vs LAN vs Space), visitor run isolation and quotas,
+# URL/redirect SSRF guards, dataset add/remove (Hub, bucket, local cache), task environment-read
+# detection (task.toml and compose parsing), symlink containment, the SameOrigin cross-site guard,
+# HF sign-in, and the `openenv harbor push/serve` helpers. Many tests monkeypatch huggingface_hub.HfApi
+# and module internals; some spawn threads and poll with short sleeps.
 """UI downloads must preserve the exact supervision consumed by the trainer."""
 
 import json
@@ -10,6 +18,9 @@ from openenv.harbor.ui import _contract, _training_trace
 
 
 def rollout():
+    # [FUNCTION DOC]
+    # HELPER: Returns a train HarborRolloutResult (reward 1.0, tokens) with one turn whose loss mask is
+    # partial ([0, 0, 1, 0]).
     return HarborRolloutResult(
         task_name="partial-mask",
         reward=1.0,
@@ -28,6 +39,9 @@ def rollout():
 
 
 def test_ui_download_and_trainer_share_partial_masks():
+    # [FUNCTION DOC]
+    # The UI contract (after JSON round trip) equals export_training_contract, its trace entries equal
+    # the trainer's to_trace_entries, and the partial mask gives 1 trainable token.
     result = rollout()
     # The download is this document serialised as JSON, so compare what survives the round trip.
     document = json.loads(json.dumps(_contract(result.model_dump())))
@@ -38,6 +52,8 @@ def test_ui_download_and_trainer_share_partial_masks():
 
 
 def test_auxiliary_and_rejected_turns_cannot_gain_supervision_in_download():
+    # [FUNCTION DOC]
+    # Auxiliary, discarded and untrainable copies of the turn produce no trace entries and all-zero masks.
     result = rollout()
     for i, changes in enumerate(
         (dict(role="auxiliary"), dict(discarded=True), dict(trainable=False)), 1
@@ -51,6 +67,9 @@ def test_auxiliary_and_rejected_turns_cannot_gain_supervision_in_download():
 
 
 def test_eval_or_fatal_results_cannot_be_exported_as_training():
+    # [FUNCTION DOC]
+    # Eval results produce no contract and to_trace_entries raises ("eval-only"); a FATAL finding makes
+    # _contract raise ("fatal").
     result = rollout()
     result.rollout_type = "eval"
     assert _contract(result.model_dump()) is None
@@ -63,6 +82,8 @@ def test_eval_or_fatal_results_cannot_be_exported_as_training():
 
 
 def test_invalid_mask_cannot_be_hidden_by_the_download_path():
+    # [FUNCTION DOC]
+    # A mask of the wrong length makes _contract raise ValueError.
     result = rollout()
     result.turns[0].loss_mask = [0, 1]
     with pytest.raises(ValueError):
@@ -70,6 +91,9 @@ def test_invalid_mask_cannot_be_hidden_by_the_download_path():
 
 
 def test_typed_download_matches_session_capture_and_keeps_audit_separate():
+    # [FUNCTION DOC]
+    # The typed _training_trace download equals HarborSession.fetch_training_trace, keeps only agent and
+    # masked-context turns with their masks, and _contract equals export_training_contract.
     from unittest.mock import MagicMock
 
     from harbor_env.harness import HarborSession
@@ -113,6 +137,9 @@ def test_typed_download_matches_session_capture_and_keeps_audit_separate():
 
 
 def test_typed_download_rejects_legacy_masks_and_eval_capture():
+    # [FUNCTION DOC]
+    # A missing loss mask raises ("explicit loss_mask") for the typed trace but not for _contract; eval
+    # results produce no typed trace.
     result = rollout()
     result.turns[0].loss_mask = None
     with pytest.raises(ValueError, match="explicit loss_mask"):
@@ -123,6 +150,9 @@ def test_typed_download_rejects_legacy_masks_and_eval_capture():
 
 
 def test_run_page_keeps_downloads_behind_the_same_grant():
+    # [FUNCTION DOC]
+    # run_html embeds the same grant token on all download buttons, the grant resolves to the run id,
+    # and eval runs omit the training_trace download.
     from openenv.harbor import ui_pages
 
     result = rollout().model_dump()
@@ -137,6 +167,10 @@ def test_run_page_keeps_downloads_behind_the_same_grant():
 
 
 def test_ui_validation_keeps_the_qualified_acp_profile(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # With a qualification report (env var) qualifying acp under an opencode profile and stubbed
+    # validate_llm/capabilities, validate_endpoint allows only acp with its profile shown; with
+    # experimental=True it also allows opencode. Writes the report to tmp_path.
     import importlib
     from types import SimpleNamespace
 
@@ -218,6 +252,10 @@ def test_ui_validation_keeps_the_qualified_acp_profile(tmp_path, monkeypatch):
 def test_live_view_follows_its_own_session_with_concurrent_rollouts(
     tmp_path, monkeypatch
 ):
+    # [FUNCTION DOC]
+    # Builds the Gradio app with stubbed service, rollout and transcript; starting a run and ticking shows
+    # only the transcript of the session reported via on_session_created, never an unrelated one, and
+    # registry-wide listing is never used.
     """The run view polls the session its rollout reported, never "the newest one" in the registry.
 
     Two visitors running at once must each watch their own rollout; discovering sessions by listing
@@ -258,6 +296,9 @@ def test_live_view_follows_its_own_session_with_concurrent_rollouts(
     )
 
     async def run(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake rollout; creates an unrelated and an own session, reports the own one, waits up to
+        # ~10s for the release event, then returns an eval result for it.
         registry.create("unrelated-private-run")
         session = registry.create("this-ui-run")
         kwargs["on_session_created"](session.session_id)
@@ -271,6 +312,8 @@ def test_live_view_follows_its_own_session_with_concurrent_rollouts(
         )
 
     def transcript(session):
+        # [FUNCTION DOC]
+        # HELPER: Asserts the session is the run's own, sets the release event, returns a marker string.
         assert session.session_id == "this-ui-run"
         release.set()
         return "this-ui-run trace"
@@ -311,6 +354,9 @@ def test_live_view_follows_its_own_session_with_concurrent_rollouts(
 
 
 def test_ui_refuses_datasets_it_does_not_serve(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Server functions hb_tasks, hb_file and hb_add refuse an unserved local path and never leak the
+    # contents of a file in it.
     """A dataset spec from the browser can be a local path; the UI must only open served datasets."""
     from openenv.harbor.ui import harbor_gradio_builder
 
@@ -341,6 +387,8 @@ def test_ui_refuses_datasets_it_does_not_serve(monkeypatch, tmp_path):
 
 
 def _clear_ui_env(monkeypatch):
+    # [FUNCTION DOC]
+    # HELPER: Deletes every UI-related environment variable (SPACE_ID and OPENENV_HARBOR_UI_*/RUN_*).
     for name in (
         "SPACE_ID",
         "OPENENV_HARBOR_RUN_HISTORY",
@@ -358,6 +406,10 @@ def _clear_ui_env(monkeypatch):
 
 
 def test_settings_default_open_locally_and_closed_on_a_space(monkeypatch):
+    # [FUNCTION DOC]
+    # ui_settings.load: loopback host is permissive, 0.0.0.0 is exposed and restrictive, a Space limits
+    # visibility to "own", 2 runs per visitor, no server endpoint sharing, never offers the local token,
+    # and RUN_VISIBILITY can override.
     from openenv.harbor import ui_settings
 
     _clear_ui_env(monkeypatch)
@@ -391,6 +443,8 @@ def test_settings_default_open_locally_and_closed_on_a_space(monkeypatch):
 
 
 def test_an_empty_visitor_secret_is_replaced_and_persisted(tmp_path):
+    # [FUNCTION DOC]
+    # A whitespace-only secret file is replaced by a generated secret written back to disk.
     from types import SimpleNamespace
 
     from openenv.harbor.ui_settings import visitor_secret
@@ -402,6 +456,9 @@ def test_an_empty_visitor_secret_is_replaced_and_persisted(tmp_path):
 
 
 def test_a_visitor_url_may_not_reach_private_addresses():
+    # [FUNCTION DOC]
+    # url_problem rejects non-HTTP schemes and private/loopback/link-local addresses including IPv6
+    # embeddings, and allows localhost when private_ok.
     from openenv.harbor.ui_settings import url_problem
 
     assert url_problem("ftp://example.com/v1", private_ok=True)
@@ -420,6 +477,8 @@ def test_a_visitor_url_may_not_reach_private_addresses():
 
 
 def test_a_redirect_to_a_private_address_is_refused():
+    # [FUNCTION DOC]
+    # _PublicRedirects.redirect_request raises HTTPError for a redirect to a metadata IP.
     import urllib.error
     import urllib.request
 
@@ -433,6 +492,9 @@ def test_a_redirect_to_a_private_address_is_refused():
 
 
 def test_each_visitor_sees_only_their_own_runs(tmp_path):
+    # [FUNCTION DOC]
+    # RunManager list/get filter runs by owner digest; None owner sees all, empty owner sees none; the
+    # stored file contains only the digest.
     from openenv.harbor import ui_runs
     from openenv.harbor.ui_settings import owner_of
 
@@ -459,12 +521,17 @@ def test_each_visitor_sees_only_their_own_runs(tmp_path):
 
 
 def test_hugging_face_connect_routes_to_a_provider_and_needs_a_token(monkeypatch):
+    # [FUNCTION DOC]
+    # connect_endpoint for source "hf" refuses without a token, otherwise validates "<model>:<route>"
+    # with provider hf and purpose eval, and strips the api key from the kept form.
     from openenv.harbor import ui, ui_settings
 
     _clear_ui_env(monkeypatch)
     seen = {}
 
     def fake_validate(url, model, api_key, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records arguments and returns an ok engine echoing model and key.
         seen.update(url=url, model=model, api_key=api_key, **kwargs)
         return {"ok": True, "model": model, "api_key": api_key}
 
@@ -487,6 +554,8 @@ def test_hugging_face_connect_routes_to_a_provider_and_needs_a_token(monkeypatch
 
 
 def test_the_card_never_carries_a_key(monkeypatch):
+    # [FUNCTION DOC]
+    # _card output never contains the engine's api key.
     from types import SimpleNamespace
 
     from openenv.harbor import ui
@@ -504,6 +573,8 @@ def test_the_card_never_carries_a_key(monkeypatch):
 
 
 def test_download_grants_cannot_be_guessed_or_reused_for_another_run():
+    # [FUNCTION DOC]
+    # grant is stable per run; the run id itself or empty string is not a valid grant.
     from openenv.harbor import ui_pages
 
     token = ui_pages.grant("run-1")
@@ -513,6 +584,9 @@ def test_download_grants_cannot_be_guessed_or_reused_for_another_run():
 
 
 def test_only_public_hub_datasets_can_be_added(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # _hub_problem rejects local-looking or malformed specs, private/gated and missing datasets, accepting
+    # only public ones; the Hub lookup is anonymous (token False).
     from types import SimpleNamespace
 
     from openenv.harbor import ui
@@ -528,12 +602,18 @@ def test_only_public_hub_datasets_can_be_added(monkeypatch, tmp_path):
     }
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi returning canned dataset info.
         def __init__(self, token=None):
+            # [FUNCTION DOC]
+            # HELPER: Asserts the token is False.
             assert token is False, (
                 "adds are looked up anonymously, never with the server's token"
             )
 
         def dataset_info(self, spec):
+            # [FUNCTION DOC]
+            # HELPER: Returns the canned info or raises FileNotFoundError.
             if spec not in info:
                 raise FileNotFoundError(spec)
             return info[spec]
@@ -546,6 +626,8 @@ def test_only_public_hub_datasets_can_be_added(monkeypatch, tmp_path):
 
 
 def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # reads_environment flags a task whose compose file or task.toml interpolates a host variable.
     from openenv.harbor import ui_data
 
     task = tmp_path / "t"
@@ -572,6 +654,9 @@ def test_tasks_that_read_the_server_environment_are_found(monkeypatch, tmp_path)
 def test_served_tasks_that_read_the_server_environment_cannot_run(
     monkeypatch, tmp_path
 ):
+    # [FUNCTION DOC]
+    # on_run refuses an env-reading task on a visitor endpoint and, on the server's own endpoint,
+    # proceeds (stopping only for the missing capture proxy); RunManager.start is never reached.
     from types import SimpleNamespace
 
     from openenv.harbor import ui, ui_runs
@@ -597,6 +682,8 @@ def test_served_tasks_that_read_the_server_environment_cannot_run(
     monkeypatch.setattr("openenv.harbor.serving.HarborService.current", lambda: None)
 
     def said(**engine):
+        # [FUNCTION DOC]
+        # HELPER: Calls the on_run handler with the given engine fields and returns the status message.
         return handlers["on_run"](
             {
                 "ok": True,
@@ -616,6 +703,10 @@ def test_served_tasks_that_read_the_server_environment_cannot_run(
 
 
 def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Each of many host-reaching compose constructs (absolute/traversing binds, env_file, include,
+    # extends, host networks, privileges, sockets, build SSH/network/cache) in an included compose file
+    # is flagged; an ordinary compose file and task-relative binds are not.
     """Compose can pull the host's files into a container, which a local backend runs on this machine."""
     from openenv.harbor import ui_data
 
@@ -685,6 +776,9 @@ def test_a_compose_file_that_reads_the_host_is_found(monkeypatch, tmp_path):
 
 
 def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # Detection works on decoded TOML/YAML (escapes, list/map env passthrough, secrets, traversal,
+    # additional contexts, unparseable files flagged) and handles a YAML alias bomb in under 2 seconds.
     """The guard reads task.toml and compose files as parsed, not as raw text."""
     import time
 
@@ -757,6 +851,9 @@ def test_env_reads_are_found_in_what_harbor_and_compose_decode(monkeypatch, tmp_
 def test_the_file_tree_lists_the_top_level_first_and_stops_at_the_cap(
     monkeypatch, tmp_path
 ):
+    # [FUNCTION DOC]
+    # file_tree lists top-level files first, skips dotfiles and symlinks out of the task, and reports
+    # truncation at MAX_TREE_FILES.
     from openenv.harbor import ui_data
 
     for rel in (
@@ -787,18 +884,27 @@ def test_the_file_tree_lists_the_top_level_first_and_stops_at_the_cap(
 
 
 def test_a_dataset_of_unknown_size_is_measured_or_refused(monkeypatch):
+    # [FUNCTION DOC]
+    # _tasks_bytes sums file sizes and stops after passing the cap; start_add fails with "Couldn't tell
+    # how big" when the size is unknown or zero.
     import time
 
     from huggingface_hub.hf_api import RepoFile, RepoFolder
     from openenv.harbor import ui_data
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi listing a folder and three 3GB files.
         def __init__(self, token=None):
+            # [FUNCTION DOC]
+            # HELPER: Ignores the token.
             pass
 
         def list_repo_tree(
             self, spec, repo_type=None, path_in_repo=None, recursive=None
         ):
+            # [FUNCTION DOC]
+            # HELPER: Returns an iterator of one folder and three large files.
             big = RepoFile(path="tasks/t/blob", size=3_000_000_000, oid="x")
             return iter([RepoFolder(path="tasks/t", oid="y"), big, big, big])
 
@@ -823,6 +929,8 @@ def test_a_dataset_of_unknown_size_is_measured_or_refused(monkeypatch):
 
 
 def test_harbor_expands_only_braced_variables_in_task_toml(monkeypatch):
+    # [FUNCTION DOC]
+    # harbor's resolve_env_vars expands only braced variables. Skipped without harbor.
     """Why `reads_environment` looks for `${` alone in task.toml: Harbor leaves a bare `$VAR` as is.
 
     Compose is checked for bare `$VAR` too, since Docker Compose expands both forms.
@@ -840,6 +948,8 @@ def test_harbor_expands_only_braced_variables_in_task_toml(monkeypatch):
 
 
 def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # RunManager.start enforces per_owner limits per owner and per quota key (signed-in account).
     import asyncio
     import threading
     from types import SimpleNamespace
@@ -849,6 +959,8 @@ def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
     release = threading.Event()
 
     async def slow(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake rollout that waits until released, then raises RuntimeError.
         while not release.is_set():
             await asyncio.sleep(0.01)
         raise RuntimeError("stopped")
@@ -880,6 +992,8 @@ def test_one_visitor_cannot_hold_every_slot(monkeypatch, tmp_path):
 
 
 def test_a_cancelled_rollout_releases_its_live_slot(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # A cancelled rollout frees its live slot and the run is recorded as failed with CancelledError.
     import asyncio
     import time
     from types import SimpleNamespace
@@ -887,6 +1001,8 @@ def test_a_cancelled_rollout_releases_its_live_slot(monkeypatch, tmp_path):
     from openenv.harbor import ui_runs
 
     async def cancelled(*args, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Raises asyncio.CancelledError.
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(
@@ -911,6 +1027,9 @@ def test_a_cancelled_rollout_releases_its_live_slot(monkeypatch, tmp_path):
 
 
 def test_engine_reacquire_cannot_race_with_forget(monkeypatch):
+    # [FUNCTION DOC]
+    # Releasing the last hold of an engine calls forget while holding the refcount lock, so a concurrent
+    # re-hold blocks until forget returns; the final refcount is 1.
     import threading
     from types import SimpleNamespace
 
@@ -927,7 +1046,11 @@ def test_engine_reacquire_cannot_race_with_forget(monkeypatch):
     threads = []
 
     def forget(upstream, service):
+        # [FUNCTION DOC]
+        # HELPER: Starts a thread that re-holds the engine and asserts it cannot finish within 50ms.
         def hold_again():
+            # [FUNCTION DOC]
+            # HELPER: Signals start, holds the engine, signals reacquired.
             started.set()
             manager._hold_engine(engine)
             reacquired.set()
@@ -946,6 +1069,8 @@ def test_engine_reacquire_cannot_race_with_forget(monkeypatch):
 
 
 def test_markdown_from_a_model_loads_no_images():
+    # [FUNCTION DOC]
+    # _markdown does not render image tags.
     from openenv.harbor.ui_trace import _markdown
 
     out = _markdown("look ![x](https://tracker.example/p.png)")
@@ -953,6 +1078,8 @@ def test_markdown_from_a_model_loads_no_images():
 
 
 def test_add_progress_counts_files_not_bytes():
+    # [FUNCTION DOC]
+    # The _progress tqdm replacement records file-count progress and ignores byte-unit bars.
     from openenv.harbor.ui_data import _progress
 
     job = {}
@@ -965,6 +1092,8 @@ def test_add_progress_counts_files_not_bytes():
 
 
 def test_run_history_skips_files_that_are_not_runs(tmp_path):
+    # [FUNCTION DOC]
+    # RunStore.list ignores non-run JSON, broken files and dotfiles.
     """Anything else in the folder (a list, a broken file, the folder's own dotfiles) is skipped."""
     from openenv.harbor import ui_runs
 
@@ -979,6 +1108,9 @@ def test_run_history_skips_files_that_are_not_runs(tmp_path):
 
 
 def _bucket_settings(tmp_path):
+    # [FUNCTION DOC]
+    # HELPER: Creates a "data" mount dir under tmp_path and returns settings with bucket "org/space",
+    # that mount and hf_login True.
     from types import SimpleNamespace
 
     mount = tmp_path / "data"
@@ -987,16 +1119,25 @@ def _bucket_settings(tmp_path):
 
 
 def test_page_adds_go_into_the_bucket_and_the_bucket_is_the_list(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # _copy_to_bucket copies only tasks/ into the bucket folder "org__suite"; the mount path is the
+    # added spec, hub_id maps it back, and added_in_bucket lists it unless already served.
     from openenv.harbor import ui_data
 
     settings = _bucket_settings(tmp_path)
     copies = []
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi whose copy_files records the copy and creates the mounted task.
         def __init__(self, token=None):
+            # [FUNCTION DOC]
+            # HELPER: Ignores the token.
             pass
 
         def copy_files(self, src, dst):
+            # [FUNCTION DOC]
+            # HELPER: Records (src, dst) and creates a task.toml under the mount.
             copies.append((src, dst))
             task = settings.bucket_mount / "org__suite" / "tasks" / "t1"
             task.mkdir(parents=True)
@@ -1023,6 +1164,8 @@ def test_page_adds_go_into_the_bucket_and_the_bucket_is_the_list(monkeypatch, tm
 def test_a_removed_dataset_cannot_be_recached_by_inflight_indexing(
     monkeypatch, tmp_path
 ):
+    # [FUNCTION DOC]
+    # A _forget during an in-flight task_rows prevents the stale rows from being cached.
     import threading
 
     from openenv.harbor import ui_data
@@ -1032,6 +1175,8 @@ def test_a_removed_dataset_cannot_be_recached_by_inflight_indexing(
     started, release = threading.Event(), threading.Event()
 
     def row(index, path, spec=None):
+        # [FUNCTION DOC]
+        # HELPER: Blocking task_row stub returning a minimal row.
         started.set()
         assert release.wait(1)
         return {"index": index, "name": path.name, "title": path.name, "paragraphs": []}
@@ -1049,6 +1194,9 @@ def test_a_removed_dataset_cannot_be_recached_by_inflight_indexing(
 
 
 def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # remove_added deletes only files under the dataset's bucket prefix, rejects non-dataset paths, and
+    # locally deletes only the cache folder (".." is rejected).
     from types import SimpleNamespace
 
     from huggingface_hub import BucketFile, BucketFolder
@@ -1061,10 +1209,16 @@ def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
     deleted = []
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi for bucket listing and deletion.
         def __init__(self, token=None):
+            # [FUNCTION DOC]
+            # HELPER: Ignores the token.
             pass
 
         def list_bucket_tree(self, bucket, prefix=None, recursive=None):
+            # [FUNCTION DOC]
+            # HELPER: Asserts bucket/prefix and returns one folder and one file.
             assert bucket == "org/space" and prefix == "org__suite/"
             entry = {"path": "org__suite/tasks/t1/task.toml", "size": 1, "xetHash": ""}
             return [
@@ -1073,6 +1227,8 @@ def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
             ]
 
         def batch_bucket_files(self, bucket, delete=None):
+            # [FUNCTION DOC]
+            # HELPER: Records deleted paths.
             deleted.extend(delete)
 
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
@@ -1095,6 +1251,8 @@ def test_removing_deletes_only_the_dataset_folder(monkeypatch, tmp_path):
 
 
 def test_two_removes_of_the_same_dataset_are_serialised(monkeypatch):
+    # [FUNCTION DOC]
+    # Two concurrent _remove_added calls for one dataset: exactly one succeeds and one returns an error.
     import threading
     from types import SimpleNamespace
 
@@ -1104,6 +1262,8 @@ def test_two_removes_of_the_same_dataset_are_serialised(monkeypatch):
     entered, release = threading.Event(), threading.Event()
 
     def remove(spec, settings):
+        # [FUNCTION DOC]
+        # HELPER: Blocking remove_added stub.
         entered.set()
         assert release.wait(1)
 
@@ -1127,6 +1287,9 @@ def test_two_removes_of_the_same_dataset_are_serialised(monkeypatch):
 
 
 def test_signing_in_is_an_account_for_inference_providers(monkeypatch):
+    # [FUNCTION DOC]
+    # With use_account, connect_endpoint uses the OAuth token, reports "expired" without one, and never
+    # keeps the token in the remembered form.
     from types import SimpleNamespace
 
     from openenv.harbor import ui
@@ -1152,6 +1315,10 @@ def test_signing_in_is_an_account_for_inference_providers(monkeypatch):
 
 
 def test_a_cross_site_request_is_refused_and_others_pass(monkeypatch):
+    # [FUNCTION DOC]
+    # SameOrigin ASGI middleware returns 403 for cross-origin or cross-site UI POSTs, passes same-origin,
+    # header-less and GET requests and non-UI paths (/mcp), ignores X-Forwarded-Host, and honours
+    # OPENENV_HARBOR_UI_HOSTS as allowed public hosts.
     import asyncio
 
     from openenv.harbor.serving import SameOrigin
@@ -1159,17 +1326,25 @@ def test_a_cross_site_request_is_refused_and_others_pass(monkeypatch):
     calls = []
 
     async def app(scope, receive, send):
+        # [FUNCTION DOC]
+        # HELPER: Inner ASGI app recording the request path.
         calls.append(scope["path"])
 
     sent = []
 
     async def send(message):
+        # [FUNCTION DOC]
+        # HELPER: Records sent ASGI messages.
         sent.append(message)
 
     async def receive():
+        # [FUNCTION DOC]
+        # HELPER: Returns an empty http.request message.
         return {"type": "http.request"}
 
     def request(method, path="/web/gradio_api/queue/join", **headers):
+        # [FUNCTION DOC]
+        # HELPER: Builds an ASGI http scope with method, path and headers (underscores become dashes).
         return {
             "type": "http",
             "method": method,
@@ -1264,6 +1439,8 @@ def test_a_cross_site_request_is_refused_and_others_pass(monkeypatch):
 
 
 def test_the_cross_site_guard_is_on_without_sign_in(monkeypatch):
+    # [FUNCTION DOC]
+    # build_app installs SameOrigin middleware even when HF login is not attached.
     """Sign-in is not the only reason to refuse other sites: a page could start rollouts either way."""
     from fastapi import FastAPI
     from openenv.core.env_server import http_server
@@ -1279,6 +1456,9 @@ def test_the_cross_site_guard_is_on_without_sign_in(monkeypatch):
 
 
 def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
+    # [FUNCTION DOC]
+    # _fill_bucket creates buckets private by default, public on request, warns on an existing public
+    # bucket without changing it, and makes it private when public=False.
     from types import SimpleNamespace
 
     from openenv.cli.commands import harbor
@@ -1286,20 +1466,30 @@ def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
     made, changed, state = [], [], {}
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi tracking bucket privacy state.
         def bucket_info(self, bucket):
+            # [FUNCTION DOC]
+            # HELPER: Returns privacy or raises FileNotFoundError.
             if bucket not in state:
                 raise FileNotFoundError(bucket)
             return SimpleNamespace(private=state[bucket])
 
         def create_bucket(self, bucket, private=None, exist_ok=False):
+            # [FUNCTION DOC]
+            # HELPER: Records creation and stores privacy.
             made.append((bucket, private))
             state[bucket] = private
 
         def update_bucket_settings(self, bucket, private):
+            # [FUNCTION DOC]
+            # HELPER: Records change and stores privacy.
             changed.append((bucket, private))
             state[bucket] = private
 
         def list_bucket_tree(self, bucket):
+            # [FUNCTION DOC]
+            # HELPER: Returns an empty list.
             return []
 
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
@@ -1315,13 +1505,21 @@ def test_push_keeps_buckets_private_unless_told(monkeypatch, capsys):
 
 
 def test_push_does_not_treat_bucket_lookup_failures_as_missing(monkeypatch):
+    # [FUNCTION DOC]
+    # A non-NotFound lookup error propagates instead of creating the bucket.
     from openenv.cli.commands import harbor
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi whose lookup fails.
         def bucket_info(self, bucket):
+            # [FUNCTION DOC]
+            # HELPER: Raises RuntimeError("rate limited").
             raise RuntimeError("rate limited")
 
         def create_bucket(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Fails the test if called.
             pytest.fail("a failed lookup is not proof that the bucket is missing")
 
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
@@ -1330,6 +1528,8 @@ def test_push_does_not_treat_bucket_lookup_failures_as_missing(monkeypatch):
 
 
 def test_push_removes_omitted_ui_overrides(monkeypatch):
+    # [FUNCTION DOC]
+    # _remove_omitted_ui_variables deletes UI variables not in the new set, keeping others.
     from types import SimpleNamespace
 
     from openenv.cli.commands import harbor
@@ -1337,7 +1537,11 @@ def test_push_removes_omitted_ui_overrides(monkeypatch):
     deleted = []
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi with Space variables.
         def get_space_variables(self, repo_id):
+            # [FUNCTION DOC]
+            # HELPER: Returns three variables.
             return {
                 "OPENENV_HARBOR_UI_SERVER_ENDPOINT": SimpleNamespace(value="1"),
                 "OPENENV_HARBOR_UI_ROLLOUTS": SimpleNamespace(value="0"),
@@ -1345,6 +1549,8 @@ def test_push_removes_omitted_ui_overrides(monkeypatch):
             }
 
         def delete_space_variable(self, repo_id, key):
+            # [FUNCTION DOC]
+            # HELPER: Records deleted keys.
             deleted.append(key)
 
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
@@ -1355,6 +1561,9 @@ def test_push_removes_omitted_ui_overrides(monkeypatch):
 
 
 def test_the_hub_floor_has_every_call_push_makes():
+    # [FUNCTION DOC]
+    # Both pyproject files pin huggingface_hub to allow 1.29.0 but not 1.28.0, and the installed HfApi
+    # has every bucket/Space method push uses.
     """The fakes above define `update_bucket_settings` whatever the version, so check the real
     contract: both floors exclude 1.28, the last release without it, and the installed client has
     every bucket and Space call `push` makes."""
@@ -1388,6 +1597,9 @@ def test_the_hub_floor_has_every_call_push_makes():
 
 
 def test_push_refuses_a_space_whose_visitors_would_have_no_model():
+    # [FUNCTION DOC]
+    # The push CLI with --no-visitor-endpoints and no --share-endpoint exits 2 with "needs
+    # --share-endpoint" (ANSI and box characters stripped).
     """On a Space the endpoint is shared only when asked, so turning visitors' own models off needs it."""
     import re
 
@@ -1403,6 +1615,9 @@ def test_push_refuses_a_space_whose_visitors_would_have_no_model():
 
 
 def test_push_turns_on_sign_in_in_the_space_readme(tmp_path):
+    # [FUNCTION DOC]
+    # _enable_hf_login adds hf_oauth and inference-api scope to README front matter, keeps the body, and
+    # is idempotent.
     from openenv.cli.commands import harbor
 
     readme = tmp_path / "README.md"
@@ -1421,6 +1636,8 @@ def test_push_turns_on_sign_in_in_the_space_readme(tmp_path):
 
 
 def test_push_turns_on_sign_in_for_the_real_env_readme(tmp_path):
+    # [FUNCTION DOC]
+    # On the real harbor_env README copy, hf_oauth is added to the front matter.
     """The README documents `hf_oauth: true` in its text; only its front matter may count."""
     from pathlib import Path
 
@@ -1434,6 +1651,9 @@ def test_push_turns_on_sign_in_for_the_real_env_readme(tmp_path):
 
 
 def test_sign_in_on_a_docker_space_is_the_real_one(monkeypatch):
+    # [FUNCTION DOC]
+    # On a Space with OAuth configured and no SYSTEM variable, _attach_hf_login installs real (not
+    # mocked) Gradio OAuth routes. Skipped without itsdangerous.
     """Docker Spaces do not set SYSTEM=spaces; Gradio would then fake the login as the operator."""
     pytest.importorskip("itsdangerous")  # Gradio's OAuth libraries, in the Space image
     from fastapi import FastAPI
@@ -1458,11 +1678,15 @@ def test_sign_in_on_a_docker_space_is_the_real_one(monkeypatch):
 
 
 def test_hub_inspection_failures_are_not_cached(monkeypatch):
+    # [FUNCTION DOC]
+    # _inspect_hub re-raises a failure and retries on the next call instead of caching it.
     from openenv.harbor import ui, ui_data
 
     calls = 0
 
     def summary(spec):
+        # [FUNCTION DOC]
+        # HELPER: Raises on the first call, then returns a summary; counts calls via nonlocal.
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -1478,13 +1702,21 @@ def test_hub_inspection_failures_are_not_cached(monkeypatch):
 
 
 def test_hub_summary_propagates_rate_limits_and_timeouts(monkeypatch):
+    # [FUNCTION DOC]
+    # hub_summary propagates errors from list_repo_tree.
     from openenv.harbor import ui_data
 
     class Api:
+        # [CLASS DOC]
+        # HELPER: Fake HfApi whose listing fails.
         def __init__(self, token=None):
+            # [FUNCTION DOC]
+            # HELPER: Ignores the token.
             pass
 
         def list_repo_tree(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Raises RuntimeError("rate limited").
             raise RuntimeError("rate limited")
 
     monkeypatch.setattr("huggingface_hub.HfApi", Api)
@@ -1493,6 +1725,8 @@ def test_hub_summary_propagates_rate_limits_and_timeouts(monkeypatch):
 
 
 def test_read_only_ui_hides_rollout_controls():
+    # [FUNCTION DOC]
+    # run_card.js contains the read-only message and checks rollouts === false.
     from openenv.harbor.ui import _asset
 
     source = _asset("run_card.js")
@@ -1501,6 +1735,8 @@ def test_read_only_ui_hides_rollout_controls():
 
 
 def test_a_task_row_lists_its_keywords_once(tmp_path):
+    # [FUNCTION DOC]
+    # task_row merges [task] and [metadata] keywords without duplicates.
     """`task.toml` is read for keywords in `[task]` and `[metadata]`; a helper reused for the
     environment check must not shadow the one this reads them with."""
     from openenv.harbor import ui_data
@@ -1513,6 +1749,9 @@ def test_a_task_row_lists_its_keywords_once(tmp_path):
 
 
 def test_serve_can_allow_private_urls_on_any_bind_address():
+    # [FUNCTION DOC]
+    # _ui_env emits OPENENV_HARBOR_UI_PRIVATE_URLS only when asked and that variable is not in the
+    # push-managed set.
     """`OPENENV_HARBOR_UI_PRIVATE_URLS` has a `serve` flag, and `push` never removes a hand-set one."""
     from openenv.cli.commands import harbor
 
@@ -1524,6 +1763,9 @@ def test_serve_can_allow_private_urls_on_any_bind_address():
 
 
 def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # start_add refuses a downloaded dataset containing a symlinked task and removes the copy; a failing
+    # cleanup is reported; added_in_bucket skips bucket datasets containing links.
     """A link in a Hub dataset could point a task, or the files the page shows by itself, at
     anything on the server. The add is refused, and what was copied is removed."""
     import time
@@ -1537,6 +1779,8 @@ def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
     monkeypatch.setattr(tasks, "_DATASET_ROOT", tmp_path / "cache")
 
     def download(spec, tqdm_class=None):
+        # [FUNCTION DOC]
+        # HELPER: Fake resolve_task_dirs creating a real task and a symlinked task in the cache.
         suite = tasks._DATASET_ROOT / spec.replace("/", "__") / "tasks"
         (suite / "fine").mkdir(parents=True, exist_ok=True)
         (suite / "fine" / "task.toml").write_text("")
@@ -1562,6 +1806,8 @@ def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
 
     # a cleanup that fails is said, and the copy it leaves is not listed after a restart
     def fail(spec, settings):
+        # [FUNCTION DOC]
+        # HELPER: Raises OSError("bucket unreachable").
         raise OSError("bucket unreachable")
 
     monkeypatch.setattr(ui_data, "remove_added", fail)
@@ -1582,6 +1828,8 @@ def test_a_dataset_with_a_link_is_not_added(monkeypatch, tmp_path):
 
 
 def test_the_page_reads_no_file_through_a_link(tmp_path):
+    # [FUNCTION DOC]
+    # task_row and _toml do not read through symlinked files or a symlinked task folder.
     from openenv.harbor import ui_data
 
     host = tmp_path / "host.txt"
@@ -1603,6 +1851,8 @@ def test_the_page_reads_no_file_through_a_link(tmp_path):
 
 
 def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # A symlinked compose file or task.toml is flagged by reads_environment.
     from openenv.harbor import ui_data
 
     host = tmp_path / "host"
@@ -1629,6 +1879,9 @@ def test_a_link_in_a_task_counts_as_reading_the_host(monkeypatch, tmp_path):
 
 
 def test_a_served_dataset_is_read_only_inside_its_own_folder(tmp_path):
+    # [FUNCTION DOC]
+    # Task rows, details and file reads never follow links out of the dataset folder (tasks or tasks/
+    # itself linked) and such tasks are flagged; an operator's link to the whole dataset folder works.
     """Every read the page makes (card text, file tree, file viewer, environment check) is
     anchored on the dataset's folder: a link to anywhere else, at any level, is not followed. The
     folder itself may be a link, which is the operator's own choice."""
@@ -1642,6 +1895,8 @@ def test_a_served_dataset_is_read_only_inside_its_own_folder(tmp_path):
         (folder / "token").write_text("hf_server_secret\n")
 
     def dataset(name):
+        # [FUNCTION DOC]
+        # HELPER: Creates <name>/tasks/own with an instruction and empty task.toml; returns the tasks dir.
         tasks = tmp_path / name / "tasks"
         (tasks / "own").mkdir(parents=True)
         (tasks / "own" / "instruction.md").write_text("Do the task.\n")
@@ -1676,6 +1931,8 @@ def test_a_served_dataset_is_read_only_inside_its_own_folder(tmp_path):
 
 
 def test_the_task_api_reads_instructions_only_inside_the_dataset(tmp_path):
+    # [FUNCTION DOC]
+    # HarborTaskProvider.get_task_range shows empty instructions for linked files or linked task folders.
     """The Task API is public on a Space: its instruction preview follows the page's rule."""
     from openenv.harbor import tasks
 
@@ -1698,6 +1955,9 @@ def test_the_task_api_reads_instructions_only_inside_the_dataset(tmp_path):
 
 
 def test_a_registry_task_is_read_only_inside_harbors_cache(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # For registry specs, task_root anchors on Harbor's CACHE_DIR and returns None for links out of it;
+    # instructions are not read through such links. Skipped without harbor.
     """A registry dataset is a git checkout in Harbor's cache, and git keeps links: the cache is its
     anchor, so a link out of it is not followed."""
     # Harbor itself installs only on Python 3.12+ (the `harbor` extra); registry datasets need it.
@@ -1722,6 +1982,9 @@ def test_a_registry_task_is_read_only_inside_harbors_cache(monkeypatch, tmp_path
 
 
 def test_a_page_run_with_several_rewards_is_shown_not_failed(monkeypatch, tmp_path):
+    # [FUNCTION DOC]
+    # ui_runs._rollout passes require_reward False and reward_key from OPENENV_HARBOR_REWARD_KEY;
+    # _verdict shows "Graded" for multiple rewards and _result_html lists them with a --reward-key hint.
     """A task can report several rewards with none named `reward` (SmolDataEnvs: `correctness`,
     `submission`). A trainer must choose; a page's run shows them all, and `--reward-key` picks the
     headline one."""
@@ -1734,6 +1997,8 @@ def test_a_page_run_with_several_rewards_is_shown_not_failed(monkeypatch, tmp_pa
     seen = {}
 
     async def run(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Fake run_rollout recording kwargs and returning an empty namespace.
         seen.update(kwargs)
         return SimpleNamespace()
 
@@ -1768,6 +2033,8 @@ def test_a_page_run_with_several_rewards_is_shown_not_failed(monkeypatch, tmp_pa
 
 
 def test_the_reward_key_is_a_serve_and_push_setting():
+    # [FUNCTION DOC]
+    # _ui_env strips and emits OPENENV_HARBOR_REWARD_KEY and it is a push-managed variable.
     from openenv.cli.commands import harbor
 
     assert harbor._ui_env(None, None, "", None, reward_key=" correctness ") == {

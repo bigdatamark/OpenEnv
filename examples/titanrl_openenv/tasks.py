@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Task profiles for the TitanRL to OpenEnv example: frozen records bundling the
+# environment-specific choices (opening instruction, tool schema, which tool argument
+# is the action, observation renderer, optional reward shaping), plus a chess profile
+# (prompt, chess_move tool, FEN/legal-move renderer, engine-evaluation shaping reward)
+# and a generic fallback profile, registered by name. Imports the bridge either as a
+# package-relative or flat module. No torch dependency.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -64,6 +71,10 @@ __all__ = [
 
 @dataclass(frozen=True)
 class TaskProfile:
+    # [CLASS DOC]
+    # Frozen dataclass describing one task: name, instruction, tool (None means the generic
+    # tool), tool_action_key (None means the whole tool arguments are the action), render
+    # (None means generic rendering) and shaping (None means no extra rewards).
     """Everything environment-specific about one OpenEnv task.
 
     Attributes:
@@ -130,6 +141,12 @@ CHESS_MOVE_TOOL: dict[str, Any] = {
 
 
 def render_chess_observation(observation: Any) -> str:
+    # [FUNCTION DOC]
+    # Renders a chess observation dict to text: a rejection note when reward is negative
+    # and the game is not done (non-numeric reward counts as not rejected), the FEN, side
+    # to move (from the FEN's second field), a check note, the legal move list with count,
+    # and a game-over line with the result. Falls back to the generic renderer for non-dicts,
+    # dicts without "fen", or when no lines were produced.
     """Render a ``ChessObservation`` dict into the text the model reads.
 
     Surfaces the position (FEN), whose turn it is, check status, the full legal
@@ -193,6 +210,12 @@ environment itself pays for checkmate.
 
 
 def chess_position_rewards(observation: Any) -> dict[str, float]:
+    # [FUNCTION DOC]
+    # Shaping reward for chess. Returns an empty dict for non-dict observations. For a done
+    # game, returns the terminal reward clamped to [-1, 1] under the position key (empty if
+    # the reward is not numeric). Otherwise reads metadata["evaluation"], and returns
+    # tanh(evaluation / CHESS_EVAL_SCALE) under the position key; empty dict if metadata or
+    # evaluation is missing, non-numeric, NaN or infinite.
     """Shape the sparse chess reward with the engine's own position evaluation.
 
     ``envs/chess_env`` pays ``+/-1.0`` for a decided game, ``-0.1`` for an
@@ -271,6 +294,9 @@ TASK_PROFILES: dict[str, TaskProfile] = {
 
 
 def get_task_profile(name: str) -> TaskProfile:
+    # [FUNCTION DOC]
+    # Returns the registered profile with the given name.
+    # Raises: ValueError listing known profile names if not found.
     """Look up a registered :class:`TaskProfile` by name."""
     try:
         return TASK_PROFILES[name]

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Opt-in monkeypatch making all Harbor E2B sandboxes share one template name, so tasks
+# with identical environments (same env hash) reuse one E2B template instead of building
+# one per task (and racing on first build). Also adds bounded retries on the read-only
+# template-existence lookup. Module-level flag records whether the patch is applied.
 """One E2B template for a whole suite, instead of one per task.
 
 Harbor names each sandbox template `f"{environment_name}__{env_hash}"` and takes `environment_name`
@@ -38,6 +43,15 @@ _applied = False
 
 
 def enable_shared_templates(name: str = "") -> bool:
+    # [FUNCTION DOC]
+    # Resolves the shared name from the argument or HARBOR_SHARED_ENV_NAME; if empty or
+    # already applied, returns the current applied flag. Imports Harbor's e2b module (any
+    # import failure logs a warning and returns False). Replaces E2BEnvironment.__init__ so
+    # environment_name (keyword, or second positional) is replaced by the shared name (logs a
+    # warning if neither is present), and replaces _does_template_exist with a version that
+    # retries httpx.TransportError up to 3 attempts with 1s/2s backoff. Sets the module flag,
+    # logs, returns True.
+    # Side effects: mutates Harbor's E2BEnvironment class globally (process-wide).
     """Point every E2B template at one shared `environment_name`. Idempotent.
 
     Args:
@@ -66,6 +80,9 @@ def enable_shared_templates(name: str = "") -> bool:
         # This is a read-only alias lookup. Retrying sandbox creation or commands here could
         # duplicate side effects. In particular, a reused HTTP/2 connection can close on PING
         # before this GET returns; let the pool acquire another connection for the next attempt.
+        # [FUNCTION DOC]
+        # HELPER: patched async template-existence check: calls the original, retrying transport
+        # errors (re-raised on the third failure) with exponential sleep. Returns the original's result.
         for attempt in range(3):
             try:
                 return await original_template_exists(self)
@@ -85,6 +102,8 @@ def enable_shared_templates(name: str = "") -> bool:
         # Keyword-only in practice: Harbor passes `environment_name=` from three call sites. Handled
         # defensively anyway, because silently failing to rename would reintroduce per-task templates
         # while looking like it worked.
+        # [FUNCTION DOC]
+        # HELPER: patched constructor substituting the shared environment_name, then delegating to the original.
         if "environment_name" in kwargs:
             kwargs["environment_name"] = shared
         elif len(args) >= 2:

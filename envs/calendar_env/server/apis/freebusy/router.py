@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI router for POST /freebusy/query (Google Calendar v3 freeBusy). Uses get_user_context to resolve the
+# database id and user id from request headers. A module-level CalendarSessionManager is created but unused here.
 """
 FreeBusy API endpoints following Google Calendar API v3 structure
 Handles FreeBusy query operations with exact Google API compatibility
@@ -22,6 +25,8 @@ session_manager = CalendarSessionManager()
 
 
 def get_freebusy_manager(database_id: str) -> FreeBusyManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new FreeBusyManager bound to the database id.
     """Get freebusy manager for the specified database"""
     return FreeBusyManager(database_id)
 
@@ -31,6 +36,12 @@ async def query_freebusy(
     request: FreeBusyQueryRequest,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # Validates that the request has 1-50 calendar items and returns the manager's FreeBusyQueryResponse for the user.
+    # Raises: HTTPException 400 for pydantic ValidationError (field paths and messages joined) or ValueError (business
+    # validation); 500 for anything else.
+    # KNOWN ISSUE: the 400 HTTPExceptions for empty/too-many items are raised inside the try and caught by the generic
+    # exception handler, so clients receive a 500 instead.
     """
     Returns free/busy information for a set of calendars
 

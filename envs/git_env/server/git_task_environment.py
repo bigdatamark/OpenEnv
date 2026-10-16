@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Server-side Git environment. Delegates all git/Gitea work to the core
+# GitServerClient (clone into workspace, reset to commit, list repos, run git
+# commands). Supports optional per-task base states (repo, commit) for fast
+# reproducible resets.
 
 """
 Git Task Environment - Optimized for task-based isolation.
@@ -27,6 +32,9 @@ from openenv.core.tools.git_server_client import GitServerClient
 
 
 class GitTaskEnvironment(Environment):
+    # [CLASS DOC]
+    # Environment holding a GitServerClient, the workspace dir, a task_id ->
+    # (repo_name, commit) mapping, the current task id and a GitState.
     """
     Git Environment optimized for task-based isolation.
 
@@ -83,6 +91,11 @@ class GitTaskEnvironment(Environment):
         workspace_dir: str = "/workspace",
         task_repos: dict[str, tuple[str, str]] | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores workspace dir and task mapping, creates the GitServerClient, creates an
+        # initial GitState, then blocks on the client's wait_for_ready and records
+        # gitea_ready accordingly (prints a warning if not ready).
+        # Side effects: network calls to Gitea.
         """Initialize Git Task Environment."""
         super().__init__()
         self.workspace_dir = workspace_dir
@@ -108,6 +121,14 @@ class GitTaskEnvironment(Environment):
             self._state.gitea_ready = False
 
     def reset(self, task_id: str | None = None) -> Observation:
+        # [FUNCTION DOC]
+        # Starts a new episode (new UUID, step 0, current readiness). If task_id is
+        # configured, resets the existing workspace repo to the task commit or clones it
+        # at that commit, and returns a success observation with workspace path, current
+        # commit and task; on any exception returns a failure observation with the error.
+        # Otherwise returns a generic "ready" observation with workspace and Gitea URL.
+        # An unknown task_id is silently treated as no task.
+        # Side effects: filesystem/git operations in the workspace.
         """
         Reset environment to clean state.
 
@@ -170,6 +191,11 @@ class GitTaskEnvironment(Environment):
         )
 
     def step(self, action: Action) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count and dispatches on action_type to the clone, list or
+        # git-command handler. Unknown types and any handler exception yield a failure
+        # observation.
+        # Raises: ValueError if the action is not a GitAction.
         """
         Execute a Git action and return observation.
 
@@ -210,6 +236,10 @@ class GitTaskEnvironment(Environment):
             )
 
     def _handle_clone_repo(self, action: GitAction) -> GitObservation:
+        # [FUNCTION DOC]
+        # HELPER: Clones action.repo_name into the workspace (optional target_dir) at
+        # commit "main", or at the current task's commit if the repo matches the task.
+        # Returns success observation with clone path and commit, or failure with error.
         """Handle repository clone action."""
         try:
             # Determine commit to use
@@ -238,6 +268,10 @@ class GitTaskEnvironment(Environment):
             )
 
     def _handle_list_repos(self, action: GitAction) -> GitObservation:
+        # [FUNCTION DOC]
+        # HELPER: Lists repositories from Gitea and returns an observation with a
+        # formatted text listing (name, clone URL, optional description) and the raw
+        # repos list; failure observation on exception.
         """Handle list repositories action."""
         try:
             repos = self._git_client.list_repositories()
@@ -264,6 +298,10 @@ class GitTaskEnvironment(Environment):
             )
 
     def _handle_git_command(self, action: GitAction) -> GitObservation:
+        # [FUNCTION DOC]
+        # HELPER: Runs action.command via the client in action.working_dir. success is
+        # exit code 0; stdout goes to output and stderr to error. Failure observation on
+        # exception.
         """Handle git command execution action."""
         try:
             exit_code, stdout, stderr = self._git_client.execute_git_command(
@@ -285,5 +323,7 @@ class GitTaskEnvironment(Environment):
 
     @property
     def state(self) -> GitState:
+        # [FUNCTION DOC]
+        # Property returning the current GitState.
         """Get current environment state."""
         return self._state

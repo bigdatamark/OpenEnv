@@ -1,3 +1,17 @@
+# [MODULE DOC]
+# ContainerProvider that runs OpenEnv servers in Novita AI sandboxes
+# (novita-sandbox SDK, optional extra "openenv[novita]"). Sources are either a
+# registry OCI image (converted to a template by the SDK with a keep-alive start
+# command) or a "template:<abs Dockerfile path>" reference whose Dockerfile was
+# rewritten for Novita's template parser (BuildKit cache mounts stripped, ARG
+# defaults and --platform resolved in FROM lines, two-stage builds sharing one
+# base flattened to one stage) and is built into a template at start time. The
+# provider launches the server itself in the background, exposes port 8000 on
+# the sandbox's public host as an HTTPS URL, detects crashes via a PID file, and
+# withholds/redacts logs in errors. Defaults: 3600 s sandbox lifetime, 2 CPUs
+# and 1024 MB for Dockerfile templates, root user when no USER is declared.
+# Module constants include regexes for FROM, COPY --from, USER, RUN and ARG
+# lines.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -65,6 +79,12 @@ _ARG_DEFAULT_RE = re.compile(
 
 
 def _strip_mount_flags(content: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Removes leading "--mount=..." flags from RUN instructions and their
+    # backslash continuation lines. Each mount must have exactly one "type=" option
+    # equal to "cache" (case-insensitive).
+    # Returns: rewritten Dockerfile text.
+    # Raises: ValueError for any other mount type (or a mount without a type).
     """Remove supported BuildKit cache mounts from ``RUN`` instructions.
 
     Novita's template parser copies a ``RUN`` body verbatim into the build
@@ -117,6 +137,11 @@ def _strip_mount_flags(content: str) -> str:
 
 
 def _resolve_from_references(content: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Collects "ARG NAME=value" defaults declared before the first FROM,
+    # then rewrites every FROM line: removes leading "--platform=..." flags and
+    # substitutes "${NAME}" and "$NAME" with the defaults (longest names first).
+    # Rewritten FROM lines are normalized to "FROM <reference>". Returns the text.
     """Substitute ``ARG`` defaults into ``FROM`` lines and drop ``--platform``.
 
     Two parser limitations, handled together because both corrupt the base
@@ -164,6 +189,10 @@ def _resolve_from_references(content: str) -> str:
 
 
 def _split_stages(content: str) -> List[Dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Splits Dockerfile text into stages at FROM lines; each stage is a dict
+    # with "base" (image reference), "alias" (name after "AS", or None) and "body"
+    # (list of following lines). Lines before the first FROM are dropped.
     """Split a Dockerfile into its ``FROM``-delimited stages."""
     stages: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
@@ -185,11 +214,15 @@ def _split_stages(content: str) -> List[Dict[str, Any]]:
 
 
 def _dockerfile_declares_user(content: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if any line is a USER instruction.
     """Return whether *content* contains a Dockerfile ``USER`` instruction."""
     return any(_USER_RE.match(line) for line in content.splitlines())
 
 
 def _reject_unflattened_copy_from(content: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Raises ValueError if any COPY line still contains a --from option.
     """Reject COPY instructions with ``--from`` left after flattening."""
     if any(_COPY_FROM_REMAINDER_RE.match(line) for line in content.splitlines()):
         raise ValueError(
@@ -200,6 +233,17 @@ def _reject_unflattened_copy_from(content: str) -> None:
 
 
 def _flatten_multistage(content: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Converts a multi-stage Dockerfile into one stage. Single-stage input
+    # is returned unchanged (after rejecting any COPY --from). For multiple stages:
+    # all must share the same base (ValueError otherwise) and the first must have an
+    # alias (ValueError). Output starts with "FROM <base>" followed by all stage
+    # bodies in order; in later stages each simple "COPY --from=<builder> src dst"
+    # becomes a "RUN mkdir -p ... && cp -a src dst" (dropped when src equals dst);
+    # a COPY --from naming another stage raises ValueError. Finally rejects any
+    # remaining COPY --from forms.
+    # KNOWN ISSUE: lines before the first FROM (e.g. global ARGs) are discarded for
+    # multi-stage input.
     """Collapse a multi-stage Dockerfile into a single stage.
 
     Novita's parser rejects multi-stage Dockerfiles outright, and that is the
@@ -273,6 +317,9 @@ def _flatten_multistage(content: str) -> str:
 
 
 def _prepare_dockerfile(content: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Applies mount stripping, FROM resolution and multi-stage flattening in
+    # that order. Returns the rewritten text; propagates ValueError.
     """Rewrite an OpenEnv Dockerfile into what Novita's template parser accepts.
 
     Applies, in order: BuildKit ``--mount`` stripping, ``ARG``/``--platform``
@@ -284,6 +331,12 @@ def _prepare_dockerfile(content: str) -> str:
 
 
 def _require_secure_url(url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns url if it is an https:// URL with no second scheme inside and
+    # its hostname is not loopback (localhost/127.0.0.1/::1, which indicates SDK
+    # debug mode). Raises RuntimeError otherwise (URL not included in messages).
+    # KNOWN ISSUE: the hostname extraction splits on the last ":", so an IPv6
+    # loopback "::1" is reduced to ":" and not detected.
     """Enforce https/wss transport (RFC 002 security invariant S1).
 
     ``EnvClient`` derives its WebSocket URL from this base URL, so a plaintext
@@ -320,6 +373,9 @@ def _require_secure_url(url: str) -> str:
 
 
 def _require_bare_host(host: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns host if it is a non-empty string with no "://"; otherwise
+    # raises RuntimeError.
     """Require the SDK host value to contain no URL scheme."""
     if not isinstance(host, str) or not host or "://" in host:
         raise RuntimeError(
@@ -330,6 +386,9 @@ def _require_bare_host(host: str) -> str:
 
 
 def _raise_install_error(exc: ImportError) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Always raises RuntimeError telling the user to install
+    # openenv[novita], chained from the ImportError.
     raise RuntimeError(
         "Novita sandbox support requires optional dependencies. "
         "Install them with `pip install openenv[novita]`."
@@ -337,6 +396,9 @@ def _raise_install_error(exc: ImportError) -> None:
 
 
 class _DefaultNovitaAdapter:
+    # [CLASS DOC]
+    # HELPER: Thin wrapper over the novita-sandbox SDK (tests inject a fake):
+    # sandbox creation, command exec, host lookup, kill and template builds.
     """Thin adapter over the ``novita-sandbox`` SDK.
 
     The provider talks to this private adapter instead of spreading SDK details
@@ -351,6 +413,10 @@ class _DefaultNovitaAdapter:
         api_key: Optional[str],
         domain: Optional[str],
     ):
+        # [FUNCTION DOC]
+        # Imports the SDK (RuntimeError if missing) and creates a Novita client with
+        # api_key and domain (None means the SDK falls back to NOVITA_API_KEY /
+        # NOVITA_DOMAIN).
         try:
             from novita_sandbox import Novita
         except ImportError as exc:  # pragma: no cover - exercised via provider tests
@@ -373,6 +439,11 @@ class _DefaultNovitaAdapter:
     ) -> Any:
         # Exactly one source: a registry image (resolved and cached by the SDK
         # itself) or an already-built template id from `image_from_dockerfile`.
+        # [FUNCTION DOC]
+        # Creates a sandbox with the timeout and either a template id or a registry
+        # image; for an image, also passes a build spec pinning the start command to
+        # "sleep infinity" with a 5 s timer-based ready command. Adds env vars
+        # ("envs"), metadata and secure only when given. Returns the SDK sandbox.
         kwargs: Dict[str, Any] = {
             "timeout": timeout,
         }
@@ -425,6 +496,11 @@ class _DefaultNovitaAdapter:
         background: bool = False,
         user: Optional[str] = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Runs command in the sandbox (SDK runs it via a login bash shell) with
+        # timeout, background flag and optional user. A non-zero exit
+        # (CommandExitException) is swallowed and its stdout returned. Returns stdout
+        # or "".
         """Run *command* through a login shell inside *sandbox*, returning stdout.
 
         The SDK runs commands as ``/bin/bash -l -c <command>`` and raises
@@ -452,10 +528,14 @@ class _DefaultNovitaAdapter:
         return getattr(result, "stdout", "") or ""
 
     def host(self, sandbox: Any, port: int) -> str:
+        # [FUNCTION DOC]
+        # Returns the sandbox's public host for port as a string (no scheme).
         """Return the public host (no scheme) exposing *port* on *sandbox*."""
         return str(sandbox.get_host(port))
 
     def kill(self, sandbox: Any) -> None:
+        # [FUNCTION DOC]
+        # Kills (permanently removes) the sandbox.
         sandbox.kill()
 
     def build_template(
@@ -468,6 +548,12 @@ class _DefaultNovitaAdapter:
         memory_mb: int,
         on_build_logs: Optional[Callable[[Any], None]],
     ) -> str:
+        # [FUNCTION DOC]
+        # Builds a Novita template from Dockerfile content with the given context dir
+        # (for COPY sources): sets the user to root unless the Dockerfile declares a
+        # USER, pins the start command to "sleep infinity" with a 5 s ready timer, and
+        # builds via the client's template namespace with cpu/memory and an optional
+        # build log callback. Returns the template id string. Network I/O; can be slow.
         """Build a Novita template from Dockerfile *content* and return its id.
 
         Uses ``Template.from_dockerfile`` to translate the Dockerfile into
@@ -516,6 +602,13 @@ class _DefaultNovitaAdapter:
 
 
 class NovitaSandboxProvider(ContainerProvider):
+    # [CLASS DOC]
+    # ContainerProvider with at most one active Novita sandbox. Holds default
+    # image, env vars, lifetime timeout, metadata, secure flag, cmd, working
+    # directory, log surfacing flag, template build settings and the SDK adapter;
+    # tracks the active sandbox, base URL, the user the server runs as, and injected
+    # env var values for redaction. A class-level registry maps absolute
+    # Dockerfile paths to prepared content and context dir (shared by instances).
     """
     Container provider that runs environments in Novita AI sandboxes.
 
@@ -573,6 +666,14 @@ class NovitaSandboxProvider(ContainerProvider):
         dockerfile_path: str,
         context_dir: Optional[str] = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Class method. Resolves and reads the Dockerfile, rewrites it with
+        # _prepare_dockerfile, validates that relative COPY sources (not --from) of the
+        # rewritten text exist or glob-match under the context dir (default: the
+        # Dockerfile's grandparent), and stores the prepared content and context in the
+        # registry. Returns "template:<absolute path>".
+        # Raises: FileNotFoundError if missing; ValueError for a missing context dir,
+        # missing COPY source, or an unsupported Dockerfile shape.
         """Validate a Dockerfile and return a ``template:`` reference for
         :meth:`start_container`.
 
@@ -662,6 +763,11 @@ class NovitaSandboxProvider(ContainerProvider):
         return f"template:{src}"
 
     def _resolve_template_ref(self, reference: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Looks up registry metadata for a "template:<path>" reference
+        # (ValueError if unregistered) and builds the template via the adapter using the
+        # configured or default template name, cpu, memory and build log callback.
+        # Returns the template id.
         """Build the template for a ``template:<path>`` reference; return its id."""
         path = reference[len("template:") :]
         meta = self._dockerfile_registry.get(path)
@@ -682,6 +788,12 @@ class NovitaSandboxProvider(ContainerProvider):
 
     @staticmethod
     def _default_template_name(dockerfile_path: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "openenv-<slug>-<8 hex of sha256 of the Dockerfile bytes>",
+        # where slug is the env directory name (Dockerfile's grandparent, else parent)
+        # lowercased with "_" and other non [a-z0-9-] runs turned into "-". Reads the
+        # file from disk (OSError if missing). The hash is of the original, not the
+        # prepared, content.
         """Derive a stable template name from the Dockerfile's env directory.
 
         The env directory keeps the template recognizable in the Novita
@@ -717,6 +829,11 @@ class NovitaSandboxProvider(ContainerProvider):
         on_build_logs: Optional[Callable[[Any], None]] = None,
         _adapter: Any = None,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration and empty runtime state, and creates the default SDK
+        # adapter eagerly (RuntimeError if the SDK is missing) unless one is injected.
+        # KNOWN ISSUE: the docstring calls the image form "template:<id>" but the
+        # reference actually carries the Dockerfile path.
         """
         Args:
             image (`str`, *optional*):
@@ -808,6 +925,10 @@ class NovitaSandboxProvider(ContainerProvider):
             self._adapter = _adapter
 
     def _discover_server_cmd(self, port: int = _DEFAULT_NOVITA_PORT) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Finds openenv.yaml in the sandbox, reads its "app" field and returns
+        # "cd <yaml dir> && python -m uvicorn <app> --host 0.0.0.0 --port <port>".
+        # Raises ValueError if the file or field is missing.
         """Discover the server command from ``openenv.yaml`` inside the sandbox.
 
         Finds the file, reads the ``app`` field, and constructs a command of the
@@ -839,6 +960,9 @@ class NovitaSandboxProvider(ContainerProvider):
         )
 
     def _find_openenv_yaml(self) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns "/app/env/openenv.yaml" if it exists in the sandbox, else the
+        # first openenv.yaml under /app (depth 4) if absolute, else None.
         """Locate ``openenv.yaml`` inside the sandbox.
 
         Tries the modern layout path ``/app/env/openenv.yaml`` first, then falls
@@ -864,6 +988,8 @@ class NovitaSandboxProvider(ContainerProvider):
 
     @staticmethod
     def _parse_app_field(yaml_content: str) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Delegates to parse_openenv_app_field.
         """Extract the ``app`` value from raw openenv.yaml content.
 
         Uses PyYAML to handle comments, quotes, and nested keys correctly.
@@ -877,6 +1003,19 @@ class NovitaSandboxProvider(ContainerProvider):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Creates a sandbox, launches the server and returns "https://<host>".
+        # Raises RuntimeError if a sandbox is active; ValueError for a port other than
+        # None/8000, no image, or unknown kwargs (accepted: cmd; wait_timeout is
+        # silently dropped). For "template:" images the template is built first (before
+        # any sandbox exists); other strings are registry images. Records non-empty env
+        # var values for redaction (cleared if creation fails). After creation: the
+        # command is kwargs cmd, constructor cmd, or discovered from openenv.yaml (no
+        # Dockerfile CMD fallback); the server runs as root for registry images and as
+        # the template's user otherwise; the host must be bare and the URL HTTPS and
+        # non-loopback. Any failure after creation kills the sandbox (cleanup errors
+        # suppressed) and re-raises.
+        # Side effects: cloud resources, network I/O.
         """
         Create a Novita sandbox and start an OpenEnv server inside it.
 
@@ -1022,6 +1161,12 @@ class NovitaSandboxProvider(ContainerProvider):
         return self._base_url
 
     def _launch_server(self, cmd: str, *, user: Optional[str] = None) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Runs, in the background via the adapter (no timeout), a shell that
+        # writes its PID to /tmp/openenv-server.pid and then execs the command
+        # (prefixed by "cd <working directory> &&" if configured) with output
+        # redirected to /tmp/openenv-server.log, as the given user. cmd is trusted
+        # configuration and not sanitized.
         """Start the OpenEnv server inside the sandbox as a background process.
 
         This is the one place the provider assumes something about the image, so
@@ -1070,6 +1215,10 @@ class NovitaSandboxProvider(ContainerProvider):
         )
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the active sandbox (errors propagate) and always clears sandbox, base
+        # URL, server user and redaction values; with no sandbox only clears redaction
+        # values.
         """Kill the active Novita sandbox.
 
         `kill()` permanently removes the sandbox: it cannot be resumed or
@@ -1090,6 +1239,8 @@ class NovitaSandboxProvider(ContainerProvider):
             self._redact_values = set()
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Same as stop_container.
         """Stop the active sandbox and release provider-held resources.
 
         Overrides the base no-op so a caller holding a bare `ContainerProvider`
@@ -1101,6 +1252,8 @@ class NovitaSandboxProvider(ContainerProvider):
 
     @property
     def base_url(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the active base URL. Raises RuntimeError if none.
         """URL returned by the last `start_container`."""
         if self._base_url is None:
             raise RuntimeError(
@@ -1110,6 +1263,9 @@ class NovitaSandboxProvider(ContainerProvider):
         return self._base_url
 
     def _redact(self, text: str, *, max_chars: int = 2000) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Replaces recorded env var values with "***" and keeps only the last
+        # max_chars (default 2000) characters with a truncation marker.
         """Scrub injected secret values and bound length before surfacing output.
 
         Replaces any injected env-var value with `***` and keeps only the tail.
@@ -1124,6 +1280,10 @@ class NovitaSandboxProvider(ContainerProvider):
         return redacted
 
     def _server_died_message(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns a fixed crash message, or, when surface_server_logs is set and
+        # a sandbox exists, a message including the redacted server log (read as the
+        # server user).
         """Build the startup-crash error, secure by default (RFC 002 S4).
 
         Untrusted code can print secrets then force a crash to exfiltrate them
@@ -1158,6 +1318,11 @@ class NovitaSandboxProvider(ContainerProvider):
         )
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 120.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health (5 s timeout) about every second until 200. With
+        # an active sandbox each iteration checks the PID file (missing/empty means
+        # still starting) and raises RuntimeError with _server_died_message if the
+        # process is dead. Raises TimeoutError after timeout_s.
         """
         Poll the /health endpoint until the sandbox is ready.
 

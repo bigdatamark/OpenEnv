@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Placeholder "openenv serve" CLI command (Typer sub-app). Local serving is not
+# implemented; the command only prints alternative ways to run an environment.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Serve OpenEnv environments locally (TO BE IMPLEMENTED)."""
@@ -35,6 +38,13 @@ def serve(
         typer.Option("--reload", help="Enable auto-reload on code changes"),
     ] = False,
 ) -> None:
+    # [FUNCTION DOC]
+    # Typer command "openenv serve". Prints a not-implemented notice plus
+    # instructions: build and docker run using the given port, or "uv run --project .
+    # server --port <port>" (with a "cd <env_path>" hint when openenv.yaml exists in
+    # env_path, default cwd). host and reload are accepted but unused.
+    # Raises: always typer.Exit(1).
+    # Side effects: console output only.
     """
     Serve an OpenEnv environment locally.
 

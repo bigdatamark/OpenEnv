@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Static MCP tool definitions for user lookup. Exposes USERS_TOOLS, a list with one
+# descriptor "get_user_by_email" whose inputSchema requires a string "email".
+# Data only; no logic or side effects.
 """
 MCP Tools for User Management
 """

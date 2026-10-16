@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Low-level helpers to cancel blocking socket operations so validation transport calls respect
+# wall-clock deadlines.
+
 """Socket cancellation for bounded validation transport operations."""
 
 import socket
@@ -7,6 +11,8 @@ from contextlib import contextmanager
 
 
 def abort_socket(transport_socket):
+    # [FUNCTION DOC]
+    # HELPER: Shuts down (both directions) and closes the given socket, ignoring OSError from either step.
     """Interrupt pending reads/writes before closing the transport."""
     try:
         transport_socket.shutdown(socket.SHUT_RDWR)
@@ -20,6 +26,13 @@ def abort_socket(transport_socket):
 
 @contextmanager
 def http_deadline(timeout_s):
+    # [FUNCTION DOC]
+    # Context manager enforcing one wall-clock deadline over an HTTPX request including body reads.
+    # Yields an extensions mapping with a "trace" callback for HTTPX. A daemon timer aborts the
+    # captured socket when the deadline passes.
+    # Inputs: timeout_s (float). Raises TimeoutError("HTTP deadline elapsed") immediately if timeout_s
+    # <= 0, after the block if the deadline passed, or in place of any exception raised after expiry.
+    # Side effects: timer thread; duplicates and finally closes the connection's socket descriptor.
     """Yield HTTPX trace extensions enforcing one request/body wall deadline.
 
     The request must establish a fresh connection. Reused clients must disable
@@ -33,11 +46,16 @@ def http_deadline(timeout_s):
     watched_socket = None
 
     def abort():
+        # [FUNCTION DOC]
+        # HELPER: Timer callback: sets the expired flag and aborts the watched socket if one was captured.
         expired.set()
         if watched_socket is not None:
             abort_socket(watched_socket)
 
     def trace(event, info):
+        # [FUNCTION DOC]
+        # HELPER: HTTPX trace hook; on the TCP-connect-complete event, stores a duplicate of the
+        # connection's underlying socket, and if the deadline already passed, aborts and raises TimeoutError.
         nonlocal watched_socket
         if event == "connection.connect_tcp.complete":
             # Retain a duplicate descriptor: TLS wrapping detaches the original

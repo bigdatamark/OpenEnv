@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Docker-local validation provider: copies the package into a filtered temporary snapshot
+# (no symlinks, caches, credential-like files or outputs), builds it with the docker CLI,
+# and runs it as a hardened, resource-limited container (non-root, read-only rootfs, all
+# capabilities dropped, pid/memory/cpu limits, loopback-only port 8000, tmpfs scratch).
+# Only "public" network mode is supported. All docker calls go through a bounded
+# subprocess helper; output is redacted of known secrets and token-like strings.
 """Bounded Docker-local execution for validation, independent of core providers.
 
 Only public egress is supported in this increment. Runtime hardening is an execution
@@ -57,6 +64,10 @@ _TOKEN = re.compile(
 
 
 def _safe_text(value: str, secrets: tuple[str, ...] = ()) -> str:
+    # [FUNCTION DOC]
+    # HELPER: replaces each given secret value (longest first) and token-like patterns
+    # (HF/OpenAI/GitHub tokens, bearer tokens, password/token/api key/secret assignments)
+    # with "[REDACTED]", then keeps only the last 64 KiB (UTF-8, partial chars dropped). Returns text.
     for secret in sorted(secrets, key=len, reverse=True):
         if secret:
             value = value.replace(secret, "[REDACTED]")
@@ -70,6 +81,13 @@ def _safe_text(value: str, secrets: tuple[str, ...] = ()) -> str:
 def _command(
     argv: list[str], timeout_s: float, max_bytes: int = _MAX_OUTPUT
 ) -> tuple[int, str, str]:
+    # [FUNCTION DOC]
+    # HELPER: runs argv in a new session with stdin closed, draining stdout/stderr in daemon
+    # threads that keep only the last max_bytes of each. Waits up to timeout_s.
+    # Returns (exit code, stdout, stderr) decoded with replacement.
+    # Raises ProviderError if timeout_s is non-finite or <= 0, the binary cannot be started,
+    # or the deadline passes (process group is SIGKILLed). Any other exception (e.g.
+    # KeyboardInterrupt) also kills the process group and is re-raised.
     """Drain both pipes while retaining bounded tails; kill the client process group."""
     if not math.isfinite(timeout_s) or timeout_s <= 0:
         raise ProviderError("Operation deadline elapsed")
@@ -86,6 +104,8 @@ def _command(
     buffers = [bytearray(), bytearray()]
 
     def drain(pipe, output):
+        # [FUNCTION DOC]
+        # HELPER: reads a pipe in 8 KiB chunks into output, truncating to the last max_bytes, and closes the pipe.
         try:
             while chunk := pipe.read(8192):
                 output.extend(chunk)
@@ -129,6 +149,9 @@ def _command(
 
 
 def _contained(root: Path, relative: str) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns root/relative after checking its resolved path stays inside root and it
+    # is not itself a symlink; raises ProviderError otherwise.
     path = root / relative
     try:
         path.resolve().relative_to(root.resolve())
@@ -140,11 +163,20 @@ def _contained(root: Path, relative: str) -> Path:
 
 
 def _snapshot(root: Path, destination: Path, max_bytes: int, deadline: float) -> None:
+    # [FUNCTION DOC]
+    # HELPER: copies the tree at root into destination via descriptor-relative, no-follow
+    # opens. Skips excluded directory names and secret-like file names; rejects symlinks,
+    # non-regular/non-directory entries, depth > 64, more than 100000 entries, total bytes
+    # over max_bytes, or passing the monotonic deadline (all ProviderError). Preserves file
+    # permission bits. Any OSError becomes ProviderError.
     """Copy source bytes, excluding links, caches, known credential names and outputs."""
     total = 0
     files = 0
 
     def copy_tree(directory_fd: int, target_dir: Path, depth: int = 0):
+        # [FUNCTION DOC]
+        # HELPER: recursive worker copying entries of an open directory descriptor into
+        # target_dir, updating the shared total byte and file counters.
         nonlocal total, files
         if depth > 64:
             raise ProviderError("Build snapshot exceeds its directory depth budget")
@@ -201,11 +233,17 @@ def _snapshot(root: Path, destination: Path, max_bytes: int, deadline: float) ->
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    # [CLASS DOC]
+    # HELPER: urllib redirect handler that refuses to follow redirects.
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # [FUNCTION DOC]
+        # Returns None so redirects are surfaced as errors instead of followed.
         return None
 
 
 class DockerValidationProvider:
+    # [CLASS DOC]
+    # ValidationProvider "docker-local" with IMAGE_BUILD and EXEC capabilities and only public networking.
     """Build isolated source snapshots and launch owned, resource-bounded subjects."""
 
     name = "docker-local"
@@ -213,6 +251,9 @@ class DockerValidationProvider:
     supported_network_modes = frozenset({"public"})
 
     def __init__(self, *, build_timeout_s: float = 600, max_context_bytes: int = 2**30):
+        # [FUNCTION DOC]
+        # Stores the build timeout (default 600s) and max build context size (default 1 GiB).
+        # Raises ValueError if the timeout is non-finite/non-positive or the size is non-positive.
         if not math.isfinite(build_timeout_s) or build_timeout_s <= 0:
             raise ValueError("build_timeout_s must be positive and finite")
         if max_context_bytes <= 0:
@@ -221,6 +262,13 @@ class DockerValidationProvider:
         self.max_context_bytes = max_context_bytes
 
     def build(self, root: Path, execution: ExecutionDeclaration) -> str:
+        # [FUNCTION DOC]
+        # Resolves root (ProviderError if unreadable), checks the Dockerfile and context paths are
+        # contained, snapshots the package into a temp dir, re-checks them in the snapshot
+        # (Dockerfile must be a file, context a directory), runs docker build with an iidfile
+        # within the remaining deadline, and returns the "sha256:<64 hex>" image id.
+        # Raises StartupError (redacted stderr tail) on build failure; ProviderError on snapshot
+        # problems, timeouts or a missing/invalid image id. Temp files are removed afterwards.
         deadline = time.monotonic() + self.build_timeout_s
         try:
             root = root.resolve(strict=True)
@@ -261,6 +309,16 @@ class DockerValidationProvider:
             return image
 
     def start(self, spec: LaunchSpec) -> "DockerRunningSubject":
+        # [FUNCTION DOC]
+        # Refuses (UnsupportedCapability) non-public network, any GPU request, or non-finite CPU.
+        # Creates a uniquely named, run-id-labeled container with hardening flags, memory/cpu
+        # limits, loopback publish of port 8000, shm up to 64 MiB and a /tmp tmpfs sharing the
+        # disk budget, plus spec env vars; rejects images declaring bind/volume mounts; starts it;
+        # reads the host port (must be loopback, valid range); then polls GET /health (no proxy,
+        # no redirects) until HTTP 200 or the startup deadline. Returns the DockerRunningSubject
+        # with base_url set. On any failure stops/removes the container and raises StartupError
+        # (redacted message), re-raising KeyboardInterrupt/SystemExit/StartupError as-is; a
+        # cleanup failure raises StartupError mentioning both.
         if spec.network.mode not in self.supported_network_modes:
             raise UnsupportedCapability(
                 f"docker-local does not enforce {spec.network.mode}"
@@ -371,9 +429,14 @@ class DockerValidationProvider:
 
 
 class DockerRunningSubject:
+    # [CLASS DOC]
+    # Handle for one owned container: name, run id, base_url, stopped flag and env var
+    # values treated as secrets for redaction.
     """An owned container; only this container is removed during cleanup."""
 
     def __init__(self, name: str, spec: LaunchSpec):
+        # [FUNCTION DOC]
+        # Initializes from the container name and launch spec; base_url empty until started.
         self.name = name
         self.run_id = spec.run_id
         self.base_url = ""
@@ -381,6 +444,9 @@ class DockerRunningSubject:
         self._secrets = tuple(spec.env_vars.values())
 
     def _run(self, argv: list[str], timeout_s: float, max_bytes: int = _MAX_OUTPUT):
+        # [FUNCTION DOC]
+        # HELPER: runs a docker command and returns stdout; raises ProviderError with a redacted
+        # stderr tail on non-zero exit (and propagates _command errors).
         code, stdout, stderr = _command(argv, timeout_s, max_bytes)
         if code:
             raise ProviderError(
@@ -389,6 +455,10 @@ class DockerRunningSubject:
         return stdout
 
     def _raw_inspect(self, timeout_s: float = 10) -> dict:
+        # [FUNCTION DOC]
+        # HELPER: runs docker inspect on the container and returns the first JSON object,
+        # requiring the ownership label to equal the run id. Raises ProviderError on a label
+        # mismatch or malformed output.
         output = self._run(["docker", "inspect", self.name], timeout_s)
         try:
             details = json.loads(output)[0]
@@ -399,6 +469,9 @@ class DockerRunningSubject:
             raise ProviderError("Docker returned invalid inspection evidence") from None
 
     def inspect(self) -> dict:
+        # [FUNCTION DOC]
+        # Returns a sanitized summary: container/image ids, running and OOM-killed flags, user,
+        # selected HostConfig limits/security settings, and mounts (type, destination, rw).
         """Return selected effective settings without image env, command or host paths."""
         details = self._raw_inspect()
         host = details.get("HostConfig", {})
@@ -431,6 +504,10 @@ class DockerRunningSubject:
         }
 
     def logs(self, max_bytes: int = _MAX_OUTPUT) -> str:
+        # [FUNCTION DOC]
+        # Returns the redacted tail (last 1000 lines, at most max_bytes) of combined
+        # stdout+stderr logs. Raises ValueError if max_bytes is outside 1..65536, ProviderError
+        # if docker logs fails.
         if not 0 < max_bytes <= _MAX_OUTPUT:
             raise ValueError("max_bytes must be between 1 and 65536")
         code, stdout, stderr = _command(
@@ -445,6 +522,12 @@ class DockerRunningSubject:
         )
 
     def exec(self, argv: list[str], timeout_s: float) -> ExecResult:
+        # [FUNCTION DOC]
+        # Runs argv inside the container via docker exec within timeout_s and returns an
+        # ExecResult with redacted output and elapsed time. Raises ValueError for empty argv,
+        # non-string or NUL-containing args; ProviderError if already stopped. If the command
+        # times out or fails to launch, stops the container (since killing the client does not
+        # kill in-container processes) and re-raises (or raises the cleanup error chained).
         if (
             not argv
             or any(not isinstance(arg, str) or "\0" in arg for arg in argv)
@@ -475,6 +558,9 @@ class DockerRunningSubject:
         )
 
     def _owner(self) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: lists containers filtered by name and returns the ownership label of the
+        # container whose name matches exactly, or None if none. Raises ProviderError if listing fails.
         """Return the owner label of this subject's container, or `None` if absent.
 
         A listing reports a missing container as an empty result on every engine,
@@ -505,6 +591,11 @@ class DockerRunningSubject:
         return None
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Idempotent removal: if already stopped returns; if the container is gone marks
+        # stopped; refuses (ProviderError) to remove a container owned by another run; otherwise
+        # docker rm --force --volumes, then re-lists to verify removal, raising ProviderError
+        # if it still exists or verification fails. Marks the subject stopped on success.
         if self._stopped:
             return
         try:

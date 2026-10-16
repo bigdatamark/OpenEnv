@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: connects to a SUMO-RL traffic-signal environment server at
+# localhost:8000, runs one episode (up to 100 steps) with a random phase policy and
+# prints configuration, progress and summary statistics from env state.
 """
 Simple example demonstrating SUMO-RL Environment usage.
 
@@ -24,6 +28,13 @@ from sumo_rl_env import SumoAction, SumoRLEnv
 
 
 def main():
+    # [FUNCTION DOC]
+    # Entry point: resets the env, prints observation and simulation config, steps with
+    # random phases chosen from the observation's action_mask, prints progress every 10
+    # steps, then prints totals and final state. Always closes the env.
+    # Side effects: network calls, stdout.
+    # KNOWN ISSUE: action ids are sampled from the action_mask values themselves (not
+    # the indices where the mask is set); and if 0 steps run the average divides by zero.
     """Run a simple SUMO traffic control episode."""
     # Connect to the SUMO environment server
     print("Connecting to SUMO-RL environment...")

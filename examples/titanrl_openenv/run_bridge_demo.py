@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Standalone demo (no torch/torchtitan) of the OpenEnv bridge on the built-in chess
+# environment: serves the chess env in-process with uvicorn in a background thread,
+# then plays a few moves in tool mode (starting with a deliberately illegal move) and
+# text mode using a seeded random legal-move picker instead of a model. At import time
+# adds this directory and the repo root to sys.path. Server helpers are reused by tests.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -70,6 +76,9 @@ from tasks import CHESS_MOVE_TOOL, CHESS_TASK  # noqa: E402
 
 
 def _make_chess_env() -> ChessEnvironment:
+    # [FUNCTION DOC]
+    # HELPER: env factory for a chess env with depth-1 moonfish opponent, agent always
+    # white and a 40-move limit.
     """Chess env pinned for a fast, reproducible demo.
 
     ``agent_color="white"`` removes ``ChessEnvironment``'s default per-episode
@@ -85,6 +94,9 @@ def _make_chess_env() -> ChessEnvironment:
 
 
 def build_demo_app():
+    # [FUNCTION DOC]
+    # Builds the FastAPI app serving the chess env (action/observation models, name
+    # chess_env) via OpenEnv's create_app. Returns: the app.
     """Build the FastAPI app serving ``chess_env`` over OpenEnv's protocol."""
     return create_app(
         _make_chess_env,
@@ -95,6 +107,9 @@ def build_demo_app():
 
 
 def free_port() -> int:
+    # [FUNCTION DOC]
+    # Binds a socket to port 0 on 127.0.0.1 to obtain and return a free port number.
+    # Note the port is released before return, so it may be taken by another process.
     """Pick an unused localhost port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -106,6 +121,13 @@ def serve_in_background(
     port: int = 8765,
     startup_timeout_s: float = 15.0,
 ):
+    # [FUNCTION DOC]
+    # Starts a uvicorn server for the demo app in a daemon thread and polls every 50 ms
+    # until it reports started.
+    # Returns: tuple (uvicorn.Server, thread). Raises: TimeoutError (after asking the
+    # server to exit) if not started within startup_timeout_s.
+    # KNOWN ISSUE: docstring says it returns the uvicorn.Server, but it returns a
+    # (server, thread) tuple.
     """Serve the demo env in a daemon thread; return the ``uvicorn.Server``.
 
     Blocks until the server reports it has started (or raises on timeout). Stop
@@ -133,6 +155,9 @@ def serve_in_background(
 
 
 def move_tool_call(move: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns an OpenAI-style tool call dict for the chess move tool, with the move
+    # encoded as JSON arguments.
     """An OpenAI-style ``chess_move`` tool call playing ``move``."""
     return {
         "function": {
@@ -143,6 +168,9 @@ def move_tool_call(move: str) -> dict[str, Any]:
 
 
 def pick_move(observation: Any, rng: random.Random) -> str | None:
+    # [FUNCTION DOC]
+    # Returns a random legal move (via rng) from a dict observation's legal_moves list, or
+    # None if the observation is not a dict or has no legal moves.
     """Choose a legal move from the observation, the way a policy would."""
     if not isinstance(observation, dict):
         return None
@@ -151,6 +179,9 @@ def pick_move(observation: Any, rng: random.Random) -> str | None:
 
 
 def _summarize(turn) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns a one-line summary of a BridgeTurn: reward, done, and the first 32
+    # chars of the board part of the FEN from the raw observation.
     """One-line view of a turn (the full rendering is multi-line)."""
     fen = (turn.raw_observation or {}).get("fen", "") if turn.raw_observation else ""
     return f"reward={turn.reward} done={turn.done} fen={fen.split(' ')[0][:32]}"
@@ -162,6 +193,11 @@ def _summarize(turn) -> str:
 
 
 async def _play_tool_mode(base_url: str, max_moves: int = 6) -> None:
+    # [FUNCTION DOC]
+    # HELPER: demo in tool mode: creates a bridge with the chess profile's tool action key
+    # and renderer, resets, plays the illegal move a1a8 and prints the first rendered line,
+    # then up to max_moves random legal moves via tool calls, stopping when done. Always
+    # stops the bridge. Side effects: network to local server, stdout.
     print("\n=== tool mode (assistant calls chess_move) ===")
     bridge = OpenEnvBridge(
         base_url=base_url,
@@ -195,6 +231,9 @@ async def _play_tool_mode(base_url: str, max_moves: int = 6) -> None:
 
 
 async def _play_text_mode(base_url: str, max_moves: int = 4) -> None:
+    # [FUNCTION DOC]
+    # HELPER: demo in text mode: bridge with action_key "move", resets and plays up to
+    # max_moves random legal moves as plain text, printing summaries. Always stops the bridge.
     print("\n=== text mode (assistant text is the move) ===")
     # In text mode the raw message text becomes the value of ``action_key``, so
     # point it at the chess action's field name.
@@ -221,6 +260,9 @@ async def _play_text_mode(base_url: str, max_moves: int = 4) -> None:
 
 
 async def main(port: int | None = None) -> None:
+    # [FUNCTION DOC]
+    # Async entry point: picks a free port if none is given, starts the background server,
+    # runs both demo modes and prints a completion message; always signals the server to exit.
     port = port or free_port()
     server, _thread = serve_in_background(port=port)
     base_url = f"http://127.0.0.1:{port}"

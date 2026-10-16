@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Implements the "openenv validate" CLI command. It either probes a running
+# OpenEnv server over HTTP (runtime validation, producing a dict report) or runs
+# the package validation pipeline from openenv.validation on a local package
+# directory (static/runtime/semantic levels with a severity policy, producing a
+# ValidationReport). Defines process exit codes: 0 pass, 1 fail, 2
+# unsupported/unrecognized package, 3 internal/policy error, and a mapping from
+# level names to Level values. The validate function is registered as a command
+# elsewhere (not decorated here).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """OpenEnv validate command."""
@@ -34,11 +43,23 @@ _LEVELS = {
 
 
 def _looks_like_url(value: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if value (stripped, lowercased) starts with "http://" or
+    # "https://".
     candidate = value.strip().lower()
     return candidate.startswith("http://") or candidate.startswith("https://")
 
 
 def _render_report(report: ValidationReport | dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Renders a report as human-readable text.
+    # For a dict (runtime report): header with target, profile, standard version and
+    # mode, then one PASS/FAIL line per item in "criteria", with details, expected
+    # and actual values for failures, and a final verdict from "passed".
+    # For a ValidationReport: header with target, signature, policy version and
+    # levels run, one line per result with status, check id and duration, plus
+    # evidence lines and remediation for fail/error/skip results, then the verdict.
+    # Returns: the multi-line string.
     if isinstance(report, dict):
         lines = [
             f"Validation report for {report.get('target', '')} (profile: {report.get('standard_profile', 'running_environment')})",
@@ -81,6 +102,9 @@ def _render_report(report: ValidationReport | dict[str, Any]) -> str:
 
 
 def _write_runtime_report(report: dict[str, Any], path: Path | None = None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Serializes report as indented JSON; if path is given, writes it there
+    # with a trailing newline. Returns the JSON string.
     payload = json.dumps(report, indent=2)
     if path is not None:
         path.write_text(payload + "\n")
@@ -148,6 +172,23 @@ def validate(
         ),
     ] = 5.0,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI entry for "openenv validate".
+    # Runtime mode: chosen when --url is given or target looks like a URL. Errors
+    # (Exit 1) if a non-URL target is combined with --url, if the argument URL and
+    # --url differ, or if --local is set. Calls validate_running_environment with
+    # the timeout (ValueError -> Exit 1), writes/serializes the JSON report
+    # (failure -> Exit 3), prints JSON or rendered text, and exits 1 if the report's
+    # "passed" is falsy.
+    # Local mode: unknown --level -> Exit 3; target (default cwd) must be a
+    # directory else Exit 2. Fails with an internal error if --output's parent
+    # directory does not exist. Runs run_validation with the level ceiling,
+    # skip_build, an optional loaded policy, and an artifacts directory
+    # "<output stem>.artifacts" next to output; writes the report. Signature or
+    # unsupported-package errors -> Exit 2; policy or any other error -> Exit 3.
+    # Prints JSON or rendered text; exits 1 if the verdict is FAIL (WARN passes).
+    # Side effects: network (runtime), filesystem writes, possible image builds,
+    # console output.
     """
     Validate a local package or a running OpenEnv server.
 

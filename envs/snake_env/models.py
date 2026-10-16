@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic data models (action and observation) for the Snake environment, which wraps marlenv's
+# Snake-v1 game.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -18,6 +21,10 @@ from pydantic import Field
 
 
 class SnakeAction(Action):
+    # [CLASS DOC]
+    # Action model with a single integer field "action". Meaning depends on the server's observer
+    # mode: relative moves (0 noop, 1 left, 2 right) for "snake", absolute directions (0..4) for "human".
+    # No range validation is performed.
     """
     Action for the Snake environment.
 
@@ -39,11 +46,19 @@ class SnakeAction(Action):
     action: int
 
     def __post_init__(self):
+        # [FUNCTION DOC]
+        # Intended to coerce the action field to int.
+        # KNOWN ISSUE: Action is a pydantic model, and pydantic never calls __post_init__ (a dataclass hook),
+        # so this method is dead code; any coercion happens only through pydantic's own int validation.
         """Ensure action is converted to int (handles string inputs from web interface)."""
         self.action = int(self.action)
 
 
 class SnakeObservation(Observation):
+    # [CLASS DOC]
+    # Observation model: full integer game grid (height x width), the per-agent encoded observation
+    # (H x W x C floats), running episode score/steps/fruits/kills, and an alive flag. Inherits
+    # done, reward and metadata from Observation.
     """
     Observation from the Snake environment.
 

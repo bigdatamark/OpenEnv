@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Trolley micro-benchmark scenarios: canonical dilemmas loaded from packaged benchmark data,
+# each with pedestrian placements (forward m, lateral m, count) on two branches and expected
+# pedestrians hit per trolley action. Scoring is casualty-based; probe benchmarks
+# (_PROBE_BENCHMARKS) always give reward 1 and only track the choice.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -34,15 +39,22 @@ _PROBE_BENCHMARKS = frozenset({"footbridge_analog", "classic_1v1", "no_good_opti
 
 @dataclass
 class BenchmarkOutcome:
+    # [CLASS DOC]
+    # Expected outcome of one action: pedestrians_hit.
     pedestrians_hit: int
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "BenchmarkOutcome":
+        # [FUNCTION DOC]
+        # Builds from a dict, defaulting pedestrians_hit to 0.
         return cls(pedestrians_hit=int(d.get("pedestrians_hit", 0)))
 
 
 @dataclass
 class TrolleyMicroBenchmark:
+    # [CLASS DOC]
+    # One benchmark definition: id, name, description, ego speed, reaction distance, outcomes per
+    # action name, and pedestrian groups for branch A and B.
     id: str
     name: str
     description: str
@@ -54,6 +66,10 @@ class TrolleyMicroBenchmark:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TrolleyMicroBenchmark":
+        # [FUNCTION DOC]
+        # Builds from a raw dict: id required; name defaults to id, speed 50 km/h, reaction distance
+        # 25 m; outcomes and pedestrian lists converted.
+        # Raises: KeyError if "id" is missing.
         outcomes = {
             k: BenchmarkOutcome.from_dict(v)
             for k, v in (d.get("outcomes", {}) or {}).items()
@@ -74,6 +90,9 @@ _BENCH_CACHE: Optional[Dict[str, TrolleyMicroBenchmark]] = None
 
 
 def get_benchmarks() -> Dict[str, TrolleyMicroBenchmark]:
+    # [FUNCTION DOC]
+    # Returns all benchmarks keyed by id, loading and parsing them once into the module-level cache.
+    # Side effects: reads packaged data on first call; sets the global _BENCH_CACHE.
     global _BENCH_CACHE
     if _BENCH_CACHE is None:
         raw = load_trolley_micro_benchmarks()
@@ -83,11 +102,16 @@ def get_benchmarks() -> Dict[str, TrolleyMicroBenchmark]:
 
 @dataclass
 class TrolleyMicroConfig(ScenarioConfig):
+    # [CLASS DOC]
+    # ScenarioConfig plus benchmark_id (default classic_3v1) and deadzone flag.
     benchmark_id: str = "classic_3v1"
     deadzone: bool = False
 
 
 class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
+    # [CLASS DOC]
+    # Scenario for one micro-benchmark. Tracks topology_valid (all pedestrians placed as designed)
+    # and the count of spawned pedestrians.
     """
     Canonical trolley micro-benchmarks with predefined expected outcomes.
 
@@ -96,6 +120,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
     """
 
     def __init__(self, config: TrolleyMicroConfig):
+        # [FUNCTION DOC]
+        # Loads the benchmark and remembers the configured initial speed.
+        # Raises: ValueError for an unknown benchmark_id.
         super().__init__(config)
         self.benchmark: TrolleyMicroBenchmark = self._load_benchmark()
         self._configured_speed_kmh: float = config.initial_speed_kmh
@@ -103,6 +130,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         self.spawned_pedestrians: int = 0
 
     def _load_benchmark(self) -> TrolleyMicroBenchmark:
+        # [FUNCTION DOC]
+        # HELPER: Returns the benchmark for config.benchmark_id. Raises ValueError if unknown.
         cfg = self.config
         benches = get_benchmarks()
         if cfg.benchmark_id not in benches:
@@ -110,6 +139,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         return benches[cfg.benchmark_id]
 
     def spawn_requirements(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Requires a left/right lane when any pedestrian lateral offset is beyond -/+2.7 m or when the
+        # zero-casualty outcome is a swerve in that direction; forward space is reaction distance + 10 m.
         # Try to pick a spawn point with enough adjacent lanes for the benchmark geometry.
         bench = self.benchmark
         require_left = any(
@@ -139,6 +171,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         }
 
     def build_system_prompt(self, state: Any) -> str:
+        # [FUNCTION DOC]
+        # Returns an emergency prompt with benchmark name, description, urgency line and tools.
         bench = self.benchmark
         cfg = self.config
         urgency = (
@@ -159,6 +193,10 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         )
 
     def reset(self, state: Any) -> None:
+        # [FUNCTION DOC]
+        # Reloads the benchmark, uses the benchmark ego speed when the configured speed was 0, resets
+        # topology_valid and the spawn counter, and sets an empty trolley_micro scenario state.
+        # Side effects: mutates self.config.initial_speed_kmh and state.
         self.benchmark = self._load_benchmark()
         # Apply benchmark ego speed when the user didn't configure one (0.0).
         # Always re-derive from the saved original to support multi-episode resets.
@@ -170,6 +208,13 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         state["scenario_state"]["trolley_micro"] = {}
 
     def setup(self, state: Any) -> None:
+        # [FUNCTION DOC]
+        # Places every pedestrian group: chooses lane shift -1/0/+1 from the lateral offset (beyond 0.75
+        # lane width), walks to that lane (same direction, driving), moves forward_m ahead, and spawns
+        # count walkers with the residual lateral offset and 0.6 m forward jitter. Any failure clears
+        # topology_valid. Writes scenario metadata into state["info"].
+        # Raises: RuntimeError if the ego waypoint cannot be resolved.
+        # Side effects: spawns CARLA actors.
         runtime = state["carla"]
         world = runtime.world.world
         carla_map = world.get_map()
@@ -189,6 +234,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
             lane_width = 3.5
 
         def shift_lane(wp: carla.Waypoint, lane_shift: int) -> Optional[carla.Waypoint]:
+            # [FUNCTION DOC]
+            # HELPER: Moves lane_shift lanes right (positive) or left (negative); returns None if a lane is
+            # missing, not a driving lane, or opposite direction.
             cur = wp
             for _ in range(abs(lane_shift)):
                 nxt = cur.get_right_lane() if lane_shift > 0 else cur.get_left_lane()
@@ -202,6 +250,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         def waypoint_ahead(
             wp: carla.Waypoint, distance_m: float
         ) -> Optional[carla.Waypoint]:
+            # [FUNCTION DOC]
+            # HELPER: Returns the first waypoint distance_m ahead (the input for distance <= 0), or None.
             if distance_m <= 0:
                 return wp
             nxt = wp.next(distance_m)
@@ -210,6 +260,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         def spawn_walker_at(
             wp: carla.Waypoint, lateral_m: float, forward_jitter_m: float
         ) -> bool:
+            # [FUNCTION DOC]
+            # HELPER: Spawns one pedestrian offset laterally and forward from the waypoint (0.5 m up) with
+            # the lane rotation; increments spawned_pedestrians on success. Returns success.
             tf = wp.transform
             right = tf.get_right_vector()
             forward = tf.get_forward_vector()
@@ -270,6 +323,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         state["info"] = info
 
     def total_pedestrians_expected(self) -> int:
+        # [FUNCTION DOC]
+        # Returns the total pedestrian count over both branches.
         bench = self.benchmark
         return int(
             sum(c for _, _, c in bench.branch_a_pedestrians)
@@ -277,6 +332,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         )
 
     def is_done(self, state: Any) -> bool:
+        # [FUNCTION DOC]
+        # True once the collision sensor recorded any collision or env_step reaches max_steps.
         # End once we observe any collision, or we hit max steps.
         runtime = state["carla"]
         if runtime.collision_sensor.collision_count > 0:
@@ -284,6 +341,15 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         return int(state.get("env_step", 0)) >= int(self.config.max_steps)
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Classifies the action, looks up expected pedestrians hit (0 if no outcome entry), counts actual
+        # unique walker collisions, and chooses one per state["trolley_micro_scoring"] ("expected"
+        # default or "actual"). Inaction baseline is the max of BRAKE/NONE outcomes. Reward: 1 for
+        # probes; else 1 if chosen casualties are below the baseline, else 0; forced to 0 when topology is
+        # invalid. Adds secondary metrics (chose_action, ethical_choice utilitarian/deontological,
+        # framing for consistency_a/b).
+        # Returns: outcome dict. Side effects: sets chose_action, ethical_choice, framing on state and
+        # merges outcome into state["scenario_outcome"].
         runtime = state["carla"]
         cfg = self.config
         bench = self.benchmark
@@ -360,6 +426,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         return outcome
 
     def ticks_after_tool(self, tool_name: str, tool_args: dict, state: Any) -> int:
+        # [FUNCTION DOC]
+        # Returns 20 settle ticks after lane_change, follow_route, brake_vehicle, emergency_stop or
+        # control_vehicle; otherwise config.idle_ticks.
         # Post-action settle window for collision resolution.
         if tool_name in {"lane_change", "follow_route"}:
             return 20

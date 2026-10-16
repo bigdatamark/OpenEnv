@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Adapter converting Agent World Model (AWM) tool-use episodes into ECHO role-segmented trajectories: the task and
+# tool list become CONTEXT, each tool call an ACTION segment (Hermes-style tool_call envelope), harness warnings a
+# WARNING segment, and the real tool result / verify result / error an ENV_OUTPUT segment (tool_response envelope).
+# Provides an offline converter from episode dicts and an opt-in live replay against a running AWM server.
 """Adapt **Agent World Model (AWM)** episodes into ECHO role-masked trajectories.
 
 ``envs/agent_world_model_env`` (AgentWorldModel-1K, upstream) is a suite of **1,000
@@ -41,22 +46,31 @@ DEFAULT_SYSTEM = (
 
 
 def _dumps(obj: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Serialises an object to JSON with sorted keys, non-ASCII preserved and ", "/": " separators, for deterministic text.
     """Stable, compact-ish JSON so token roles are deterministic across runs."""
     return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(", ", ": "))
 
 
 def serialize_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # Returns an ACTION text: a tool_call block containing the JSON of the tool name and arguments, followed by a newline.
     """An agent action, in a generic Hermes-style tool-call envelope (ACTION tokens)."""
     return f"<tool_call>\n{_dumps({'name': tool_name, 'arguments': arguments})}\n</tool_call>\n"
 
 
 def serialize_env_output(payload: Any) -> str:
+    # [FUNCTION DOC]
+    # Returns an ENV_OUTPUT text: a tool_response block containing the payload (strings as-is, otherwise deterministic JSON).
     """Real environment output, in a tool-response envelope (ENV_OUTPUT tokens)."""
     body = payload if isinstance(payload, str) else _dumps(payload)
     return f"<tool_response>\n{body}\n</tool_response>\n"
 
 
 def _env_payload(obs: dict[str, Any]) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Selects the environment-output portion of an observation dict in priority order: tool_result as-is; else a dict
+    # with verify_result (plus reward_type if present); else a dict with error (plus reward_type); else None.
     """Pick the real-world portion of an AWM observation, in priority order.
 
     ``tool_result`` is the common case; ``verify_result`` is the grader's output on
@@ -84,6 +98,11 @@ def awm_episode_to_trajectory(
     system_preamble: str = DEFAULT_SYSTEM,
     include_tool_list: bool = True,
 ) -> Trajectory:
+    # [FUNCTION DOC]
+    # Builds a Trajectory from an episode dict: one CONTEXT segment (system preamble, task line, optional comma-joined tool
+    # list), then per step an ACTION segment (tool name default "unknown", arguments default empty), an optional WARNING
+    # segment, and an ENV_OUTPUT segment when a payload exists. Reward is the episode reward as float (0.0 if missing/None);
+    # task_prompt is the task; meta holds scenario, task_idx and step count.
     """Turn an AWM episode dict into a role-segmented :class:`Trajectory`.
 
     Expected episode shape (matches :func:`live_capture` output and the bundled
@@ -148,6 +167,13 @@ def awm_episode_to_trajectory(
 
 
 def live_capture(base_url: str, episode: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Replays the episode's tool calls against a running AWM server and returns a new episode dict of the same shape with real
+    # observations: resets to the episode's scenario/task, lists tools (falling back to the episode's tool list on error),
+    # steps each CallToolAction recording the observation dump and the last non-None reward, and, unless the scripted episode
+    # already ends with "done", always sends a done call (errors ignored). Scenario, task and task_idx prefer the reset
+    # observation's values. Side effects: network I/O; runs its own event loop via asyncio.run (fails inside a running loop).
+    # Raises KeyError if the episode lacks "scenario" or "steps".
     """Replay ``episode``'s tool calls against a *running* AWM server, capturing
     the **real** observations. Returns a new episode dict (same shape) you can feed
     to :func:`awm_episode_to_trajectory`.
@@ -162,6 +188,8 @@ def live_capture(base_url: str, episode: dict[str, Any]) -> dict[str, Any]:
     from openenv.core.env_server.mcp_types import CallToolAction  # type: ignore
 
     async def _run() -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Async body of live_capture performing the replay described above and returning the captured episode dict.
         captured: list[dict[str, Any]] = []
         last_reward = 0.0
         async with AWMEnv(base_url=base_url) as env:

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# FastAPI entry point for the Julia environment. Reads JULIA_MAX_WORKERS
+# (default 8), JULIA_EXECUTION_TIMEOUT (default 120), JULIA_LOG_FILE (default
+# <tmp>/julia_env.log) and JULIA_LOG_LEVEL (default INFO). At import time it
+# configures logging, enables the shared Julia process pool, registers its
+# shutdown at exit, builds the app (environment class as factory, up to
+# MAX_WORKERS sessions), adds a request-logging middleware and a GET
+# /pool_status endpoint.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -69,6 +77,14 @@ LOG_LEVEL = os.getenv("JULIA_LOG_LEVEL", "INFO")
 
 
 def setup_logging():
+    # [FUNCTION DOC]
+    # HELPER: Sets the "julia_env" and "openenv" loggers to LOG_LEVEL and, unless
+    # "julia_env" already has handlers, attaches a rotating file handler (10 MB x 5,
+    # DEBUG) and a stdout console handler (INFO) with a detailed format to both.
+    # Returns the "julia_env" logger.
+    # Side effects: creates the log directory/file; mutates global logging config.
+    # KNOWN ISSUE: on failure to create the file handler it calls the module-level
+    # logger, which is not yet assigned during the first call (NameError).
     """Configure logging to both file and console with rotation."""
     # Configure both julia_env and openenv hierarchies to share handlers
     julia_logger = logging.getLogger("julia_env")
@@ -115,6 +131,10 @@ logger = setup_logging()
 
 
 def initialize_julia_pool():
+    # [FUNCTION DOC]
+    # Logs the configuration banner and enables the JuliaExecutor process pool with
+    # MAX_WORKERS workers and EXECUTION_TIMEOUT; logs whether the pool or the
+    # subprocess fallback is used. Side effects: starts Julia worker processes.
     """Initialize the Julia process pool for better performance."""
     port = int(os.getenv("PORT", "8000"))
 
@@ -143,6 +163,9 @@ def initialize_julia_pool():
 
 
 def shutdown_julia_pool():
+    # [FUNCTION DOC]
+    # Shuts down the JuliaExecutor process pool and logs progress. Registered with
+    # atexit.
     """Shutdown the Julia process pool."""
     logger.info("Shutting down Julia Environment Server...")
     JuliaExecutor.shutdown_pool()
@@ -174,9 +197,15 @@ from starlette.requests import Request
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    # [CLASS DOC]
+    # Starlette middleware logging each HTTP request and response status/latency at
+    # DEBUG level, skipping /health and /pool_status.
     """Log all incoming HTTP requests for debugging."""
 
     async def dispatch(self, request: Request, call_next):
+        # [FUNCTION DOC]
+        # Passes the request through, logging method, path, status code and elapsed
+        # time (except for skipped paths). Returns the downstream response.
         start_time = time_module.time()
         path = request.url.path
 
@@ -202,6 +231,9 @@ app.add_middleware(RequestLoggingMiddleware)
 # Add custom health endpoint with pool metrics
 @app.get("/pool_status")
 async def pool_status():
+    # [FUNCTION DOC]
+    # GET /pool_status handler: returns max_workers, timeout, whether the pool is
+    # enabled, and the pool's metrics dict.
     """Get Julia process pool status."""
     return {
         "max_workers": MAX_WORKERS,
@@ -212,6 +244,8 @@ async def pool_status():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn on 0.0.0.0 at port PORT (default 8000), blocking.
     """Main entry point for running the server."""
     import uvicorn
 

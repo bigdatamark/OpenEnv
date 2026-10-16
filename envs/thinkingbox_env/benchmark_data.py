@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Downloads, safely extracts, validates and caches the commit-pinned ThinkingBox benchmark data release.
+# A bundle is a root with dataset/{agent,scenario,test_case}, servers, support, releases and LICENSE.txt,
+# plus a YAML manifest of task UIDs. Canonical caches carry a JSON stamp and must match a pinned bundle
+# hash. Module settings come from env vars: OPENENV_TB_DATASET (explicit data path), OPENENV_TB_DATA_TIMEOUT
+# (default 120 s), OPENENV_TB_DATA_CACHE (default under XDG_CACHE_HOME/openenv). Size limits: 256 MiB
+# archive, 2 GiB extracted. A thread lock plus a file lock serialise publication.
 """Download and validate the executable ThinkingBox benchmark release.
 
 The loader safely extracts a commit-pinned archive, verifies every executable
@@ -63,11 +70,17 @@ _download_lock = threading.Lock()
 
 
 class DatasetError(RuntimeError):
+    # [CLASS DOC]
+    # RuntimeError subclass raised whenever the pinned data bundle is unavailable or invalid.
     """The pinned ThinkingBox data bundle is unavailable or invalid."""
 
 
 @dataclass(frozen=True)
 class DataBundle:
+    # [CLASS DOC]
+    # Frozen dataclass identifying a validated bundle: root, dataset dir, manifest path, bundle hash, manifest
+    # file hash, hash of the ordered UID list, task count, and release name / revision ("local" unless
+    # canonical).
     """Identify one validated executable ThinkingBox data bundle.
 
     Args:
@@ -103,6 +116,9 @@ class DataBundle:
 
 
 def _read_test_uids(path: Path) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: loads the YAML manifest and returns its list of UIDs. Raises DatasetError if it cannot be parsed,
+    # is not a non-empty list of non-blank strings, or contains duplicates.
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -119,10 +135,14 @@ def _read_test_uids(path: Path) -> list[str]:
 
 
 def _sha256_file(path: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: SHA-256 hex digest of a file's bytes.
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _sha256_json(value: object) -> str:
+    # [FUNCTION DOC]
+    # HELPER: SHA-256 hex digest of the compact, key-sorted, non-ASCII-preserving JSON encoding of value.
     encoded = json.dumps(
         value,
         ensure_ascii=False,
@@ -133,6 +153,9 @@ def _sha256_json(value: object) -> str:
 
 
 def _bundle_sha256(root: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: deterministic hash over LICENSE.txt and all files under the four bundle top-level dirs (skipping
+    # __pycache__ and .pyc/.pyo), sorted by relative path, hashing path and bytes with NUL separators.
     files = [root / "LICENSE.txt"]
     for top_level in _BUNDLE_TOP_LEVELS:
         files.extend(
@@ -154,6 +177,9 @@ def _bundle_sha256(root: Path) -> str:
 
 
 def _canonical_stamp() -> dict[str, str | int]:
+    # [FUNCTION DOC]
+    # HELPER: returns the expected stamp mapping (schema version 2, release name, data commit, bundle hash,
+    # manifest path).
     return {
         "schema_version": 2,
         "release_name": DATA_RELEASE_NAME,
@@ -164,6 +190,9 @@ def _canonical_stamp() -> dict[str, str | int]:
 
 
 def _require_canonical_content(bundle: DataBundle) -> None:
+    # [FUNCTION DOC]
+    # HELPER: raises DatasetError if the manifest is outside the bundle root, or the bundle hash or manifest
+    # relative path differs from the pinned values.
     try:
         manifest_relative = bundle.manifest_path.relative_to(bundle.root).as_posix()
     except ValueError as exc:
@@ -176,6 +205,11 @@ def _require_canonical_content(bundle: DataBundle) -> None:
 
 
 def _validate_root(root: Path, *, require_stamp: bool) -> DataBundle:
+    # [FUNCTION DOC]
+    # HELPER: checks required directories, LICENSE.txt and the manifest exist (DatasetError otherwise), reads
+    # UIDs, optionally requires the stamp file to equal the canonical stamp, computes hashes and builds a
+    # DataBundle. With require_stamp, also enforces canonical content and fills release name and revision.
+    # Returns the DataBundle.
     dataset = root / "dataset"
     for relative in (
         Path("dataset/agent"),
@@ -220,6 +254,8 @@ def _validate_root(root: Path, *, require_stamp: bool) -> DataBundle:
 
 
 def load_test_uids(bundle: DataBundle) -> list[str]:
+    # [FUNCTION DOC]
+    # Returns the bundle manifest's ordered unique UIDs (DatasetError if invalid).
     """Load the validated bundle's ordered task manifest.
 
     Args:
@@ -234,6 +270,9 @@ def load_test_uids(bundle: DataBundle) -> list[str]:
 
 
 def _download(url: str, destination: Path, timeout: float) -> None:
+    # [FUNCTION DOC]
+    # HELPER: streams url to destination in 1 MiB chunks with a custom User-Agent and timeout. Raises
+    # DatasetError if the size limit is exceeded or on any download error. Side effects: network, file write.
     size = 0
     request = urllib.request.Request(
         url,
@@ -256,6 +295,9 @@ def _download(url: str, destination: Path, timeout: float) -> None:
 
 
 def _validated_archive_path(name: str) -> PurePosixPath:
+    # [FUNCTION DOC]
+    # HELPER: returns the member name as a PurePosixPath after rejecting backslashes, NULs, empty/./.. parts,
+    # absolute POSIX/Windows paths and drive letters (DatasetError).
     if "\\" in name or "\0" in name:
         raise DatasetError("ThinkingBox archive contains an unsafe path")
 
@@ -281,6 +323,9 @@ def _validated_archive_path(name: str) -> PurePosixPath:
 
 
 def _archive_target(destination: Path, relative_parts: tuple[str, ...]) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns destination joined with the relative parts; raises DatasetError if the resolved target is
+    # not strictly inside destination.
     target = destination.joinpath(*relative_parts)
     resolved = target.resolve()
     if resolved == destination or destination not in resolved.parents:
@@ -289,6 +334,11 @@ def _archive_target(destination: Path, relative_parts: tuple[str, ...]) -> Path:
 
 
 def _extract_archive(archive: Path, destination: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: safely extracts a .tar.gz: all members must share one root dir; only members under allowed
+    # top-level names are extracted (others skipped); symlinks, hard links and special files are rejected;
+    # total extracted file size is capped. Writes files and dirs under destination. Raises DatasetError on
+    # violations.
     extracted_bytes = 0
     destination = destination.resolve()
     with tarfile.open(archive, mode="r:gz") as source:
@@ -331,11 +381,16 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _cache_destination(cache_root: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns the cache directory for the pinned release: resolved cache root joined with
+    # "<release>-<commit 12 chars>-<bundle hash 16 chars>".
     key = f"{DATA_RELEASE_NAME}-{DATA_COMMIT[:12]}-{DATA_BUNDLE_SHA256[:16]}"
     return cache_root.expanduser().resolve() / key
 
 
 def _publication_lock(destination: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns the sibling lock-file path ".<name>.lock" for a destination dir.
     return destination.parent / f".{destination.name}.lock"
 
 
@@ -345,6 +400,12 @@ def ensure_data(
     archive_url: str = DATA_ARCHIVE_URL,
     timeout: float = DATA_TIMEOUT,
 ) -> DataBundle:
+    # [FUNCTION DOC]
+    # Returns the canonical cached bundle, populating the cache if needed. Fast path: validate existing cache.
+    # Otherwise, under the process thread lock and an inter-process file lock, re-checks, then downloads into a
+    # unique partial workspace, extracts, validates (canonical content), writes the stamp, revalidates, and
+    # atomically replaces the destination (removing an invalid existing one). The workspace is always deleted.
+    # Raises DatasetError on any validation/download failure. Side effects: network, filesystem.
     """Download, verify, safely extract, and publish canonical data atomically.
 
     Args:
@@ -410,6 +471,11 @@ def resolve_data_bundle(
     archive_url: str = DATA_ARCHIVE_URL,
     timeout: float = DATA_TIMEOUT,
 ) -> DataBundle:
+    # [FUNCTION DOC]
+    # Uses configured or OPENENV_TB_DATASET; if empty, returns ensure_data(). Otherwise accepts a data root
+    # (containing dataset/) or a dataset dir itself (containing agent, scenario, test_case; root is its parent),
+    # else raises DatasetError. Validates with the stamp requirement only if a stamp file exists.
+    # Returns the DataBundle.
     """Resolve an explicit local bundle or the pinned atomic cache.
 
     Args:
@@ -448,6 +514,9 @@ def data_ready(
     *,
     cache_root: Path | None = None,
 ) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the configured data (or the canonical cache) validates without downloading, False on
+    # DatasetError. Other exceptions propagate.
     """Return whether configured or cached data is already valid.
 
     Args:

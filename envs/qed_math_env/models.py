@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic models for the QED Math environment: marker base action/observation classes, three
+# action types (submit proof, get problem, get grading guidelines), and two observation types
+# (problem statement and graded submission). RewardValue is a union of bool, int, float or None.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -19,10 +23,14 @@ RewardValue = bool | int | float | None
 
 
 class QEDMathAction(Action):
+    # [CLASS DOC]
+    # Base marker action class with no extra fields.
     """Base action for the QED Math environment."""
 
 
 class SubmitProof(QEDMathAction):
+    # [CLASS DOC]
+    # Action carrying proof text (required) and an attempt_number (default 1).
     """Submit a proof attempt for the current problem."""
 
     proof: str = Field(..., description="The proof text submitted by agent")
@@ -30,18 +38,27 @@ class SubmitProof(QEDMathAction):
 
 
 class GetProblem(QEDMathAction):
+    # [CLASS DOC]
+    # Marker action requesting the current problem; no fields.
     """Request the current problem statement."""
 
 
 class GetGradingGuidelines(QEDMathAction):
+    # [CLASS DOC]
+    # Marker action requesting the grading guidelines; no fields.
     """Request the grading guidelines/rubric for current problem."""
 
 
 class QEDMathObservation(Observation):
+    # [CLASS DOC]
+    # Base marker observation class with no extra fields.
     """Base observation for the QED Math environment."""
 
 
 class ProblemObservation(QEDMathObservation):
+    # [CLASS DOC]
+    # Problem observation: problem text, reference_solution, grading_guidelines, problem_id,
+    # dataset_source, problem_type (default "proof"; also "answer" or "multi_step") and max_attempts (default 1).
     """Observation containing the problem statement."""
 
     problem: str = Field(default="", description="The mathematical problem")
@@ -62,6 +79,9 @@ class ProblemObservation(QEDMathObservation):
 
 
 class ProofSubmissionObservation(QEDMathObservation):
+    # [CLASS DOC]
+    # Graded submission: proof, score (0-7 integer), feedback, reward (default 0.0), done (default True),
+    # problem_type, attempt_number, attempts_remaining and is_correct.
     """Observation returned after submitting a proof."""
 
     proof: str = Field(default="", description="The submitted proof")

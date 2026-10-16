@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Local GPU evaluator for kernrl submissions. Writes the solution and reference
+# PyTorch modules (each defining a Model class and optionally get_inputs and
+# get_init_inputs) to a temp directory and runs, each in a separate Python
+# subprocess: an import/instantiation check, a correctness comparison, and a
+# timing benchmark; optionally runs profiling tools through GPUProfiler (Nsight
+# Systems/Compute, compute-sanitizer, torch.profiler, assembly, roofline).
+# Produces an EvalResult with a reward and an LLM-oriented text report.
 """
 Local GPU Evaluator for KernelBench
 
@@ -37,6 +45,8 @@ from .profiler import (
 
 @dataclass
 class CompilationResult:
+    # [CLASS DOC]
+    # Dataclass: compile/import check outcome (success, error text, warning list).
     """Result of compilation check."""
 
     success: bool
@@ -46,6 +56,10 @@ class CompilationResult:
 
 @dataclass
 class CorrectnessResult:
+    # [CLASS DOC]
+    # Dataclass: correctness outcome: pass flag, absolute-difference statistics
+    # (max, mean, median, std), atol/rtol, overall tolerance (atol + rtol * max
+    # abs reference), element and mismatch counts, mismatch percentage, error.
     """Result of correctness check."""
 
     correct: bool
@@ -64,6 +78,10 @@ class CorrectnessResult:
 
 @dataclass
 class BenchmarkResult:
+    # [CLASS DOC]
+    # Dataclass: benchmark outcome: mean and std of reference and solution times
+    # in microseconds, speedup (reference mean / solution mean), warmup and run
+    # counts, error.
     """Result of benchmark."""
 
     baseline_time_us: float = 0.0
@@ -78,6 +96,9 @@ class BenchmarkResult:
 
 @dataclass
 class EvalResult:
+    # [CLASS DOC]
+    # Dataclass aggregating one evaluation: step, problem id, compilation,
+    # optional correctness and benchmark, optional profiler results, and reward.
     """Complete evaluation result with all profiling data."""
 
     # Step info
@@ -107,6 +128,12 @@ class EvalResult:
     reward: float = 0.0
 
     def to_agent_feedback(self) -> str:
+        # [FUNCTION DOC]
+        # Builds a multi-section text report: compilation status (up to 2 warnings, or
+        # the error and reward then stops), sanitizer summary if successful, correctness
+        # statistics, benchmark times and speedup (or "Skipped"), then summaries of each
+        # successful profiler result (nsys, ncu, roofline, torch profiler, assembly),
+        # and the final reward. Returns the string.
         """Format as actionable feedback string for the agent."""
         lines = [f"{'=' * 60}", f"EVALUATION RESULT - Step {self.step}", f"{'=' * 60}"]
 
@@ -199,6 +226,9 @@ class EvalResult:
 
 
 class LocalGPUEvaluator:
+    # [CLASS DOC]
+    # Evaluator configured with device, tolerances, warmup/benchmark run counts,
+    # timeout and a GPUProfiler with per-tool toggles.
     """
     Evaluates kernel submissions on local GPU with comprehensive profiling.
 
@@ -232,6 +262,9 @@ class LocalGPUEvaluator:
         enable_roofline: bool = True,
         timeout: int = 60,
     ):
+        # [FUNCTION DOC]
+        # Stores settings and creates the GPUProfiler (nsys and sanitizer timeouts =
+        # timeout, ncu timeout = 2 x timeout). ncu is off by default; other tools on.
         self.device = device
         self.atol = atol
         self.rtol = rtol
@@ -259,6 +292,15 @@ class LocalGPUEvaluator:
         problem_id: str = "",
         step: int = 0,
     ) -> EvalResult:
+        # [FUNCTION DOC]
+        # Runs the full pipeline in a temp dir: compile check (return immediately on
+        # failure); sanitizer on a generated runner script if enabled; correctness; a
+        # benchmark only if correct; then nsys, ncu, torch profiler and assembly
+        # analysis as enabled, and roofline if ncu succeeded (using the benchmark's
+        # solution time or 1000 us). Computes the reward and returns the EvalResult.
+        # Side effects: temp files, multiple GPU subprocesses.
+        # KNOWN ISSUE: on compilation failure it returns before computing the reward,
+        # so the reward stays 0.0 instead of the documented -0.5 penalty.
         """
         Fully evaluate a solution with all profiling.
 
@@ -348,6 +390,12 @@ class LocalGPUEvaluator:
         reference_path: Path,
         tmpdir: Path,
     ) -> Path:
+        # [FUNCTION DOC]
+        # HELPER: Writes tmpdir/profile_runner.py, a script that loads both modules,
+        # builds the solution Model with the reference's init inputs (or none) on the
+        # device, gets inputs from the reference (or a 16x1024 random tensor), runs 5
+        # warmup and 10 profiled forward passes without gradients with CUDA syncs.
+        # Returns the script path. Paths are embedded as quoted string literals.
         """Create a runner script for profiling."""
         runner_path = tmpdir / "profile_runner.py"
         runner_path.write_text(f'''
@@ -394,6 +442,16 @@ torch.cuda.synchronize()
         return runner_path
 
     def _check_compilation(self, solution_path: Path) -> CompilationResult:
+        # [FUNCTION DOC]
+        # HELPER: Runs a subprocess (30 s timeout) that imports the solution module
+        # while capturing warnings, asserts it has a Model class, instantiates it with
+        # no arguments and checks for forward, printing "OK" and the warnings or the
+        # error with traceback. Returns success with warnings if "OK" appears in stdout,
+        # else failure with up to 2000 chars of combined output; timeouts and other
+        # exceptions become failures.
+        # KNOWN ISSUE: Model is instantiated with no arguments, so solutions whose
+        # Model requires init arguments (from get_init_inputs) fail this check; and the
+        # "OK" substring test can be satisfied by any printed text containing "OK".
         """Check if solution compiles and has required interface."""
         check_script = f'''
 import sys
@@ -458,6 +516,14 @@ except Exception as e:
         reference_path: Path,
         tmpdir: Path,
     ) -> CorrectnessResult:
+        # [FUNCTION DOC]
+        # HELPER: Runs a subprocess (self.timeout) that builds reference and solution
+        # models with the same init inputs and inputs, runs both, converts outputs to
+        # float, and prints JSON statistics of the absolute difference; correct when the
+        # max difference is below atol + rtol * max abs reference. Mismatches are
+        # counted elementwise against atol + rtol * abs(reference). Parses the last
+        # stdout line as JSON. Returns a CorrectnessResult; parse failures, script
+        # errors, timeouts and exceptions become correct=False with an error.
         """Run correctness check comparing solution to reference."""
 
         correctness_script = f'''
@@ -589,6 +655,13 @@ except Exception as e:
         reference_path: Path,
         tmpdir: Path,
     ) -> BenchmarkResult:
+        # [FUNCTION DOC]
+        # HELPER: Runs a subprocess (2 x self.timeout) that builds both models, runs
+        # the configured warmup on each, then times runs forward passes of the reference
+        # and then the solution with CUDA syncs around each call using a wall-clock
+        # timer, and prints JSON with means, stds (0 for a single run) and speedup (0
+        # if the solution mean is 0). Returns a BenchmarkResult; parse failures, script
+        # errors, timeouts and exceptions become a result with only error set.
         """Run benchmark comparing solution to reference."""
 
         benchmark_script = f'''
@@ -716,6 +789,10 @@ except Exception as e:
             return BenchmarkResult(error=str(e))
 
     def _compute_reward(self, result: EvalResult) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Reward: -0.5 if compilation failed; -0.25 if correctness ran and
+        # failed; if a non-zero benchmark speedup exists: min(speedup - 1, 2.0) when
+        # faster, else (speedup - 1) * 0.5; otherwise 0.0.
         """
         Compute reward from evaluation result.
 

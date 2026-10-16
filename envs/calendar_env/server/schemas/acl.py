@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the ACL API: scope/role enums, rule input/output shapes, watch
+# channel request/response models and the paginated ACL list response.
 import re
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -7,6 +10,8 @@ from pydantic import BaseModel, Extra, Field, field_validator, model_validator
 
 
 class ScopeType(str, Enum):
+    # [CLASS DOC]
+    # String enum of scope types: default, user, group, domain.
     default = "default"
     user = "user"
     group = "group"
@@ -14,6 +19,8 @@ class ScopeType(str, Enum):
 
 
 class AclRole(str, Enum):
+    # [CLASS DOC]
+    # String enum of roles: none, freeBusyReader, reader, writer, owner.
     none = "none"
     freeBusyReader = "freeBusyReader"
     reader = "reader"
@@ -22,6 +29,8 @@ class AclRole(str, Enum):
 
 
 class ScopeInput(BaseModel):
+    # [CLASS DOC]
+    # Input scope: type plus optional value (email for user/group, domain name for domain, omitted for default).
     type: ScopeType
     value: Optional[str] = Field(
         None,
@@ -30,6 +39,12 @@ class ScopeInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope_value(self) -> "ScopeInput":
+        # [FUNCTION DOC]
+        # After-validator: for "default" requires value to be None; for user/group requires the
+        # stripped value to match a simple email regex; for domain requires a valid hostname-like
+        # pattern of at most 253 chars. Returns self (value is not replaced by its stripped form).
+        # Raises: ValueError with a descriptive message on violations.
+        # KNOWN ISSUE: for non-default types with value omitted, value.strip() raises AttributeError instead of a clean validation error.
         """
         Validate scope value based on type:
         - default: value must be None/omitted
@@ -62,11 +77,15 @@ class ScopeInput(BaseModel):
 
 
 class ACLRuleInput(BaseModel):
+    # [CLASS DOC]
+    # Body for inserting a rule: required scope and optional role.
     scope: ScopeInput
     role: Optional[AclRole] = Field(None, description="The role assigned to the scope")
 
 
 class PatchACLRuleInput(BaseModel):
+    # [CLASS DOC]
+    # Body for patching a rule: optional scope and role.
     scope: Optional[ScopeInput] = Field(
         None, description="The extent to which calenda access is granted"
     )
@@ -74,6 +93,8 @@ class PatchACLRuleInput(BaseModel):
 
 
 class ScopeOutput(BaseModel):
+    # [CLASS DOC]
+    # Output scope: type and optional value (no validation).
     type: ScopeType
     value: Optional[str] = Field(
         None,
@@ -82,6 +103,8 @@ class ScopeOutput(BaseModel):
 
 
 class ACLRule(BaseModel):
+    # [CLASS DOC]
+    # Stored ACL rule view: id, calendar_id, user_id, role, etag and scope.
     id: str
     calendar_id: str
     user_id: str
@@ -91,6 +114,8 @@ class ACLRule(BaseModel):
 
 
 class InsertACLRule(BaseModel):
+    # [CLASS DOC]
+    # Google-style ACL resource: kind, etag, id, scope (validated input form) and role as a plain string.
     kind: str
     etag: str
     id: str
@@ -99,6 +124,8 @@ class InsertACLRule(BaseModel):
 
 
 class Channel(BaseModel):
+    # [CLASS DOC]
+    # Watch channel response: kind "api#channel", id, optional resourceId, resourceUri, token, expiration.
     """Channel model for watch notifications"""
 
     kind: str = Field(default="api#channel", description="Resource type identifier")
@@ -110,16 +137,23 @@ class Channel(BaseModel):
 
 
 class WatchParams(BaseModel):
+    # [CLASS DOC]
+    # Watch params object allowing only ttl (string seconds); extra keys are rejected.
     """Watch parameters"""
 
     ttl: Optional[str] = Field(None, description="Time to live (seconds)")
 
     class Config:
+        # [CLASS DOC]
+        # Pydantic config forbidding extra fields.
         extra = Extra.forbid
 
     @field_validator("ttl")
     @classmethod
     def _validate_ttl(cls, v: Optional[str]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER validator: None passes; otherwise the stripped string must be all digits and > 0;
+        # returns the stripped string. Raises ValueError otherwise.
         if v is None:
             return v
         s = str(v).strip()
@@ -133,6 +167,8 @@ class WatchParams(BaseModel):
 
 
 class ACLWatchRequest(BaseModel):
+    # [CLASS DOC]
+    # Watch request: id, type (default "web_hook"), address, optional token and params.
     """Request model for watching ACL changes"""
 
     id: str = Field(..., description="Channel identifier")
@@ -147,6 +183,9 @@ class ACLWatchRequest(BaseModel):
     @field_validator("type")
     @classmethod
     def _validate_type(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: accepts "web_hook" or "webhook" (case-insensitive, trimmed) and returns
+        # canonical "web_hook"; raises ValueError otherwise or if None.
         if v is None:
             raise ValueError("type is required")
         s = str(v).strip().lower()
@@ -158,6 +197,8 @@ class ACLWatchRequest(BaseModel):
     @field_validator("address")
     @classmethod
     def _validate_address(cls, v: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER validator: requires an https URL with a host; returns the trimmed string; raises ValueError otherwise.
         if v is None:
             raise ValueError("address is required")
         s = str(v).strip()
@@ -168,6 +209,9 @@ class ACLWatchRequest(BaseModel):
 
 
 class NotificationEvent(BaseModel):
+    # [CLASS DOC]
+    # Webhook notification payload: kind, id, resourceId, resourceUri, eventType,
+    # resourceState (default "sync"), timestamp and changed data dict.
     """Model for notification event payload"""
 
     kind: str = Field(default="api#channel", description="Resource type identifier")
@@ -181,6 +225,8 @@ class NotificationEvent(BaseModel):
 
 
 class WatchChannelInfo(BaseModel):
+    # [CLASS DOC]
+    # Read model describing a stored watch channel (ids, resource, calendar, webhook, timestamps as strings, is_active string, notification_count).
     """Information about a watch channel"""
 
     id: str = Field(..., description="Channel identifier")
@@ -196,6 +242,8 @@ class WatchChannelInfo(BaseModel):
 
 
 class ACLListResponse(BaseModel):
+    # [CLASS DOC]
+    # Paginated ACL list: kind "calendar#acl", etag, items of ACLRule, optional nextPageToken and nextSyncToken.
     """Response model for paginated ACL list"""
 
     kind: str = Field(default="calendar#acl", description="Resource type identifier")

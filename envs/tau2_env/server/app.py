@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI server for tau2-bench. Configured by TAU2_DOMAIN, TAU2_SPLIT, TAU2_USER_PROVIDER,
+# TAU2_USER_MODEL, provider credentials, TAU2_DATA_DIR and MAX_CONCURRENT_ENVS. Builds the module-level
+# app with a Gradio UI tab ("τ²-bench", primary) and adds root-level redirects for Hugging Face OAuth
+# routes into /web. Side effect: sets SYSTEM=spaces when SPACE_ID is present (enables real HF login).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +36,9 @@ from .tau2_environment import Tau2Environment
 
 
 def _env_factory(**overrides) -> Tau2Environment:
+    # [FUNCTION DOC]
+    # Creates a Tau2Environment from env-var settings (domain default "airline", split "test", provider "hf",
+    # model or None), with keyword overrides (used by the web UI) taking precedence. Returns the environment.
     """The server's environment. The web UI overrides `domain`, `split`, `user_model` or `hf_token`."""
     settings = {
         "domain": os.environ.get("TAU2_DOMAIN", "airline"),
@@ -42,11 +50,16 @@ def _env_factory(**overrides) -> Tau2Environment:
 
 
 class Tau2CallToolAction(CallToolAction):
+    # [CLASS DOC]
+    # CallToolAction variant whose "arguments" field also accepts a JSON string (sent by the web UI).
     """CallToolAction that accepts JSON strings for arguments (the web UI sends strings)."""
 
     @field_validator("arguments", mode="before")
     @classmethod
     def parse_arguments(cls, v: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Pydantic before-validator: if the value is a string, parses it as JSON (json.JSONDecodeError propagates
+        # as a validation error); otherwise returns it unchanged.
         if isinstance(v, str):
             return json.loads(v)
         return v
@@ -76,11 +89,16 @@ app = create_app(
 @app.get("/login/callback", include_in_schema=False)
 @app.get("/logout", include_in_schema=False)
 def _oauth_under_web(request: Request) -> RedirectResponse:
+    # [FUNCTION DOC]
+    # Route handler for /login/huggingface, /login/callback and /logout: redirects to the same path under
+    # /web, preserving the query string. Returns a RedirectResponse.
     query = f"?{request.url.query}" if request.url.query else ""
     return RedirectResponse(f"/web{request.url.path}{query}")
 
 
 def main():
+    # [FUNCTION DOC]
+    # Serves the app with uvicorn on 0.0.0.0:8000; blocks.
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

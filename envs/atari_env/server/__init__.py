@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Atari server subpackage; re-exports AtariEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

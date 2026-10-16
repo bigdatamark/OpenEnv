@@ -1,3 +1,15 @@
+# [MODULE DOC]
+# ASGI entry point for harbor_env, configured entirely through process
+# environment variables (datasets, default LLM URL/model/API key/auth header,
+# capture port, expose mode, max output tokens, PORT). At import time: if a
+# default LLM URL is set, resolves the model (the single served model when
+# OPENENV_MODEL is unset) and validates the endpoint to determine the capture
+# level ("text" unless proven better) and an LLM status dict; failures are
+# caught and recorded in that dict. Then constructs and starts a HarborService
+# (capture proxy), registers it as the current service, defaults
+# ENABLE_WEB_INTERFACE to "true", and builds the app with build_app.
+# Side effects at import: network calls to the LLM endpoint, environment
+# mutation, starting the capture service.
 """ASGI entry point for a deployed harbor_env.
 
 Everything is read from the environment so the same image serves any dataset and any engine without
@@ -135,6 +147,8 @@ app = build_app(datasets=_DATASETS, llm_url=_LLM_URL, model=_MODEL, llm=_LLM)
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Runs uvicorn serving the app on 0.0.0.0 at port PORT (default 8000), blocking.
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Implements the expert-in-the-loop rollout for one AWM task: resets the env, runs an agent policy turn by turn,
+# forwards list_tools/call_tool actions to the environment, answers ask_expert locally via the optional expert,
+# injects nudges, truncates long tool responses, then runs the code verifier and always ends the episode.
+# Also exposes parsing/formatting helpers and the TaskResult record plus sentinel reward-type labels.
 """The expert-in-the-loop rollout: one AWM task from reset to verify.
 
 ``run_task`` drives a single agent episode against a running AWM server using the
@@ -30,6 +35,10 @@ _OK_RESET = frozenset({"reset_ok", "reset_warning"})
 
 @dataclass
 class TaskResult:
+    # [CLASS DOC]
+    # Dataclass with one episode's outcome: scenario, task index, truncated task text (80 chars), tool step count, error
+    # count, expert call count, reward_type label (may be a sentinel such as reset_error/server_error/content_filter),
+    # scalar reward (None when not verified), and a filtered flag for content-filter drops.
     """Outcome of a single task episode.
 
     Attributes:
@@ -66,6 +75,9 @@ class TaskResult:
 
 
 def parse_tool_call(content: str) -> dict | None:
+    # [FUNCTION DOC]
+    # Finds the first <tool_call> block, parses its body as JSON (taking the first element of a list), and returns the
+    # dict if it has a "name" key; otherwise None (including on no match or invalid JSON).
     """Extract the first ``<tool_call>`` JSON object from a model response."""
     match = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", content, re.DOTALL)
     if not match:
@@ -82,6 +94,9 @@ def parse_tool_call(content: str) -> dict | None:
 
 
 def safe_parse_arguments(arguments: object) -> dict:
+    # [FUNCTION DOC]
+    # Converts tool arguments to a dict: JSON-decodes strings (empty dict if invalid), returns dicts as-is, and returns an
+    # empty dict for any other type.
     """Coerce tool arguments (which a model may emit as a JSON string) to a dict."""
     if isinstance(arguments, str):
         try:
@@ -92,6 +107,9 @@ def safe_parse_arguments(arguments: object) -> dict:
 
 
 def format_tools(tools, verbose: bool = False) -> str:
+    # [FUNCTION DOC]
+    # Renders tools as numbered text with name, description truncated to 120 chars (200 when verbose) and parameters with
+    # type and required marker; parameter descriptions (80 chars) are included only when verbose. Returns the string.
     """Render a tool list as text; ``verbose`` adds longer descriptions for the expert."""
     lines = [f"Available MCP tools ({len(tools)}):", "=" * 60]
     desc_len = 200 if verbose else 120
@@ -115,12 +133,16 @@ def format_tools(tools, verbose: bool = False) -> str:
 
 
 def is_content_filter_error(exc: Exception) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the exception text contains "content_filter" or "content management policy" (case-insensitive).
     """Heuristically detect content-filter rejections from the model provider."""
     text = str(exc).lower()
     return "content_filter" in text or "content management policy" in text
 
 
 def _coerce_inner_args(value: object) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Same coercion as safe_parse_arguments: JSON string or dict to dict, anything else (or invalid JSON) to empty dict.
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -130,6 +152,8 @@ def _coerce_inner_args(value: object) -> dict:
 
 
 def has_tool_call_tags(content: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the text contains an opening or closing tool_call tag, used to detect malformed tool calls.
     """Return `True` when a response attempted a tool call but failed parsing."""
     return "<tool_call" in content or "</tool_call>" in content
 
@@ -146,6 +170,18 @@ async def run_task(
     max_tool_response_chars: int = _DEFAULT_MAX_TOOL_RESPONSE_CHARS,
     verbose: bool = False,
 ) -> TaskResult:
+    # [FUNCTION DOC]
+    # Runs one episode. Reset failure returns a TaskResult with reward_type reset_error; an unusable reset (reward_type
+    # not reset_ok/reset_warning, or empty task) ends the session and returns with that reward_type. With an expert, first
+    # gets success criteria via expert.analyze and uses the adaptive prompt, else the baseline prompt. Each of up to
+    # max_iters turns: get the policy reply (content-filter errors return a filtered result immediately; other errors count
+    # as an error and stop the loop); malformed tool_call tags add an error message and continue; a plain reply becomes the
+    # final answer; list_tools caches verbose schemas for the expert; ask_expert (only if expert given) calls expert.advise;
+    # call_tool sends a CallToolAction and converts tool_result/error/observation dump to text; unknown functions are errors.
+    # Responses are truncated to max_tool_response_chars and, with an expert, followed by an error nudge or a stall nudge
+    # (when steps reach stall_threshold with no expert calls). Finally calls verify in code mode with the final answer.
+    # Returns: TaskResult with verifier reward_type and reward; any exception during the episode yields reward_type server_error.
+    # Side effects: network I/O to the env and LLMs; prints when verbose; always calls done (keep_session false) at the end.
     """Run one AWM task and return its [`TaskResult`].
 
     Args:
@@ -360,6 +396,8 @@ async def run_task(
 
 
 async def _safe_done(env) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Calls the "done" tool with keep_session false, ignoring any exception.
     try:
         await env.step(
             CallToolAction(tool_name="done", arguments={"keep_session": False})

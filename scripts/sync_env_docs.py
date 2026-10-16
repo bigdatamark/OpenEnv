@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Maintenance/CI script keeping docs/source/environments/<slug>.md stubs in sync with each
+# envs/<env>/README.md. A stub is the README with YAML frontmatter removed and repo-relative
+# links rewritten to absolute GitHub URLs, prefixed by an "openenv-source" HTML comment naming
+# the env dir. --check reports missing, stale, orphaned stubs, envs without README and stubs
+# not listed in _toctree.yml or environments.md (exit 1 if any except the no-README warning);
+# --fix creates/refreshes stubs atomically and deletes orphans; --dry-run previews --fix.
+# Toctree and catalog entries are never written, only reported.
 """Sync environment documentation with the envs/ directory.
 
 Ensures every environment in envs/ with a README.md has a corresponding
@@ -45,6 +53,8 @@ SKIP_DIRS = {"README.md"}
 
 
 def get_env_dirs():
+    # [FUNCTION DOC]
+    # Returns sorted names of directories directly under envs/ (excluding names in SKIP_DIRS).
     """Return sorted list of environment directory names under envs/."""
     return sorted(
         d
@@ -54,6 +64,10 @@ def get_env_dirs():
 
 
 def get_existing_stub_mapping():
+    # [FUNCTION DOC]
+    # Reads every .md stub in the docs environments dir and maps slug (file name without .md) to
+    # env dir, taken from the "openenv-source" comment or, for legacy stubs, from an {include}
+    # directive path. Stubs with neither are omitted. Side effects: reads files.
     """Build slug → env_dir mapping by reading stubs in docs/source/environments/.
 
     Supports two formats:
@@ -83,6 +97,8 @@ def get_existing_stub_mapping():
 
 
 def env_dir_to_slug(env_dir):
+    # [FUNCTION DOC]
+    # Returns the env dir name with a trailing "_env" removed (default slug for new stubs).
     """Convert an env directory name to a doc slug (best-effort default)."""
     slug = env_dir
     if slug.endswith("_env"):
@@ -96,6 +112,9 @@ def env_dir_to_slug(env_dir):
 
 
 def _strip_frontmatter(text):
+    # [FUNCTION DOC]
+    # HELPER: if text starts with "---", removes everything through the next "---" and leading
+    # newlines; returns text unchanged if there is no closing marker or no frontmatter.
     """Remove YAML frontmatter (--- ... ---) from the start of text."""
     if text.startswith("---"):
         try:
@@ -107,6 +126,15 @@ def _strip_frontmatter(text):
 
 
 def _rewrite_relative_links(text, env_dir):
+    # [FUNCTION DOC]
+    # HELPER: rewrites relative Markdown link/image destinations and HTML href/src attributes in
+    # README text so they point to the repo on GitHub: images (and src=) to raw.githubusercontent
+    # main, other links to github tree/blob main depending on whether the target is a directory.
+    # Only rewrites URLs without scheme/host, not starting with "/", resolving inside the repo to
+    # an existing path; query and fragment are preserved and angle-bracket form is kept. Inline
+    # code spans are untouched. Processes line by line, leaving fenced code blocks (tracking fence
+    # character and length, including inside block quotes and list items) and indented code
+    # blocks (four spaces/tab not continuing a list item) unchanged. Returns: rewritten text.
     """Keep README links working after moving their content into the docs site."""
     root = Path(ROOT).resolve()
     source_dir = Path(ENVS_DIR) / env_dir
@@ -118,6 +146,10 @@ def _rewrite_relative_links(text, env_dir):
     )
 
     def is_nested_image_destination(match):
+        # [FUNCTION DOC]
+        # HELPER: returns True if a link match sits inside the still-open alt text of an image
+        # (i.e. "![" before it has not been closed by a matching "]"), meaning it is a nested image
+        # destination that should not be rewritten.
         """Return whether a generic link match belongs to an unsupported image."""
         prefix = match.string[: match.start()]
         image_start = prefix.rfind("![")
@@ -140,6 +172,10 @@ def _rewrite_relative_links(text, env_dir):
         return depth == 1
 
     def rewrite(match):
+        # [FUNCTION DOC]
+        # HELPER: regex replacement callback: returns the match unchanged for code spans, nested
+        # image destinations, unparsable/absolute/out-of-repo/nonexistent targets; otherwise returns
+        # the prefix followed by the absolute GitHub URL.
         if match.group("code"):
             return match.group(0)
         kind = next(k for k in ("image", "link", "attribute") if match.group(k))
@@ -242,6 +278,9 @@ def _rewrite_relative_links(text, env_dir):
 
 
 def generate_stub(env_dir):
+    # [FUNCTION DOC]
+    # Reads envs/<env_dir>/README.md, strips frontmatter, rewrites relative links and returns the
+    # stub text with the openenv-source comment line prepended. Raises: OSError if no README.
     """Return the doc stub content for an environment.
 
     Inlines the README content (without HF Spaces YAML frontmatter) and
@@ -262,6 +301,11 @@ def generate_stub(env_dir):
 
 
 def analyze(env_dirs, stub_mapping):
+    # [FUNCTION DOC]
+    # Classifies envs: those without README go to no_readme; documented envs whose stub file
+    # content differs from the generated stub are stale (env_dir, slug); undocumented envs are
+    # missing with the default slug; stub mappings pointing to non-existent env dirs are orphaned.
+    # Returns: tuple (missing, orphaned, stale, no_readme).
     """Return (missing, orphaned, stale, no_readme) lists."""
     reverse_map = {v: k for k, v in stub_mapping.items()}
     documented_env_dirs = set(stub_mapping.values())
@@ -300,6 +344,10 @@ def analyze(env_dirs, stub_mapping):
 
 
 def find_unlisted(stub_mapping, orphaned):
+    # [FUNCTION DOC]
+    # Reads _toctree.yml and environments.md and, for each non-orphaned stub slug (sorted),
+    # reports it if the toctree lacks a "- local: environments/<slug>" line or the catalog lacks
+    # an "environments/<slug>" reference. Returns: (unlisted_toctree, unlisted_catalog).
     """Return (unlisted_toctree, unlisted_catalog) slug lists.
 
     A stub is unlisted when docs/source/_toctree.yml has no
@@ -335,6 +383,9 @@ def find_unlisted(stub_mapping, orphaned):
 
 
 def run_check(missing, orphaned, stale, no_readme, unlisted_toctree, unlisted_catalog):
+    # [FUNCTION DOC]
+    # Prints a report for each problem category with fix hints. No-README envs are a warning only.
+    # Returns: 0 if nothing other than no-README was found, else 1.
     ok = True
 
     if no_readme:
@@ -399,10 +450,18 @@ def run_check(missing, orphaned, stale, no_readme, unlisted_toctree, unlisted_ca
 
 
 def run_fix(missing, orphaned, stale, dry_run=False):
+    # [FUNCTION DOC]
+    # Applies (or with dry_run, prints) fixes: writes stubs for missing and stale entries and
+    # deletes existing orphaned stub files. Side effects: file writes/deletes, stdout.
     def label(action):
+        # [FUNCTION DOC]
+        # HELPER: returns the action text prefixed with "[dry-run] Would" in dry-run mode.
         return f"[dry-run] Would {action}" if dry_run else action
 
     def write_stub(stub_path, env_dir):
+        # [FUNCTION DOC]
+        # HELPER: writes the generated stub atomically via a temporary file in the same directory
+        # and os.replace, removing the temp file if anything fails.
         content = generate_stub(env_dir)
         temporary_path = None
         try:
@@ -446,6 +505,11 @@ def run_fix(missing, orphaned, stale, dry_run=False):
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: requires one of --check, --fix, --dry-run. Runs discovery and analysis;
+    # in check mode exits with run_check's code; otherwise lists no-README envs, runs fixes (or a
+    # dry run) when needed, and prints slugs that still need manual toctree/catalog entries
+    # (including newly created stubs).
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

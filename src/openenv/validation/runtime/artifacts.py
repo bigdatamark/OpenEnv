@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Writes a small, credential-redacted reproduction bundle (a directory of JSON files plus a
+# SHA256SUMS manifest) describing a runtime validation run: coverage, report, cleanup info,
+# plan, run manifest/provenance, raw collector trace and collector metadata.
+# Module constants: regexes for secret-looking keys and token-looking strings, a set of
+# token-related metadata keys exempt from key redaction, and a maximum nesting depth (64).
+
 """Small, bounded reproduction bundles; reports remain the public result contract."""
 
 import hashlib
@@ -17,6 +24,15 @@ _MAX_ARTIFACT_DEPTH = 64
 
 
 def _redact(value, *, depth=0):
+    # [FUNCTION DOC]
+    # HELPER: Recursively returns a redacted copy of a JSON-like value.
+    # Dicts: keys have token-looking substrings replaced by "[REDACTED]"; values whose key looks
+    # secret (password/secret/token/authorization/api key, case-insensitive) become "[REDACTED]"
+    # unless the key is max_tokens or prompt_token_ids; other values are redacted recursively.
+    # Lists: redacted element-wise. Strings: token patterns (hf_..., sk-/ghp_/github_pat_..., bearer X)
+    # replaced. Non-finite floats become a dict with "invalid_number" holding their string form.
+    # Dicts/lists at depth >= 64 are replaced with a dict noting the nesting limit was exceeded.
+    # Inputs: value, keyword depth (current recursion depth). Returns the redacted value; no side effects.
     if depth >= _MAX_ARTIFACT_DEPTH and isinstance(value, (dict, list)):
         return {"omitted": "artifact nesting limit exceeded"}
     if isinstance(value, dict):
@@ -38,6 +54,23 @@ def _redact(value, *, depth=0):
 def write_runtime_bundle(
     directory: Path, report, *, plan=None, evidence=None, provider=None, cleanup=None
 ):
+    # [FUNCTION DOC]
+    # Writes the bundle into the given directory (created with parents if missing).
+    # Inputs: directory (Path); report (validation report model with results, source_digest,
+    # policy_version, manifest); optional plan (RuntimePlan), evidence (RuntimeEvidence),
+    # provider (dict of provider info), cleanup (dict; defaults to a dict saying not required).
+    # Files produced: coverage.json (runtime.* check ids requested, executed = non-skip, incomplete =
+    # skip), report.json, cleanup.json, runtime-plan.json (only if plan), run-manifest.json (schema
+    # version "1", source digest, policy version, manifest schema version, SHA-256 of the plan JSON,
+    # whether the plan needed redaction, platform/python strings, provider), collector-trace.json
+    # (list of exchanges with request/response JSON parsed, malformed ones replaced by a placeholder
+    # and recorded as omitted fields), collector-evidence.json (null without evidence; otherwise
+    # parsed step/reset observation schemas, availability and parse-failure flags, omitted fields,
+    # failure phase/reason, completeness, and a "redacted" flag set if anything was omitted, failed
+    # to parse or would change under redaction).
+    # Every file is redacted, serialized as sorted, indented JSON with non-finite numbers disallowed,
+    # written as bytes, and its SHA-256 recorded in SHA256SUMS ("<hex>  <name>" lines).
+    # Returns None. Side effects: creates directory and writes files; reads platform info.
     """Write a credential-filtered trace, source/policy/plan provenance and coverage."""
     directory.mkdir(parents=True, exist_ok=True)
     files = {}

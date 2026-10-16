@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Inference script for a locally loaded (transformers) fine-tuned model on the CARLA "trolley_micro_escape_exists"
+# scenario. Reuses the GRPO training prompt and tool schemas (observe, emergency_stop, lane_change) and reproduces the
+# trainer's message layout so the model sees the same format. Runs one or more episodes and prints rewards.
+# Side effects: sys.path changes, model download/loading, network calls to the CARLA server, optional image files.
 """
 Inference script for fine-tuned models on the CARLA trolley escape scenario.
 
@@ -90,6 +95,9 @@ SCENARIO_NAME = "trolley_micro_escape_exists"
 
 
 def _describe(obs) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the observation text as in training: speed line, one line per nearby actor (type and distance) or a
+    # "no nearby actors" line, and a collision line when a collision was detected. Returns the joined string.
     """Build a text description from the observation fields (same as training)."""
     parts = []
     parts.append(f"Speed: {obs.speed_kmh:.1f} km/h.")
@@ -104,6 +112,14 @@ def _describe(obs) -> str:
 
 
 async def run_episode(llm, base_url, verbose=True, save_images=False, output_dir="llm_images", max_turns=10):
+    # [FUNCTION DOC]
+    # Resets the scenario, builds the initial user message as the training prompt directly concatenated with the
+    # observation text, then for up to max_turns turns asks the model (via llm.chat with TOOLS, 512 tokens); stops if no
+    # tool call; maps the first tool call to emergency_stop, lane_change (direction default "left") or observe for anything
+    # else; updates reward from the observation's rubric_reward (0 if missing); optionally saves a camera JPEG per turn;
+    # appends the assistant tool_calls message and a tool-role result message; stops when the env reports done.
+    # Returns: tuple of (last reward, number of turns executed).
+    # KNOWN ISSUE: with max_turns of 0 the loop variable is never bound and the return statement raises NameError.
     """Run one escape episode with the fine-tuned model.
 
     Replicates the exact message flow from GRPO training:
@@ -195,6 +211,9 @@ async def run_episode(llm, base_url, verbose=True, save_images=False, output_dir
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry: parses model id, base url, episodes, max turns and image options; loads the LocalClient once; runs each
+    # episode with asyncio.run; prints per-episode rewards/turns and the average when more than one episode.
     parser = argparse.ArgumentParser(
         description="Run inference with a fine-tuned model on the CARLA trolley escape scenario",
     )

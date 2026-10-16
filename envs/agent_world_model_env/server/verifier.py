@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Runs AWM task verifiers and the optional LLM judge. Verifier code is executed in a separate Python subprocess
+# (_verifier_runner.py) with a wall-clock timeout (OPENENV_AWM_VERIFIER_TIMEOUT, default 20s). "code" mode yields
+# a deterministic complete/others verdict; "sql" mode yields DB-derived evidence that an OpenAI-compatible LLM judges.
 """
 Verifier execution for AWM environments.
 
@@ -30,6 +34,11 @@ _RUNNER_PATH = os.path.join(
 
 
 def _run_verifier_subprocess(payload: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Runs the runner script with the payload JSON on stdin and parses its stdout JSON.
+    # Returns: the parsed result, or an error dict (execution_status "error", error_message) on timeout, launch failure,
+    # non-zero exit with empty stdout, empty stdout or invalid JSON. Never raises.
+    # Side effects: spawns a subprocess.
     """Invoke the runner. Returns a dict; never raises."""
     try:
         proc = subprocess.run(
@@ -83,6 +92,11 @@ def execute_sql_verifier(
     initial_db_path: str,
     final_db_path: str,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Runs a SQL-mode verifier. Returns an error dict if either DB file is missing. Temporarily chmods both DB files to
+    # read-only (0444) for the duration of the run and restores the original modes afterwards (chmod errors ignored).
+    # Returns: the verifier's (JSON-safe) return value, or an error dict.
+    # KNOWN ISSUE: read-only file mode does not stop a verifier running as root (or the file owner via chmod) from writing.
     """Execute SQL-mode verifier code that compares initial vs final DB state.
 
     Returns:
@@ -133,6 +147,10 @@ def execute_code_verifier(
     final_db_path: str,
     final_answer: str | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Runs a code-mode verifier with the same missing-file checks and temporary read-only DB protection, passing
+    # final_answer. Returns: a dict that always contains "result" ("complete"/"others"); if the runner's dict lacks it,
+    # "result" is set to "others" and execution_status defaults to "error".
     """Execute code-mode verifier that returns {"result": "complete"|"others"}.
 
     Returns:
@@ -191,6 +209,14 @@ def run_verifier(
     final_db_path: str,
     final_answer: str | None = None,
 ) -> tuple[str, dict]:
+    # [FUNCTION DOC]
+    # Selects and runs the verifier for one task. Reads code from the entry's "verification"."code"; code that is
+    # missing, non-string or shorter than 10 non-blank chars yields ("judge_error", error dict). The function name is the
+    # first line starting with "def verify_" (else verify_task_completion for code mode, verify_task for sql mode).
+    # Returns: (reward_type, details). Code mode: "judge_error" on execution error, else the verifier's result value.
+    # SQL mode: "judge_error" on error, else "incomplete" together with the raw result (final classification is left to
+    # the LLM judge).
+    # KNOWN ISSUE: picks the first "def verify_" function, which may be a helper rather than the entry point.
     """
     Run the appropriate verifier and return (reward_type, details).
 
@@ -229,6 +255,9 @@ def run_verifier(
 
 
 def _normalize_azure_url(base_url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: For Azure OpenAI hosts (openai.azure.com or services.ai.azure.com) strips trailing "/" and appends
+    # "/openai/v1" if not already present; other URLs are returned unchanged.
     """Normalize Azure OpenAI base URLs to include /openai/v1 suffix.
 
     The Azure OpenAI v1 API uses the standard OpenAI client with
@@ -253,6 +282,16 @@ async def run_llm_judge(
     success_criteria: str = "",
     failure_criteria: str = "",
 ) -> tuple[str, dict]:
+    # [FUNCTION DOC]
+    # Async. Asks an OpenAI-compatible chat model to classify a trajectory using the SQL verifier output.
+    # Inputs: task text, verifier result, LLM base URL/API key ("EMPTY" if none)/model, optional trajectory list and
+    # verifier reasoning/success/failure criteria strings.
+    # Behavior: returns ("judge_error", error) if base URL or model is missing. Builds a fixed system prompt and a user
+    # prompt containing task_json and verification_json, calls chat completions (temperature 1.0, max 4096 tokens),
+    # parses the reply as JSON (falling back to the first brace-delimited span). The "classification" field is lowercased
+    # and must be one of complete/incomplete/server_error/agent_error/judge_error, else "judge_error".
+    # Returns: (classification, parsed judge dict) or ("judge_error", error dict). Never raises; failures are logged.
+    # Side effects: network call to the LLM endpoint.
     """Run LLM-as-a-judge combining agent trajectory AND SQL verification results.
 
     Aligned with llm_judge_with_sql in agent-world-model-rl-rewards/task_reward.py.
@@ -385,6 +424,9 @@ async def run_llm_judge(
 
 
 def _sanitize_for_json(obj: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively converts a value to JSON-safe data (tuple keys to strings, tuples to lists, bytes decoded,
+    # unserializable values to str). Duplicates the runner's sanitizer.
     if isinstance(obj, dict):
         return {
             str(k) if isinstance(k, tuple) else k: _sanitize_for_json(v)

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI server entry for OpenSpiel. At import time reads OPENSPIEL_GAME (default "catch"),
+# OPENSPIEL_AGENT_PLAYER (default 0), OPENSPIEL_OPPONENT_POLICY (default "random") and
+# MAX_CONCURRENT_ENVS (default 8) into module globals, and creates "app" with a factory so each
+# session gets its own OpenSpielEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -52,6 +57,9 @@ max_concurrent = int(os.getenv("MAX_CONCURRENT_ENVS", "8"))
 
 # Factory function to create OpenSpielEnvironment instances
 def create_openspiel_environment():
+    # [FUNCTION DOC]
+    # HELPER: Factory that builds an OpenSpielEnvironment from the module-level game name, agent
+    # player and opponent policy. Raises whatever the environment constructor raises.
     """Factory function that creates OpenSpielEnvironment with config."""
     return OpenSpielEnvironment(
         game_name=game_name,
@@ -72,6 +80,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: parses --host (default 0.0.0.0) and --port (default 8000) and runs the app with uvicorn.
     """
     Entry point for direct execution via uv run or python -m.
 

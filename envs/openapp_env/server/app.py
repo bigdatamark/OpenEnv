@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI server entry for the OpenApp environment. At import time creates the module-level
+# "app" with create_app using the OpenAppEnvironment class as a per-session factory.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,6 +44,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: runs the app with uvicorn on 0.0.0.0:8000 (fixed, no argument parsing). Blocks.
     """
     Entry point for direct execution via uv run or python -m.
 

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Parameter sets for BehaviorAgent driving styles (speeds in km/h, distances in meters).
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
@@ -5,6 +7,8 @@
 
 
 class Cautious(object):
+    # [CLASS DOC]
+    # Cautious style: max_speed 40, larger margins (speed_lim_dist 6, proximity 12, braking 6).
     """Class for Cautious agent."""
 
     max_speed = 40
@@ -17,6 +21,8 @@ class Cautious(object):
 
 
 class Normal(object):
+    # [CLASS DOC]
+    # Normal style: max_speed 50, speed_lim_dist 3, proximity 10, braking distance 5.
     """Class for Normal agent."""
 
     max_speed = 50
@@ -29,6 +35,8 @@ class Normal(object):
 
 
 class Aggressive(object):
+    # [CLASS DOC]
+    # Aggressive style: max_speed 70, speed_lim_dist 1, proximity 8, braking 4, tailgate_counter -1.
     """Class for Aggressive agent."""
 
     max_speed = 70

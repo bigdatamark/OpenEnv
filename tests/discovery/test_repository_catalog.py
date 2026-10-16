@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Tests for git-backed catalog building (build_catalog) and catalog
+# operations (write/load, search, resolve, compare). Fixtures create real git
+# repositories in temp dirs whose environment packages raise on import, proving
+# discovery reads metadata only. Covers maintained repo declarations, commit
+# pinning, determinism, licence resolution and conflicts, invalid/symlinked/
+# duplicate-key metadata, forbidden simulation-control capabilities, refresh
+# diffs, scope checks, filters and credential redaction.
 # SPDX-License-Identifier: BSD-3-Clause
 
 import ast
@@ -21,6 +29,10 @@ from openenv.discovery.metadata import DiscoveryDeclaration
 
 
 def git(repository: Path, *args: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: runs git in the repository with fixed identity, no signing, no
+    # autocrlf and no hooks; raises CalledProcessError on failure; returns
+    # stripped stdout.
     return subprocess.run(
         [
             "git",
@@ -45,12 +57,17 @@ def git(repository: Path, *args: str) -> str:
 
 
 def commit(repository: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: stages everything, commits, and returns the new HEAD sha.
     git(repository, "add", ".")
     git(repository, "commit", "-qm", "Update fixture")
     return git(repository, "rev-parse", "HEAD")
 
 
 def environment(repository: Path, name: str, description: str) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: creates envs/<name> with openenv.yaml, a pyproject.toml carrying the
+    # description, and an __init__.py that raises if imported. Returns the dir.
     directory = repository / "envs" / name
     directory.mkdir(parents=True)
     (directory / "openenv.yaml").write_text(
@@ -69,6 +86,9 @@ def environment(repository: Path, name: str, description: str) -> Path:
 
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
+    # [FUNCTION DOC]
+    # Fixture: git repo with echo_env and chess_env, a BSD-3-Clause root
+    # pyproject and LICENSE, committed.
     repository = tmp_path / "repository"
     repository.mkdir()
     git(repository, "init", "-q")
@@ -83,6 +103,9 @@ def repository(tmp_path: Path) -> Path:
 
 
 def build(repository: Path):
+    # [FUNCTION DOC]
+    # HELPER: build_catalog for the repo with a fixed GitHub URI, publisher
+    # "example.org" and namespace "openenv".
     return build_catalog(
         repository,
         repository_uri="https://github.com/example/environments.git",
@@ -95,11 +118,19 @@ def build(repository: Path):
 def maintained_inventory(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[CatalogSnapshot, list[str]]:
+    # [FUNCTION DOC]
+    # Module-scoped fixture: copies this repo's root and per-env metadata files
+    # (openenv.yaml, pyproject, README, discovery.json and any declared tool
+    # source) into a fresh git repo, replaces env __init__ with a raising stub,
+    # commits, and returns the built snapshot plus the sorted env paths.
     source_root = Path(__file__).resolve().parents[2]
     repository = tmp_path_factory.mktemp("maintained-discovery")
     git(repository, "init", "-q")
 
     def copy_metadata(relative: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: copies one relative file from the source tree if it exists; asserts
+        # it is not a symlink.
         source = source_root / relative
         assert not source.is_symlink(), f"Metadata must not be a symlink: {relative}"
         if source.is_file():
@@ -150,6 +181,10 @@ def maintained_inventory(
 def test_maintained_declarations_support_task_selection_without_imports(
     maintained_inventory: tuple[CatalogSnapshot, list[str]], path: str, query: str
 ) -> None:
+    # [FUNCTION DOC]
+    # For selected real envs: snapshot is complete, has 2-5 representative
+    # queries, description provenance points to discovery.json, and a paraphrased
+    # query (not literally listed) ranks that env first and resolves to it.
     snapshot, paths = maintained_inventory
     assert snapshot.complete
     assert snapshot.inventory.paths == paths
@@ -168,6 +203,9 @@ def test_maintained_declarations_support_task_selection_without_imports(
 
 
 def test_calendar_declares_only_source_evidenced_event_tools() -> None:
+    # [FUNCTION DOC]
+    # calendar_env discovery.json declares MCP tools that are a subset of the
+    # EVENTS_TOOLS literal in its source (parsed with ast) and no simulation controls.
     source_root = Path(__file__).resolve().parents[2]
     declaration_path = source_root / "envs/calendar_env/discovery.json"
     assert declaration_path.is_file()
@@ -195,6 +233,9 @@ def test_calendar_declares_only_source_evidenced_event_tools() -> None:
 def test_real_git_inventory_round_trips_and_selects_by_task(
     repository: Path, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Build, write and load a catalog; search selects echo_env, and resolved
+    # source/artifact fields point to HEAD.
     snapshot = build(repository)
     assert snapshot.complete
     assert snapshot.inventory.paths == ["envs/chess_env", "envs/echo_env"]
@@ -214,6 +255,8 @@ def test_real_git_inventory_round_trips_and_selects_by_task(
 
 
 def test_build_reads_only_the_selected_commit(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # Uncommitted edits and untracked envs do not change the build.
     first = build(repository)
     (repository / "envs/echo_env/pyproject.toml").write_text(
         '[project]\nname="changed"\ndescription="uncommitted description"\n'
@@ -225,6 +268,8 @@ def test_build_reads_only_the_selected_commit(repository: Path) -> None:
 def test_two_builds_of_one_revision_are_byte_identical(
     repository: Path, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # Writing two builds of the same revision produces identical bytes.
     first, second = tmp_path / "first.json", tmp_path / "second.json"
     write_catalog(build(repository), first)
     write_catalog(build(repository), second)
@@ -234,6 +279,9 @@ def test_two_builds_of_one_revision_are_byte_identical(
 def test_descriptions_and_requirements_are_source_declarations(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Entry fields come from pyproject/openenv.yaml/LICENSE with provenance and a
+    # single orchestration interface without version.
     entry = next(
         item for item in build(repository).entries if item.data.name == "echo_env"
     )
@@ -254,6 +302,9 @@ def test_descriptions_and_requirements_are_source_declarations(
 def test_reviewable_declarations_provide_search_hints_and_tools(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A discovery.json supplies description, tags, queries and agent tools,
+    # yielding capabilities and a declared MCP interface at the commit revision.
     declaration = {
         "description": "A minimal client smoke test for message-based tools.",
         "tags": ["smoke-test"],
@@ -286,6 +337,9 @@ def test_reviewable_declarations_provide_search_hints_and_tools(
 
 
 def test_license_conflicts_are_unknown_not_a_positive_claim(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # Conflicting README and pyproject licences give "unknown" and a
+    # license_conflict issue.
     (repository / "envs/echo_env/README.md").write_text(
         "---\nlicense: apache-2.0\n---\n# Echo\n"
     )
@@ -311,6 +365,9 @@ def test_license_conflicts_are_unknown_not_a_positive_claim(repository: Path) ->
 def test_custom_license_categories_do_not_establish_license_identity(
     repository: Path, package_license: str, readme_license: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Differing/"other" custom licence texts give unknown licence, no URL or
+    # provenance, and a conflict issue.
     (repository / "envs/echo_env/pyproject.toml").write_text(
         '[project]\nname="echo"\ndescription="Echo messages."\n'
         f"license={{text={json.dumps(package_license)}}}\n"
@@ -342,6 +399,9 @@ def test_custom_license_categories_do_not_establish_license_identity(
 def test_equivalent_license_declarations_keep_their_source_evidence(
     repository: Path, package_license: str, readme_license: str, expected: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Equivalent declarations (same text up to newline style, or case-insensitive
+    # SPDX) keep a licence and URL to the env pyproject with no conflict.
     (repository / "envs/echo_env/pyproject.toml").write_text(
         '[project]\nname="echo"\ndescription="Echo messages."\n'
         f"license={{text={json.dumps(package_license)}}}\n"
@@ -362,6 +422,9 @@ def test_equivalent_license_declarations_keep_their_source_evidence(
 def test_unclosed_frontmatter_is_invalid_with_each_line_ending(
     repository: Path, newline: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Unclosed README front matter makes the snapshot incomplete with
+    # invalid_metadata, for LF/CRLF/CR.
     (repository / "envs/echo_env/README.md").write_bytes(
         newline.join(["---", "license: MIT", ""]).encode()
     )
@@ -375,6 +438,8 @@ def test_unclosed_frontmatter_is_invalid_with_each_line_ending(
 
 
 def test_missing_license_is_explicitly_unknown(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # Removing root licence sources makes all entries "unknown".
     (repository / "pyproject.toml").unlink()
     (repository / "LICENSE").unlink()
     commit(repository)
@@ -393,6 +458,9 @@ def test_missing_license_is_explicitly_unknown(repository: Path) -> None:
 def test_license_tables_distinguish_file_pointers_from_license_text(
     repository: Path, scope: str, declaration: str, expected: str
 ) -> None:
+    # [FUNCTION DOC]
+    # license tables: file pointer -> unknown, SPDX text -> that id, custom text
+    # -> "other"; provenance names the declaring pyproject at env or repo scope.
     origin = (
         "envs/echo_env/pyproject.toml" if scope == "environment" else "pyproject.toml"
     )
@@ -413,6 +481,8 @@ def test_license_tables_distinguish_file_pointers_from_license_text(
 
 
 def test_license_table_cannot_claim_both_a_file_and_text(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # A licence table with both file and text yields an error-level invalid_metadata.
     (repository / "envs/echo_env/pyproject.toml").write_text(
         '[project]\nname="echo"\ndescription="Echo messages."\n'
         'license={file="LICENSE",text="MIT"}\n'
@@ -431,6 +501,9 @@ def test_license_table_cannot_claim_both_a_file_and_text(repository: Path) -> No
 def test_failed_eligible_record_is_not_a_complete_inventory(
     repository: Path, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # An invalid openenv.yaml drops that entry and marks the snapshot incomplete;
+    # loading the written catalog raises CatalogError "incomplete".
     (repository / "envs/echo_env/openenv.yaml").write_text("name: [not-a-name]\n")
     commit(repository)
     snapshot = build(repository)
@@ -450,6 +523,9 @@ def test_failed_eligible_record_is_not_a_complete_inventory(
 def test_symlink_metadata_is_rejected_without_reading_its_target(
     repository: Path, tmp_path: Path
 ) -> None:
+    # [FUNCTION DOC]
+    # A symlinked pyproject gives symlink_metadata and its target content never
+    # appears in the snapshot.
     secret = tmp_path / "private.toml"
     secret.write_text('description="must-not-be-read"\n')
     metadata = repository / "envs/echo_env/pyproject.toml"
@@ -465,6 +541,8 @@ def test_symlink_metadata_is_rejected_without_reading_its_target(
 def test_duplicate_metadata_keys_do_not_silently_override_claims(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Duplicate JSON keys in discovery.json yield invalid_metadata.
     (repository / "envs/echo_env/discovery.json").write_text(
         '{"license":"MIT","license":"BSD-3-Clause"}'
     )
@@ -477,6 +555,8 @@ def test_duplicate_metadata_keys_do_not_silently_override_claims(
 def test_publisher_cannot_supply_an_execution_approval_boolean(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # requires_explicit_trust in discovery.json makes the build incomplete.
     (repository / "envs/echo_env/discovery.json").write_text(
         '{"requires_explicit_trust":false}'
     )
@@ -488,6 +568,9 @@ def test_publisher_cannot_supply_an_execution_approval_boolean(
 def test_agent_capabilities_do_not_advertise_simulation_controls(
     repository: Path, control: str
 ) -> None:
+    # [FUNCTION DOC]
+    # Declaring reset/step/state/get_state as tools makes the build incomplete and
+    # never appear as capabilities.
     (repository / "envs/echo_env/discovery.json").write_text(
         json.dumps(
             {
@@ -506,6 +589,8 @@ def test_agent_capabilities_do_not_advertise_simulation_controls(
 
 
 def test_external_subject_keeps_known_revision_without_distribution(repository: Path):
+    # [FUNCTION DOC]
+    # artifact_availability external keeps the revision with no artifacts.
     (repository / "envs/echo_env/discovery.json").write_text(
         '{"artifact_availability":"external"}'
     )
@@ -519,6 +604,9 @@ def test_external_subject_keeps_known_revision_without_distribution(repository: 
 
 
 def test_refresh_distinguishes_new_revisions_from_withdrawal(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # compare_catalogs after removing chess_env and editing echo_env reports echo
+    # as superseded (new identifier) and chess as withdrawn.
     previous = build(repository)
     git(repository, "rm", "-qr", "envs/chess_env")
     (repository / "envs/echo_env/README.md").write_text("A corrected description.\n")
@@ -540,6 +628,9 @@ def test_refresh_distinguishes_new_revisions_from_withdrawal(repository: Path) -
 def test_refresh_reports_metadata_correction_without_changing_the_artifact(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A re-digested snapshot with only a corrected description is reported as a
+    # correction with the same identifier and nothing else.
     previous = build(repository)
     payload = previous.model_dump(by_alias=True, exclude_none=True, mode="json")
     payload["entries"][0]["description"] = "Corrected task description."
@@ -568,6 +659,8 @@ def test_refresh_reports_metadata_correction_without_changing_the_artifact(
 def test_an_incomplete_refresh_cannot_withdraw_last_known_records(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # compare_catalogs raises CatalogError "incomplete" when the new build is incomplete.
     previous = build(repository)
     (repository / "envs/echo_env/openenv.yaml").write_text("not: [valid\n")
     commit(repository)
@@ -579,6 +672,9 @@ def test_an_incomplete_refresh_cannot_withdraw_last_known_records(
 def test_snapshot_cannot_claim_entries_outside_its_inventory_scope(
     repository: Path, tmp_path: Path, root: str
 ) -> None:
+    # [FUNCTION DOC]
+    # A re-digested catalog whose inventory root does not contain the entries is
+    # rejected on load with a "profile" CatalogError.
     snapshot = build(repository)
     payload = snapshot.model_dump(by_alias=True, exclude_none=True, mode="json")
     payload["inventory"]["root"] = root
@@ -600,6 +696,8 @@ def test_snapshot_cannot_claim_entries_outside_its_inventory_scope(
 def test_identifier_only_result_is_resolved_only_in_the_configured_snapshot(
     repository: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # resolve_entry finds known identifiers and raises "not found" otherwise.
     snapshot = build(repository)
     identifier = snapshot.entries[0].identifier
     assert resolve_entry(snapshot, identifier).identifier == identifier
@@ -608,6 +706,9 @@ def test_identifier_only_result_is_resolved_only_in_the_configured_snapshot(
 
 
 def test_filters_are_explicit_and_unknown_filters_fail(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # license filter matches/excludes entries; unknown filter keys raise
+    # "Unsupported filter".
     snapshot = build(repository)
     assert len(search_catalog(snapshot, "", filters={"license": "BSD-3-Clause"})) == 2
     assert search_catalog(snapshot, "", filters={"license": "MIT"}) == []
@@ -616,6 +717,9 @@ def test_filters_are_explicit_and_unknown_filters_fail(repository: Path) -> None
 
 
 def test_repository_credentials_are_not_reflected_in_errors(repository: Path) -> None:
+    # [FUNCTION DOC]
+    # A repository URI with embedded credentials raises CatalogError whose message
+    # does not contain the token.
     with pytest.raises(CatalogError) as error:
         build_catalog(
             repository,

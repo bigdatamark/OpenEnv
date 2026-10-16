@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the Jupyter environment; all behavior comes from MCPToolClient
+# (list_tools, call_tool, reset, step).
 """Client for the Jupyter environment.
 
 Connects to a running jupyter_env server and exposes notebook tools through the
@@ -40,6 +43,9 @@ from openenv.core.mcp_client import MCPToolClient
 
 
 class JupyterEnv(MCPToolClient):
+    # [CLASS DOC]
+    # MCPToolClient subclass with no additions; exists to give the environment a
+    # named client type.
     """Client for the Jupyter environment.
 
     Inherits all MCP tool-calling functionality from MCPToolClient:

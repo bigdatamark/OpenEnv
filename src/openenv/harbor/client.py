@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Synchronous typed client for a deployed harbor_env server: Task API discovery over
+# plain HTTP (httpx) and rollout execution / capability queries via MCP tool calls over
+# the OpenEnv WebSocket client.
 """Typed client for a deployed harbor_env server.
 
 Two surfaces, matching the server: the Task API for discovery (plain HTTP, cheap, side-effect free)
@@ -32,6 +36,9 @@ _DEFAULT_MESSAGE_TIMEOUT_S = 1800.0
 
 
 class HarborEnv(MCPToolClient):
+    # [CLASS DOC]
+    # MCPToolClient subclass holding an extra httpx client for the Task API endpoints, with
+    # a 1800s default WebSocket message timeout.
     """Client for `harbor_env`.
 
     Args:
@@ -49,6 +56,9 @@ class HarborEnv(MCPToolClient):
         message_timeout_s: float = _DEFAULT_MESSAGE_TIMEOUT_S,
         **kwargs: Any,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initializes the MCP client with base_url and message timeout (extra kwargs passed
+        # through) and creates an httpx client rooted at base_url with a 120s timeout.
         super().__init__(
             base_url=base_url, message_timeout_s=message_timeout_s, **kwargs
         )
@@ -56,20 +66,29 @@ class HarborEnv(MCPToolClient):
 
     # --- discovery (Task API) --------------------------------------------
     def splits(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # GET /harbor_env/splits; returns the JSON list of split descriptors. Raises httpx.HTTPStatusError on error status.
         """Datasets this server offers, with task counts."""
         return self._http.get("/harbor_env/splits").raise_for_status().json()
 
     def num_tasks(self, split: str = "") -> int:
+        # [FUNCTION DOC]
+        # POST /harbor_env/num_tasks with the split; returns the int num_tasks (0 if absent).
         payload = self._post("/harbor_env/num_tasks", {"split": split})
         return int(payload.get("num_tasks", 0))
 
     def get_task(self, split: str, index: int) -> HarborTaskRef:
+        # [FUNCTION DOC]
+        # POST /harbor_env/task with split and index; validates payload["task"] (or the whole
+        # payload) as a HarborTaskRef and returns it.
         payload = self._post("/harbor_env/task", {"split": split, "index": index})
         return HarborTaskRef.model_validate(payload.get("task", payload))
 
     def get_task_range(
         self, split: str, start: int = 0, stop: int = 20
     ) -> list[HarborTaskRef]:
+        # [FUNCTION DOC]
+        # POST /harbor_env/task_range with split/start/stop; returns a list of HarborTaskRef from payload["tasks"].
         payload = self._post(
             "/harbor_env/task_range", {"split": split, "start": start, "stop": stop}
         )
@@ -97,6 +116,12 @@ class HarborEnv(MCPToolClient):
         agent_step_limit: int = 0,
         sampling: dict[str, Any] | None = None,
     ) -> HarborRolloutResult:
+        # [FUNCTION DOC]
+        # Calls the "run_rollout" MCP tool with all arguments; provider, purpose, eval_sampling
+        # and sampling are only sent when non-default (for compatibility with older servers).
+        # Parses the text result as a HarborRolloutResult and returns it. Raises RuntimeError if
+        # the tool reports an error; pydantic ValidationError on malformed results.
+        # KNOWN ISSUE: the docstring omits keep_sandbox, force_build, provider, purpose and eval_sampling.
         """Run one rollout and return its result.
 
         `harness` and `sandbox` are per-call, so consecutive rollouts can use different agents and
@@ -163,11 +188,17 @@ class HarborEnv(MCPToolClient):
         return HarborRolloutResult.model_validate_json(_as_text(raw))
 
     def capabilities(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Calls the "capabilities" MCP tool and returns its JSON-decoded dict.
         """Harnesses, sandboxes, datasets and LLM status for this server."""
         return json.loads(_as_text(self._call("capabilities")))
 
     # --- internals ---------------------------------------------------------
     def _call(self, name: str, **kwargs: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: sends a CallToolAction via step() (awaiting it through run_async_safely in
+        # async mode). Returns observation.result for CallToolObservation, raising RuntimeError
+        # with the error message/type if the tool failed; otherwise returns the raw observation.
         """Call an MCP tool from synchronous code.
 
         `MCPToolClient.call_tool` cannot be used here. It is a coroutine that internally does
@@ -190,9 +221,13 @@ class HarborEnv(MCPToolClient):
         return observation
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: POSTs JSON body to path, raises on error status, returns the decoded JSON.
         return self._http.post(path, json=body).raise_for_status().json()
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the httpx client, then always closes the underlying MCP/WebSocket client.
         try:
             self._http.close()
         finally:
@@ -200,6 +235,10 @@ class HarborEnv(MCPToolClient):
 
 
 def _as_text(raw: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: extracts text from an MCP result: strings as-is; dicts use content[0]["text"]
+    # if present, otherwise JSON-dump the dict; non-empty lists use the first element's
+    # text attribute (or str of it); anything else str().
     """MCP tool results arrive as text content; unwrap whatever shape the transport used."""
     if isinstance(raw, str):
         return raw

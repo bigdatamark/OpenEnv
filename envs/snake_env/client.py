@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Client for the Snake environment. Supports in-repo (package-relative) and standalone imports.
+# Defines SnakeEnv, which serialises SnakeAction to JSON and parses server payloads back into
+# SnakeObservation / State objects; transport (WebSocket session) is handled by EnvClient.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +35,9 @@ except ImportError:
 
 
 class SnakeEnv(EnvClient[SnakeAction, SnakeObservation, State]):
+    # [CLASS DOC]
+    # Typed EnvClient for the Snake server. Only implements the three serialisation hooks; reset,
+    # step, state and connection management come from the EnvClient base class.
     """
     HTTP client for the Snake Environment.
 
@@ -56,6 +63,8 @@ class SnakeEnv(EnvClient[SnakeAction, SnakeObservation, State]):
     """
 
     def _step_payload(self, action: SnakeAction) -> Dict:
+        # [FUNCTION DOC]
+        # Inputs: action - SnakeAction. Returns a mapping with a single key "action" holding the integer move.
         """
         Convert SnakeAction to JSON payload for step request.
 
@@ -70,6 +79,12 @@ class SnakeEnv(EnvClient[SnakeAction, SnakeObservation, State]):
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[SnakeObservation]:
+        # [FUNCTION DOC]
+        # Inputs: payload - server step/reset response mapping with "observation", "reward", "done", "metadata".
+        # Builds a SnakeObservation from the "observation" sub-mapping, defaulting missing fields
+        # (empty grid/observation, zero counters, alive True). done/reward come from the top-level payload;
+        # metadata prefers top-level "metadata" and falls back to the observation's own metadata.
+        # Returns: StepResult wrapping that observation plus reward, done (default False) and top-level metadata.
         """
         Parse server response into StepResult[SnakeObservation].
 
@@ -101,6 +116,8 @@ class SnakeEnv(EnvClient[SnakeAction, SnakeObservation, State]):
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # Returns a generic State built from the payload's "episode_id" and "step_count" (default 0).
         """
         Parse server response into State object.
 

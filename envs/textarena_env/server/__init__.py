@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# TextArena server subpackage. Re-exports TextArenaEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

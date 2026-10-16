@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for request shaping before the inference engine: upstream.prepare_request (capture
+# parameters per capture level, top_logprobs defaulting, reasoning field renaming/stripping without
+# mutating caller messages, train-tier neutralisation of truncation/penalty sampling knobs), the
+# internal _served_model marker read by the chat dialect transformer, engine base URL normalisation
+# and truncating_params reporting.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,11 +29,15 @@ prepare_request = upstream.prepare_request
 
 
 def chat_transformer():
+    # [FUNCTION DOC]
+    # HELPER: Returns the OPENAI_CHAT transformer from a new dialects.TransformManager.
     return dialects.TransformManager().get(detection.APIType.OPENAI_CHAT)
 
 
 # --- capture parameters -----------------------------------------------------
 def test_capture_parameters_are_forced_on():
+    # [FUNCTION DOC]
+    # Default prepare_request sets logprobs and return_token_ids True.
     out = prepare_request({"messages": []})
     assert out["logprobs"] is True
     assert out["return_token_ids"] is True
@@ -38,6 +48,8 @@ def test_capture_parameters_are_forced_on():
     [({}, 0), ({"top_logprobs": None}, 0), ({"top_logprobs": 5}, 5)],
 )
 def test_top_logprobs_is_never_left_as_none(given, expected):
+    # [FUNCTION DOC]
+    # Parametrized: top_logprobs defaults to 0 when missing or None, otherwise kept.
     """`setdefault` keeps an explicit `None`, and vLLM then returns no logprobs at all.
 
     A harness sending `"top_logprobs": null` would get a perfectly normal response whose
@@ -47,6 +59,8 @@ def test_top_logprobs_is_never_left_as_none(given, expected):
 
 
 def test_prior_thinking_is_renamed_for_vllm():
+    # [FUNCTION DOC]
+    # reasoning_content in assistant messages is renamed to reasoning.
     """vLLM reads a prior turn's thinking from `reasoning`; the dialects emit `reasoning_content`.
 
     Without the rename the earlier turn renders as an empty `<think></think>`, so the prompt differs
@@ -62,6 +76,8 @@ def test_prior_thinking_is_renamed_for_vllm():
 
 # --- the internal marker ----------------------------------------------------
 def test_served_model_marker_is_read_during_transform():
+    # [FUNCTION DOC]
+    # With a Qwen3.5 _served_model marker, the transformer sets enable_thinking False.
     """The marker has to be on the body before the transformer runs, because that is when it reads it.
 
     It used to be attached afterwards, by the upstream client, so every transformer saw `None`: the
@@ -75,6 +91,8 @@ def test_served_model_marker_is_read_during_transform():
 
 
 def test_without_the_marker_the_model_specific_fix_cannot_apply():
+    # [FUNCTION DOC]
+    # Without the marker no chat_template_kwargs are added.
     """Pins the old behaviour, so the test above cannot pass for the wrong reason."""
     body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
     out = chat_transformer().transform_request(dict(body))
@@ -82,6 +100,8 @@ def test_without_the_marker_the_model_specific_fix_cannot_apply():
 
 
 def test_the_fix_is_model_specific():
+    # [FUNCTION DOC]
+    # A non-Qwen marker does not set enable_thinking.
     body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
     out = chat_transformer().transform_request(
         {**body, "_served_model": "meta-llama/Llama-3-8B"}
@@ -90,6 +110,8 @@ def test_the_fix_is_model_specific():
 
 
 def test_the_marker_never_reaches_the_engine():
+    # [FUNCTION DOC]
+    # _served_model is removed by both the transformer and prepare_request.
     """It is an internal field. An unknown key on the wire is at best noise and at worst a 400."""
     assert "_served_model" not in chat_transformer().transform_request(
         {"model": "m", "messages": [], "_served_model": "Qwen/Qwen3.5-9B"}
@@ -101,6 +123,8 @@ def test_the_marker_never_reaches_the_engine():
 
 # --- the caller's messages are the ones the graph stores ---------------------
 def test_prepare_request_does_not_rewrite_the_callers_messages():
+    # [FUNCTION DOC]
+    # The caller's message dict is unchanged while the output carries the renamed field.
     """`reasoning_content` -> `reasoning` is for the engine only.
 
     The message dicts handed in here are the same objects the graph stores as `request_messages`.
@@ -120,6 +144,8 @@ def test_prepare_request_does_not_rewrite_the_callers_messages():
 
 
 def test_messages_without_reasoning_are_passed_through_untouched():
+    # [FUNCTION DOC]
+    # Messages without reasoning are passed through as the same objects.
     message = {"role": "user", "content": "go"}
     out = prepare_request({"messages": [message]})
     assert out["messages"][0] is message
@@ -136,6 +162,8 @@ def test_messages_without_reasoning_are_passed_through_untouched():
     ],
 )
 def test_engine_base_is_the_root_whichever_form_is_given(given):
+    # [FUNCTION DOC]
+    # Parametrized: trailing slash and /v1 are stripped by normalise_engine_base and InferenceClient.
     """Every route this layer builds is `/v1/...`, so a `/v1` base must not double up.
 
     `http://host:8000/v1` is what an OpenAI SDK wants and what people paste, and it used to make
@@ -152,6 +180,8 @@ def test_engine_base_is_the_root_whichever_form_is_given(given):
 # `return_token_ids` is rejected outright, so injecting it unconditionally meant every single call
 # failed rather than merely losing its token ids.
 def test_tokens_level_is_the_existing_behaviour():
+    # [FUNCTION DOC]
+    # tokens level sets logprobs, return_token_ids and top_logprobs 0.
     out = prepare_request({"messages": []}, capture_level="tokens")
     assert out["logprobs"] is True
     assert out["return_token_ids"] is True
@@ -159,6 +189,8 @@ def test_tokens_level_is_the_existing_behaviour():
 
 
 def test_logprobs_level_asks_for_logprobs_but_not_token_ids():
+    # [FUNCTION DOC]
+    # logprobs level omits return_token_ids.
     out = prepare_request({"messages": []}, capture_level="logprobs")
     assert out["logprobs"] is True
     assert out["top_logprobs"] == 0
@@ -166,11 +198,15 @@ def test_logprobs_level_asks_for_logprobs_but_not_token_ids():
 
 
 def test_text_level_injects_nothing():
+    # [FUNCTION DOC]
+    # text level leaves the body unchanged.
     out = prepare_request({"messages": [], "model": "m"}, capture_level="text")
     assert out == {"messages": [], "model": "m"}
 
 
 def test_text_level_strips_prior_thinking_instead_of_renaming_it():
+    # [FUNCTION DOC]
+    # text level removes reasoning fields from messages.
     """`reasoning`/`reasoning_content` is a vLLM accommodation, and a non-standard message field is
     the same 400 hazard as a non-standard top-level param."""
     out = prepare_request(
@@ -183,6 +219,8 @@ def test_text_level_strips_prior_thinking_instead_of_renaming_it():
 
 
 def test_text_level_still_does_not_rewrite_the_callers_messages():
+    # [FUNCTION DOC]
+    # text level does not mutate caller message objects.
     original = {"role": "assistant", "reasoning_content": "thinking"}
     messages = [original]
     prepare_request({"messages": messages}, capture_level="text")
@@ -207,6 +245,8 @@ def test_text_level_still_does_not_rewrite_the_callers_messages():
 
 
 def test_the_train_tier_neutralises_truncation():
+    # [FUNCTION DOC]
+    # tokens level resets top_p 1.0, top_k -1, min_p 0.0.
     body = upstream.prepare_request(
         {"model": "m", "messages": [], "top_p": 0.95, "top_k": 40, "min_p": 0.05},
         capture_level="tokens",
@@ -217,6 +257,8 @@ def test_the_train_tier_neutralises_truncation():
 
 
 def test_the_train_tier_neutralises_penalties():
+    # [FUNCTION DOC]
+    # tokens level resets frequency/presence penalties to 0 and repetition_penalty to 1.
     body = upstream.prepare_request(
         {
             "model": "m",
@@ -233,6 +275,8 @@ def test_the_train_tier_neutralises_penalties():
 
 
 def test_temperature_survives_the_train_tier():
+    # [FUNCTION DOC]
+    # Temperature is preserved at the tokens level.
     """Temperature scales the whole distribution without truncating it, so a processed logprob under
     it is still the sampling distribution's own — and it is the policy the trainer means to learn."""
     body = upstream.prepare_request(
@@ -243,6 +287,8 @@ def test_temperature_survives_the_train_tier():
 
 @pytest.mark.parametrize("level", ["logprobs", "text"])
 def test_the_eval_tiers_honour_what_the_harness_asked_for(level):
+    # [FUNCTION DOC]
+    # Parametrized logprobs/text levels keep top_p and penalties as requested.
     body = upstream.prepare_request(
         {"model": "m", "messages": [], "top_p": 0.8, "frequency_penalty": 0.5},
         capture_level=level,
@@ -254,6 +300,8 @@ def test_the_eval_tiers_honour_what_the_harness_asked_for(level):
 
 
 def test_the_callers_dict_is_not_edited():
+    # [FUNCTION DOC]
+    # prepare_request does not modify the original body dict.
     """The graph stores the harness's own request objects; overriding a copy is what keeps the trace
     honest about what was asked for."""
     original = {"model": "m", "messages": [], "top_p": 0.95}
@@ -274,9 +322,13 @@ def test_the_callers_dict_is_not_edited():
     ],
 )
 def test_nothing_is_flagged_when_nothing_truncates(body):
+    # [FUNCTION DOC]
+    # Parametrized: neutral, None or non-numeric values give an empty truncating_params result.
     assert upstream.truncating_params(body) == {}
 
 
 def test_what_was_requested_is_reported_verbatim():
+    # [FUNCTION DOC]
+    # truncating_params returns only the truncating keys with their requested values.
     found = upstream.truncating_params({"top_p": 0.95, "temperature": 0.7, "top_k": 40})
     assert found == {"top_p": 0.95, "top_k": 40}

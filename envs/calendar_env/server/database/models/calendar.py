@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# SQLAlchemy ORM model for calendars (table "calendars"), which also carries the
+# per-user calendar-list display fields.
 """
 Calendar database model
 """
@@ -20,6 +23,13 @@ from .base import Base
 
 
 class Calendar(Base):
+    # [CLASS DOC]
+    # ORM row for a calendar: calendar_id PK, owning user_id FK, summary, description,
+    # location, time_zone, JSON-text conference_properties, is_primary flag, calendar-list
+    # fields (summary_override, color_id, background/foreground colors, hidden, selected,
+    # JSON default_reminders and notification_settings), soft-delete flag, timestamps,
+    # and relationships to User, Event (cascade) and ACLs (cascade). A partial unique
+    # index (SQLite) enforces at most one primary calendar per user.
     """Calendar database model"""
 
     __tablename__ = "calendars"
@@ -78,4 +88,6 @@ class Calendar(Base):
     )
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with calendar_id, user_id, summary and is_primary.
         return f"<Calendar(calendar_id='{self.calendar_id}', user_id='{self.user_id}', summary='{self.summary}', is_primary={self.is_primary})>"

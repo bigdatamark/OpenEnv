@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Database models package: imports and re-exports the ORM classes (Base, User, Calendar,
+# Event, Attendees, Attachment, WorkingLocationProperties, Color, Settings, ACLs, Scope,
+# WatchChannel). Importing it registers all tables on Base.metadata.
 """
 Database models package
 """

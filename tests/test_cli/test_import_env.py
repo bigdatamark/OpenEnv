@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for "openenv import": static (non-importing) detection of ORS/OpenReward and
+# Verifiers environments in a source tree, generation of an OpenEnv wrapper package with
+# vendored source, dependency carry-over, secret-file exclusion, and that the generated
+# environment and FastAPI app actually work. Fake ors/verifiers SDKs are written into temp
+# dirs; uv lock generation is patched out. Several tests mutate sys.path / sys.modules
+# and import the generated packages.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -28,6 +35,9 @@ runner = CliRunner()
 
 
 def _write_fake_ors_sdk(root: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes a minimal fake "ors" package under root (Environment base with
+    # setup/teardown flags, simple model classes, RunToolOutput wrapper).
     ors_dir = root / "ors"
     ors_dir.mkdir(parents=True)
     (ors_dir / "__init__.py").write_text(
@@ -96,6 +106,10 @@ class Environment:
 
 
 def _write_single_fake_ors_env(root: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes the fake ors SDK plus demo_env.py defining DemoEnvironment with one
+    # train split, one task "alpha", class tool "answer", task tool "hint", a prompt, and a
+    # tool call returning reward 1.0 and finished.
     _write_fake_ors_sdk(root)
     (root / "demo_env.py").write_text(
         """
@@ -164,6 +178,9 @@ class DemoEnvironment(Environment):
 
 
 def _write_fake_verifiers_sdk(root: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes a minimal fake "verifiers" package with a Rubric that scores 1.0 when the
+    # answer appears in the last completion message, and a SingleTurnEnv holding datasets.
     verifiers_dir = root / "verifiers"
     verifiers_dir.mkdir(parents=True)
     (verifiers_dir / "__init__.py").write_text(
@@ -198,6 +215,9 @@ class SingleTurnEnv(Environment):
 
 
 def _write_single_fake_verifiers_env(root: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes the fake verifiers SDK plus vf_demo.py whose load_environment returns a
+    # SingleTurnEnv with two train rows and one eval row.
     _write_fake_verifiers_sdk(root)
     (root / "vf_demo.py").write_text(
         """
@@ -221,6 +241,8 @@ def load_environment() -> vf.Environment:
 def test_ors_detector_finds_environment_class_without_importing_source(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # An aliased ors Environment subclass in envs/sample.py is detected as envs.sample:SampleEnv.
     source = tmp_path / "source"
     source.mkdir()
     (source / "envs").mkdir()
@@ -248,6 +270,8 @@ class SampleEnv(ORSEnvironment):
 def test_ors_detector_finds_openreward_environments_import_path(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Subclasses of openreward.environments.Environment are detected and the dependency is "openreward".
     source = tmp_path / "source"
     source.mkdir()
     (source / "sample.py").write_text(
@@ -269,6 +293,8 @@ class SampleEnv(Environment):
 
 
 def test_ors_detector_returns_no_matches_for_unrelated_source(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Plain classes yield no matches.
     source = tmp_path / "source"
     source.mkdir()
     (source / "plain.py").write_text("class Plain: pass\n", encoding="utf-8")
@@ -279,6 +305,8 @@ def test_ors_detector_returns_no_matches_for_unrelated_source(tmp_path: Path) ->
 def test_verifiers_detector_finds_load_environment_without_importing_source(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A module-level load_environment function is detected without being executed.
     source = tmp_path / "source"
     source.mkdir()
     (source / "demo.py").write_text(
@@ -305,6 +333,8 @@ def load_environment() -> vf.Environment:
 def test_import_command_requires_env_class_when_multiple_ors_classes(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Two candidate classes make import fail with "Multiple environment entrypoints".
     source = tmp_path / "source"
     source.mkdir()
     (source / "a.py").write_text(
@@ -337,6 +367,11 @@ def test_import_command_requires_env_class_when_multiple_ors_classes(
 def test_import_command_detects_ors_and_generates_working_wrapper(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Generates the wrapper, then imports it: splits/tasks are exposed, step before reset
+    # raises, reset exposes task spec and prompt, tools merge class and task tools, a call
+    # returns reward 1.0/done; the generated app serves list_environments, splits and MCP
+    # (tools/list works, tools/call before reset errors).
     source = tmp_path / "source"
     source.mkdir()
     _write_single_fake_ors_env(source)
@@ -419,6 +454,9 @@ def test_import_command_detects_ors_and_generates_working_wrapper(
 
 
 def test_imported_environment_usage_example_runs(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # Imports examples/imported_environment/source and runs the example script's
+    # run_imported_environment, checking its summary result.
     example_dir = Path(__file__).resolve().parents[2] / "examples/imported_environment"
     output_dir = tmp_path / "out"
 
@@ -458,6 +496,8 @@ def test_imported_environment_usage_example_runs(tmp_path: Path) -> None:
 def test_import_command_handles_source_module_matching_generated_package(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # A source module named like the generated package still imports correctly.
     source = tmp_path / "source"
     source.mkdir()
     _write_fake_ors_sdk(source)
@@ -502,6 +542,8 @@ class CollisionEnvironment(Environment):
 
 
 def test_import_command_excludes_common_secret_files(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # .env, secrets.yaml, *.pem and *.so files are not vendored; data files are.
     source = tmp_path / "source"
     source.mkdir()
     _write_single_fake_ors_env(source)
@@ -538,6 +580,8 @@ def test_import_command_excludes_common_secret_files(tmp_path: Path) -> None:
 
 
 def test_safe_vendor_dir_name_avoids_normalization_collision(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # "my-source" gets a suffixed name distinct from "my_source".
     hyphen_source = tmp_path / "my-source"
     underscore_source = tmp_path / "my_source"
     hyphen_source.mkdir()
@@ -551,6 +595,8 @@ def test_safe_vendor_dir_name_avoids_normalization_collision(tmp_path: Path) -> 
 
 
 def test_import_command_uses_detected_ors_dependency(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # OpenReward sources get "openreward" (not ors-sdk) in requirements and pyproject.
     source = tmp_path / "source"
     source.mkdir()
     (source / "demo.py").write_text(
@@ -594,6 +640,9 @@ class DemoEnvironment(Environment):
 def test_import_command_carries_source_dependencies_and_vendor_data(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Dependencies from source pyproject and requirements.txt (ignoring comments, -r and local
+    # paths) are carried over; pyproject packages vendor data; fixtures are vendored.
     source = tmp_path / "source"
     source.mkdir()
     _write_single_fake_ors_env(source)
@@ -648,6 +697,9 @@ datasets>=2.19  # reads dataset files
 def test_import_command_detects_verifiers_and_generates_working_wrapper(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Verifiers wrapper exposes train/eval splits, requires reset before step, lists a single
+    # "submit" tool, scores a correct completion 1.0/done, and its app serves the env routes.
     source = tmp_path / "vf_source"
     source.mkdir()
     _write_single_fake_verifiers_env(source)
@@ -718,6 +770,9 @@ def test_verifiers_wrapper_logs_state_initialization_errors(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    # [FUNCTION DOC]
+    # With a harness-style verifiers env whose State.for_task raises, the wrapper logs
+    # "Failed to initialize Verifiers State" and still returns the harness score 0.5.
     source = tmp_path / "vf_harness_source"
     source.mkdir()
     verifiers_dir = source / "verifiers"
@@ -812,6 +867,9 @@ def load_environment() -> vf.Environment:
 def test_imported_server_main_parses_host_and_port(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, write_source
 ) -> None:
+    # [FUNCTION DOC]
+    # Parametrized over ORS and Verifiers sources: the generated server.app main() passes
+    # --host/--port to uvicorn.run (patched).
     """Test that the generated `server` entry point honors --host and --port."""
     import uvicorn
 

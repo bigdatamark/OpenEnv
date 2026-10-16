@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# SQLAlchemy ORM model for Google Calendar color palette entries (table "colors"), plus the ColorType enum.
 """
 Color database model for Google Calendar API v3 color definitions
 """
@@ -12,6 +14,8 @@ from .base import Base
 
 
 class ColorType(enum.Enum):
+    # [CLASS DOC]
+    # Enum distinguishing palette kinds: CALENDAR ("calendar") and EVENT ("event").
     """Color type enumeration"""
 
     CALENDAR = "calendar"
@@ -19,6 +23,11 @@ class ColorType(enum.Enum):
 
 
 class Color(Base):
+    # [CLASS DOC]
+    # ORM row for one palette entry: autoincrement id, color_id string ("1", "2", ...),
+    # color_type (ColorType), background/foreground hex strings, created/updated UTC
+    # timestamps, and an "events" relationship back-populating Event.color.
+    # KNOWN ISSUE: the "Composite unique constraint" comment does not match __table_args__, which defines no constraint and only conditionally (via an always-false hasattr check on __builtins__) sets a MySQL charset.
     """Color database model for calendar and event color definitions"""
 
     __tablename__ = "colors"
@@ -44,8 +53,12 @@ class Color(Base):
     )
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with color_id, type value, background and foreground.
         return f"<Color(id='{self.color_id}', type='{self.color_type.value}', bg='{self.background}', fg='{self.foreground}')>"
 
     def to_dict(self):
+        # [FUNCTION DOC]
+        # Returns a dict with keys "background" and "foreground" (the API color shape).
         """Convert to dictionary format for API responses"""
         return {"background": self.background, "foreground": self.foreground}

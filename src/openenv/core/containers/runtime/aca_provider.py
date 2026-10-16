@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# ContainerProvider implementation that runs an OpenEnv server inside an Azure
+# Container Apps (ACA) sandbox using the preview azure-containerapps-sandbox SDK
+# (optional dependency "openenv[aca]"). The sandbox is created from an ACA disk
+# image, the server command is started in the background via a shell exec, port
+# 8000 is exposed as an anonymous public HTTPS port, and readiness is polled
+# on /health. Security defaults: explicit public ingress opt-in, HTTPS-only
+# URLs, a warning when egress is unrestricted plus a helper to build a
+# default-deny egress policy, and withholding/redacting server logs in errors.
+# Defaults: port 8000, auto-suspend 900 s, suspend modes Memory or Disk.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Azure Container Apps Sandbox provider for OpenEnv environments.
@@ -29,6 +39,9 @@ _VALID_SUSPEND_MODES = {"Memory", "Disk"}
 
 
 def _require_secure_url(url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns url unchanged if it is a string starting with "https://"
+    # (case-insensitive). Raises RuntimeError (without echoing the URL) otherwise.
     """Enforce https/wss transport (RFC 002 security invariant S1).
 
     `EnvClient` derives its WebSocket URL from this base URL, so a plaintext
@@ -46,6 +59,10 @@ def _require_secure_url(url: str) -> str:
 
 
 def _validate_anonymous_port(anonymous_port: Optional[bool]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True only if anonymous_port is truthy. Raises ValueError with
+    # guidance when it is None (no explicit opt-in) or falsy (authenticated ports
+    # unsupported).
     """Require explicit, public-only ingress opt-in (RFC 002 invariant S2).
 
     Public exposure is never implicit (`None` is rejected), and authenticated
@@ -69,6 +86,9 @@ def _validate_anonymous_port(anonymous_port: Optional[bool]) -> bool:
 
 
 def _resolve_required(value: str | None, env_name: str, parameter: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns value, or else the named environment variable's value.
+    # Raises ValueError naming the parameter and env var if both are empty.
     resolved = value or os.environ.get(env_name)
     if not resolved:
         raise ValueError(
@@ -79,6 +99,9 @@ def _resolve_required(value: str | None, env_name: str, parameter: str) -> str:
 
 
 def _raise_install_error(exc: ImportError) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Always raises RuntimeError telling the user to install openenv[aca],
+    # chained from the given ImportError.
     raise RuntimeError(
         "Azure Container Apps sandbox support requires optional dependencies. "
         "Install them with `pip install openenv[aca]`."
@@ -86,6 +109,10 @@ def _raise_install_error(exc: ImportError) -> None:
 
 
 class _DefaultACASandboxAdapter:
+    # [CLASS DOC]
+    # HELPER: Thin wrapper over the ACA sandbox SDK client exposing create, port
+    # exposure, exec, delete and close operations used by the provider (tests
+    # substitute a fake with the same methods).
     """Thin adapter over the preview `azure-containerapps-sandbox` SDK.
 
     The provider talks to this private adapter instead of spreading SDK details
@@ -103,6 +130,12 @@ class _DefaultACASandboxAdapter:
         credential: Any,
         sdk_kwargs: dict[str, Any],
     ):
+        # [FUNCTION DOC]
+        # Imports the SDK (RuntimeError via _raise_install_error if missing), defaults
+        # credential to azure.identity DefaultAzureCredential, derives the endpoint from
+        # region when endpoint is not given, and constructs a SandboxGroupClient for the
+        # subscription/resource group/sandbox group with extra sdk_kwargs.
+        # Raises: ValueError if neither endpoint nor region is given.
         try:
             from azure.containerapps.sandbox import (
                 endpoint_for_region,
@@ -154,6 +187,11 @@ class _DefaultACASandboxAdapter:
         create_timeout: int,
         polling_interval: int,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Calls the SDK's begin_create_sandbox with the given source (disk or disk_id),
+        # resources, auto-suspend settings, labels, env vars (as "environment"),
+        # egress policy and polling settings, omitting None values, and blocks on the
+        # poller result. Returns the sandbox-scoped client handle. Network I/O.
         kwargs: dict[str, Any] = {
             "disk": disk,
             "disk_id": disk_id,
@@ -176,6 +214,10 @@ class _DefaultACASandboxAdapter:
         return self._client.begin_create_sandbox(**kwargs).result()
 
     def add_port(self, sandbox: Any, *, port: int, anonymous: bool) -> str:
+        # [FUNCTION DOC]
+        # Exposes port on the sandbox (anonymous flag passed through) and returns the
+        # URL from the result's "url" attribute or dict key as a string.
+        # Raises: RuntimeError if no URL is returned.
         sandbox_port = sandbox.add_port(port, anonymous=anonymous)
         url = getattr(sandbox_port, "url", None)
         if not url and isinstance(sandbox_port, dict):
@@ -194,19 +236,32 @@ class _DefaultACASandboxAdapter:
         *,
         working_directory: str | None = None,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Runs a shell command in the sandbox (optional working directory) and returns
+        # the SDK result.
         return sandbox.exec(command, working_directory=working_directory)
 
     def delete_sandbox(self, sandbox: Any) -> None:
+        # [FUNCTION DOC]
+        # Deletes the sandbox, using the long-running begin_delete poller (blocking)
+        # when available, otherwise a plain delete.
         if hasattr(sandbox, "begin_delete"):
             sandbox.begin_delete().result()
         else:
             sandbox.delete()
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the underlying SDK client.
         self._client.close()
 
 
 def _source_from_image(image: str) -> tuple[str | None, str | None]:
+    # [FUNCTION DOC]
+    # HELPER: Parses an image string into (disk, disk_id): "disk:<name>" -> (name,
+    # None); "disk-id:<id>" -> (None, id); a bare name -> (name, None).
+    # Raises: ValueError for empty input, empty name/id after the prefix, or a bare
+    # string containing "/" or ":" (looks like an OCI image reference).
     if not image or not image.strip():
         raise ValueError("image must be a non-empty ACA disk or disk-id reference")
     image = image.strip()
@@ -241,6 +296,10 @@ def _source_from_image(image: str) -> tuple[str | None, str | None]:
 
 
 def _exec_stdout(result: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Extracts text output from an exec result: the first non-None of
+    # attributes stdout, result, output; then the same keys if it is a dict; else
+    # str(result).
     for attr in ("stdout", "result", "output"):
         value = getattr(result, attr, None)
         if value is not None:
@@ -254,6 +313,12 @@ def _exec_stdout(result: Any) -> str:
 
 
 class ACASandboxProvider(ContainerProvider):
+    # [CLASS DOC]
+    # ContainerProvider managing at most one ACA sandbox at a time. Stores resource
+    # settings (cpu, memory, disk size, auto-suspend), labels, egress policy, the
+    # default image/env vars/cmd/working directory, log surfacing flag and timeouts;
+    # tracks the active sandbox handle, base URL, port, whether it started the
+    # server process, and the set of injected env var values for log redaction.
     """Container provider backed by Azure Container Apps Sandboxes.
 
     `start_container`'s `image` is an ACA sandbox source (`disk:<name>` for a
@@ -321,6 +386,15 @@ class ACASandboxProvider(ContainerProvider):
         sdk_kwargs: Optional[dict[str, Any]] = None,
         _adapter: Any = None,
     ):
+        # [FUNCTION DOC]
+        # Validates auto_suspend_mode (ValueError) and anonymous_port (must be True,
+        # ValueError otherwise). Fills subscription_id, resource_group, sandbox_group
+        # and region from AZURE_SUBSCRIPTION_ID / AZURE_RESOURCE_GROUP /
+        # AZURE_SANDBOX_GROUP / AZURE_REGION when not given. Copies labels and env vars.
+        # Creates a _DefaultACASandboxAdapter (requiring the first three settings,
+        # ValueError if missing; owns it for closing) unless a test adapter is injected
+        # (not owned). Initializes empty runtime state.
+        # Side effects: may construct Azure credentials/SDK client.
         if auto_suspend_mode not in _VALID_SUSPEND_MODES:
             raise ValueError("auto_suspend_mode must be 'Memory' or 'Disk'")
         _validate_anonymous_port(anonymous_port)
@@ -380,6 +454,10 @@ class ACASandboxProvider(ContainerProvider):
 
     @staticmethod
     def deny_all_egress(allow: Optional[list[str]] = None) -> Any:
+        # [FUNCTION DOC]
+        # Static method returning an SDK EgressPolicy with default action Deny and an
+        # Allow host rule per pattern in allow. Raises RuntimeError if the SDK is not
+        # installed.
         """Build a default-deny ACA `EgressPolicy` (RFC 002 security invariant S3).
 
         Untrusted RL/agent code should not be able to exfiltrate data or reach
@@ -413,6 +491,19 @@ class ACASandboxProvider(ContainerProvider):
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Creates a sandbox and returns its HTTPS base URL.
+        # Raises RuntimeError if a sandbox is already active; ValueError if port is
+        # not 8000, no image is available, the image string is invalid, the effective
+        # anonymous_port override is not True, or unknown kwargs remain (accepted:
+        # labels merged over defaults, cmd, egress_policy, anonymous_port). Warns
+        # (UserWarning) when egress_policy is None. Records non-empty env var values for
+        # redaction. Creates the sandbox (on failure clears redaction values and
+        # re-raises without deleting anything). Then, if a cmd is set, starts the
+        # server in the background; exposes the port and enforces an HTTPS URL. Any
+        # failure after creation calls stop_container (errors suppressed) and
+        # re-raises. env_vars argument overrides constructor env vars when not None.
+        # Side effects: network calls creating cloud resources.
         """Start an OpenEnv server in an ACA sandbox and return its base URL.
 
         `image` is an ACA sandbox *source*, not a Docker/OCI registry image: a
@@ -533,6 +624,12 @@ class ACASandboxProvider(ContainerProvider):
         # that, running it through the subshell below is safe (RFC 002 amendment
         # S5 — no command injection from untrusted sources). `working_directory`
         # is still shlex-quoted defensively.
+        # [FUNCTION DOC]
+        # HELPER: Builds a command (prefixed with "cd <quoted working directory> &&"
+        # if set), shell-quotes it, and execs in the sandbox a nohup bash invocation in
+        # the background redirecting output to /tmp/openenv-server.log and writing its
+        # PID to /tmp/openenv-server.pid. Marks the server as started. cmd is trusted
+        # caller configuration and is not sanitized.
         if self.working_directory:
             command = f"cd {shlex.quote(self.working_directory)} && {cmd}"
         else:
@@ -553,6 +650,10 @@ class ACASandboxProvider(ContainerProvider):
         self._started_server = True
 
     def _redact(self, text: str, *, max_chars: int = 2000) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Replaces each recorded injected env var value in text with "***" and,
+        # if longer than max_chars (default 2000), keeps only the last max_chars
+        # characters prefixed with a truncation marker. Returns the string.
         """Scrub injected secret values and bound length before surfacing output.
 
         Replaces any injected env-var value with `***` and keeps only the tail.
@@ -567,6 +668,11 @@ class ACASandboxProvider(ContainerProvider):
         return redacted
 
     def _server_died_message(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the error message for a server that died during startup.
+        # Without surface_server_logs (or without a sandbox) it is a fixed message
+        # pointing to the sandbox log file; otherwise it reads the log file via exec
+        # and appends a redacted, bounded excerpt.
         """Build the startup-crash error, secure by default (RFC 002 S4).
 
         Untrusted code can print secrets then force a crash to exfiltrate them
@@ -601,6 +707,13 @@ class ACASandboxProvider(ContainerProvider):
         )
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 120.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health (5 s request timeout) about once per second until
+        # it returns 200 or timeout_s elapses. If this provider started the server, each
+        # iteration checks the PID file's process liveness in the sandbox and raises
+        # RuntimeError with _server_died_message if it is dead.
+        # Raises: TimeoutError on deadline.
+        # Side effects: HTTP requests, sandbox exec calls, sleeping.
         """Wait for the ACA-hosted OpenEnv server to answer on `/health`.
 
         A `200` on `/health` proves HTTP reachability but not that the exposed
@@ -645,6 +758,10 @@ class ACASandboxProvider(ContainerProvider):
         )
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # If a sandbox is active, deletes it via the adapter and always resets the
+        # sandbox handle, base URL, started flag and redaction values (even if deletion
+        # raises, which then propagates). With no sandbox, only clears redaction values.
         """Delete the active ACA sandbox."""
         if self._sandbox is None:
             # Still drop any injected secret values recorded by a failed start
@@ -664,6 +781,8 @@ class ACASandboxProvider(ContainerProvider):
 
     @property
     def base_url(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the base URL of the active sandbox. Raises RuntimeError if none.
         """URL returned by the last `start_container`."""
         if self._base_url is None:
             raise RuntimeError(
@@ -673,6 +792,9 @@ class ACASandboxProvider(ContainerProvider):
         return self._base_url
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the active sandbox, then closes the adapter once if this provider owns
+        # it (subsequent calls do not close it again).
         """Stop the active sandbox and close the underlying SDK client.
 
         Overrides the base no-op so a caller can release the preview SDK client

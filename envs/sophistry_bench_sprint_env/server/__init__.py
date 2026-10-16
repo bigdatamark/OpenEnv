@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for the Sophistry-Bench Sprint environment. Contains only a licence header.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

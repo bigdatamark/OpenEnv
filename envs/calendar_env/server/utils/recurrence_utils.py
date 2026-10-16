@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# RFC 5545 recurrence helpers for the calendar server: parsing RRULE/RDATE/EXDATE strings
+# into validated dictionaries (plus a dateutil rruleset) and expanding stored recurring
+# events into concrete event-instance dictionaries within a date window.
 """
 Recurrence utilities for parsing RFC 5545 RRULE strings and generating event instances
 """
@@ -18,12 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 class RecurrenceParseError(Exception):
+    # [CLASS DOC]
+    # Exception raised for any invalid recurrence data or instance generation failure.
     """Custom exception for recurrence parsing errors"""
 
     pass
 
 
 class RecurrenceParser:
+    # [CLASS DOC]
+    # Stateless collection of static parsers. FREQ_MAP maps RFC 5545 frequency names to
+    # dateutil constants; WEEKDAY_MAP maps two-letter weekday codes to dateutil weekdays.
     """
     Parser for RFC 5545 recurrence rules (RRULE, RDATE, EXDATE)
     """
@@ -54,6 +63,15 @@ class RecurrenceParser:
     def parse_recurrence_list(
         recurrence_strings: List[str], event_start: datetime
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Parses a list of recurrence lines anchored at event_start.
+        # Inputs: recurrence_strings (lines prefixed RRULE:, RDATE: or EXDATE:), event_start (DTSTART).
+        # Returns: a pair (parsed dict with keys rrule (dict from parse_rrule or None),
+        # rdate_list and exdate_list (lists of datetimes); a dateutil rruleset containing the rule,
+        # rdates and exdates). Unknown prefixes are logged and skipped.
+        # Raises: RecurrenceParseError on a second RRULE or invalid RRULE; ValueError if an
+        # RDATE/EXDATE value is not exactly the compact UTC form YYYYMMDDTHHMMSSZ (used for the rruleset).
+        # KNOWN ISSUE: annotated as returning a dict but returns a tuple; docstring omits event_start.
         """
         Parse a list of recurrence strings (RRULE, RDATE, EXDATE)
 
@@ -115,6 +133,15 @@ class RecurrenceParser:
 
     @staticmethod
     def parse_rrule(rrule_string: str) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Parses RRULE parameters ("KEY=VALUE;..." without prefix) into a dict with keys freq,
+        # until, count, interval, by_second, by_minute, by_hour, by_day, by_monthday, by_yearday,
+        # by_weekno, by_month, by_setpos, wkst. Keys are case-insensitive; parameters without "="
+        # are skipped and unknown keys logged. Numeric lists are range checked (BYSECOND 0-60,
+        # BYMINUTE 0-59, BYHOUR 0-23, BYMONTH 1-12, BYMONTHDAY +-31, BYYEARDAY/BYSETPOS +-366,
+        # BYWEEKNO +-53, the signed ones excluding zero).
+        # Raises: RecurrenceParseError for invalid FREQ/WKST/UNTIL, non-positive or non-integer
+        # COUNT/INTERVAL, invalid lists, missing FREQ, or COUNT together with UNTIL.
         """
         Parse an RRULE string according to RFC 5545
 
@@ -226,6 +253,9 @@ class RecurrenceParser:
 
     @staticmethod
     def parse_rdate_exdate(date_string: str) -> List[datetime]:
+        # [FUNCTION DOC]
+        # Splits a comma-separated date list and parses each non-empty value with parse_datetime.
+        # Values that fail are logged and dropped. Returns the list of datetimes.
         """
         Parse RDATE or EXDATE values
 
@@ -251,6 +281,12 @@ class RecurrenceParser:
 
     @staticmethod
     def parse_datetime(datetime_string: str) -> datetime:
+        # [FUNCTION DOC]
+        # Parses an RFC 5545 or ISO datetime. A trailing "Z" becomes +00:00; ISO parsing is tried
+        # first, then compact YYYYMMDDTHHMMSS (any offset suffix is discarded) or YYYYMMDD.
+        # Naive results are made UTC. Returns a timezone-aware datetime.
+        # Raises: RecurrenceParseError if no format matches.
+        # KNOWN ISSUE: in the fallback, an explicit offset is dropped and the time is treated as UTC.
         """
         Parse RFC 5545 datetime string
 
@@ -299,6 +335,10 @@ class RecurrenceParser:
     def parse_int_list(
         value_string: str, min_val: int, max_val: int, allow_zero: bool = True
     ) -> List[int]:
+        # [FUNCTION DOC]
+        # Parses comma-separated integers, skipping empty parts, checking each lies within
+        # [min_val, max_val] and, if allow_zero is False, is non-zero. Returns the list.
+        # Raises: RecurrenceParseError for non-integers, zeros (when disallowed) or out-of-range values.
         """
         Parse comma-separated list of integers with validation
 
@@ -335,6 +375,11 @@ class RecurrenceParser:
 
     @staticmethod
     def parse_by_day(value_string: str) -> List[str]:
+        # [FUNCTION DOC]
+        # Parses a BYDAY value like "MO,TU" or "1MO,-1FR" (case-insensitive). Each part must be an
+        # optional signed ordinal plus a known weekday code; ordinals must be non-zero with
+        # absolute value <= 53. Returns the uppercased parts.
+        # Raises: RecurrenceParseError for malformed parts, unknown weekdays or bad ordinals.
         """
         Parse BYDAY parameter (e.g., "MO,TU,WE" or "1MO,-1FR")
 
@@ -380,6 +425,9 @@ class RecurrenceParser:
 
 
 class EventInstanceGenerator:
+    # [CLASS DOC]
+    # Static helpers that expand a stored RecurringEvent model (rrule_* columns, rdate_list,
+    # exdate_list, template start/end) into event instance dicts.
     """
     Generator for creating event instances from recurring event templates
     """
@@ -391,6 +439,15 @@ class EventInstanceGenerator:
         end_date: datetime,
         max_instances: int = 1000,
     ) -> List[Dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Expands a recurring event between start_date and end_date.
+        # Behavior: returns an empty list (with a warning) if the event has no rrule_freq. Builds the
+        # rrule, adds RDATEs within the window, deduplicates and sorts, removes EXDATEs, truncates to
+        # max_instances (default 1000, logged) and builds one instance dict per occurrence.
+        # Returns: list of instance dicts (see _create_instance_data).
+        # Raises: RecurrenceParseError wrapping any error during generation.
+        # KNOWN ISSUE: rrule occurrences are not filtered to start at start_date; occurrences before
+        # the window (from dtstart onward) are included.
         """
         Generate event instances for a recurring event within a date range
 
@@ -456,6 +513,10 @@ class EventInstanceGenerator:
 
     @staticmethod
     def _build_rrule(recurring_event, start_date: datetime, end_date: datetime):
+        # [FUNCTION DOC]
+        # HELPER: Builds a dateutil rrule from the event: freq from rrule_freq.value, dtstart, interval
+        # (default 1); until is min(rrule_until, end_date), else count, else end_date; adds the BY*
+        # lists and wkst when present. start_date is unused.
         """Build dateutil rrule object from RecurringEvent data"""
 
         # Get frequency
@@ -510,6 +571,9 @@ class EventInstanceGenerator:
 
     @staticmethod
     def _parse_by_day_for_rrule(by_day_list: List[str]) -> List:
+        # [FUNCTION DOC]
+        # HELPER: Converts BYDAY strings into dateutil weekday objects, applying ordinals when present.
+        # Strings not matching the pattern are silently ignored.
         """Convert BYDAY strings to dateutil weekday objects"""
         weekdays = []
         weekday_pattern = re.compile(r"^([+-]?\d*)([A-Z]{2})$")
@@ -532,6 +596,9 @@ class EventInstanceGenerator:
     def _get_rdate_occurrences(
         recurring_event, start_date: datetime, end_date: datetime
     ) -> List[datetime]:
+        # [FUNCTION DOC]
+        # HELPER: Parses the event's rdate_list ISO strings and returns those within
+        # [start_date, end_date]. Unparsable values are logged and skipped.
         """Get RDATE occurrences within the date range"""
         if not recurring_event.rdate_list:
             return []
@@ -551,6 +618,9 @@ class EventInstanceGenerator:
     def _filter_exdate_occurrences(
         occurrences: List[datetime], recurring_event
     ) -> List[datetime]:
+        # [FUNCTION DOC]
+        # HELPER: Parses the event's exdate_list ISO strings and returns the occurrences not equal to
+        # any of them (unparsable values logged and skipped). Returns the input unchanged when empty.
         """Remove EXDATE occurrences from the list"""
         if not recurring_event.exdate_list:
             return occurrences
@@ -569,6 +639,11 @@ class EventInstanceGenerator:
     def _create_instance_data(
         recurring_event, occurrence_dt: datetime
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds an instance dict copying the template's fields (ids, summary, description,
+        # location, timezones, status, visibility, color, guest flags, etc.), with start at the
+        # occurrence, end at occurrence plus the template duration, originalStartTime fields set to
+        # the occurrence and template start timezone, and recurringEventId set to the parent id.
         """Create event instance data from recurring event template and occurrence datetime"""
 
         # Calculate event duration from template

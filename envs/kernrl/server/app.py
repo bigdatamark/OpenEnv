@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI entry point for kernrl: builds the app via create_app with the
+# KernelOptEnvironment class as per-session factory.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -43,6 +46,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn serving the app on 0.0.0.0:8000 (blocking).
     """
     Entry point for direct execution via uv run or python -m.
 

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Server-side Julia environment: runs the agent's core code concatenated with
+# its test code in one Julia execution (via JuliaExecutor, typically backed by
+# a process pool), parses Julia Test summaries into pass/fail counts, computes
+# a normalized reward, and passes observations through the safety/quality
+# transform. Includes a heuristic pre-check that rejects obvious "while true"
+# infinite loops without executing them.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,6 +48,16 @@ _request_counter = itertools.count(1)
 
 
 def _detect_infinite_loop(code: str) -> tuple[bool, str]:
+    # [FUNCTION DOC]
+    # HELPER: Heuristically detects infinite loops. Strips "#" comments, triple-
+    # quoted strings and simple double-quoted strings, finds each "while true"
+    # (case-insensitive), takes the text up to the next "end" keyword as the loop
+    # body, and flags the loop if the body contains none of break, return, error(,
+    # throw(, exit(. Returns (True, reason with a 100-char body preview) for the
+    # first flagged loop, else (False, "").
+    # KNOWN ISSUE: nested blocks are not handled (the first inner "end" truncates
+    # the body), and "#=" block comments are not removed, so false positives and
+    # negatives are possible.
     """
     Detect potential infinite loops in Julia code.
 
@@ -105,6 +122,9 @@ def _detect_infinite_loop(code: str) -> tuple[bool, str]:
 
 
 class JuliaCodeActEnv(Environment):
+    # [CLASS DOC]
+    # Per-session Julia environment holding a JuliaExecutor, a JuliaState and a
+    # transform pipeline. Supports concurrent sessions.
     """
     Julia Code Action Environment for executing code and tracking state.
 
@@ -126,6 +146,9 @@ class JuliaCodeActEnv(Environment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self, use_process_pool: bool = True):
+        # [FUNCTION DOC]
+        # Creates the executor (process pool use configurable), an empty state and the
+        # safe Julia transform.
         """
         Initialize the Julia Code Act Environment.
 
@@ -138,6 +161,10 @@ class JuliaCodeActEnv(Environment):
         self.transform = create_safe_julia_transform()
 
     def reset(self, **kwargs) -> Observation:
+        # [FUNCTION DOC]
+        # Starts a new episode (new UUID, step 0, exit code 0, compiles True) without
+        # recreating the executor, and returns a transformed empty observation with
+        # reward 0.0 and empty code metadata. kwargs are ignored.
         """
         Reset environment for a fresh Julia execution session.
         Returns an empty JuliaObservation with exit_code=0.
@@ -164,6 +191,21 @@ class JuliaCodeActEnv(Environment):
         return observation
 
     def step(self, action: Action, **kwargs) -> Observation:
+        # [FUNCTION DOC]
+        # Executes an action. If core_code trips the infinite-loop pre-check, updates
+        # state (step+1, exit code 1, compiles True, test totals 0) and returns a
+        # transformed observation with reward -1.0, the reason in stderr and loop flags
+        # in metadata, without running anything. Otherwise runs core_code plus
+        # test_code (joined by a blank line) with the optional "timeout" kwarg, parses
+        # test counts, infers code_compiles (exit 0 or any test counted; otherwise false
+        # only if stderr mentions an error keyword), computes the reward, updates state
+        # (step+1, exit code, compile flag, test totals) and returns a transformed
+        # observation with stdout/stderr/exit code/counts and code metadata.
+        # Raises: ValueError for a non-JuliaAction; re-raises executor exceptions.
+        # Side effects: logging, Julia execution.
+        # KNOWN ISSUE: the "loadError" keyword is compared against lowercased stderr
+        # and can never match. State fields named total_tests_* are overwritten with
+        # per-step counts rather than accumulated.
         """
         Execute Julia code and return the result as JuliaObservation.
 
@@ -339,6 +381,13 @@ class JuliaCodeActEnv(Environment):
         return observation
 
     def _parse_test_results(self, stdout: str, stderr: str) -> tuple[int, int]:
+        # [FUNCTION DOC]
+        # HELPER: Extracts (passed, failed) from combined stdout and stderr. First looks
+        # for "Some tests did not pass: P passed, F failed, E errored" (returns P,
+        # F+E). Otherwise finds each "Test Summary:" header line, determines which of
+        # Pass/Fail/Error columns are present, and reads leading integers from the
+        # following line accordingly (errors counted as failures), requiring enough
+        # numbers for the column layout. Returns (0, 0) if nothing matches.
         """
         Parse Julia test output to count passed/failed tests.
 
@@ -450,6 +499,9 @@ class JuliaCodeActEnv(Environment):
     def _calculate_reward(
         self, code_compiles: bool, tests_passed: int, tests_failed: int
     ) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Reward: -1.0 if the code did not compile; 0.0 if no tests ran; 1.5 if
+        # all tests passed; otherwise the pass rate in [0, 1).
         """
         Normalized percentage-based reward for Julia GRPO.
         Returns rewards in [-1, 1.5] range for comparability across problems.
@@ -469,6 +521,9 @@ class JuliaCodeActEnv(Environment):
         return pass_rate
 
     def _apply_transform(self, observation: JuliaObservation) -> JuliaObservation:
+        # [FUNCTION DOC]
+        # HELPER: Applies the configured transform to the observation if one is set
+        # and returns the (possibly new) observation.
         """Apply safety and quality transforms to observation."""
         if self.transform:
             observation = self.transform(observation)
@@ -476,5 +531,7 @@ class JuliaCodeActEnv(Environment):
 
     @property
     def state(self) -> JuliaState:
+        # [FUNCTION DOC]
+        # Property returning the current JuliaState.
         """Return current environment state."""
         return self._state

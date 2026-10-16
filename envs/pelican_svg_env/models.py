@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the Pelican SVG environment. An episode is one prompt and one submission;
+# the observation records the full scoring verdict.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Data models for the Pelican SVG environment.
@@ -17,6 +20,8 @@ from pydantic import Field
 
 
 class PelicanSvgAction(Action):
+    # [CLASS DOC]
+    # Submission: response holds the model's raw reply; the server extracts the SVG from it.
     """A submitted drawing.
 
     Attributes:
@@ -31,6 +36,10 @@ class PelicanSvgAction(Action):
 
 
 class PelicanSvgObservation(Observation):
+    # [CLASS DOC]
+    # Task description (on reset) or verdict (after step): prompt, task_id, subject, vehicle,
+    # expected_wheels, held_out flag, feedback text, gate_passed, structure_score and semantic_score
+    # in [0, 1], judged flag, violation codes, a per-layer breakdown mapping and an optional base64 PNG.
     """The task, or the verdict on an attempt at it.
 
     Attributes:
@@ -84,6 +93,8 @@ class PelicanSvgObservation(Observation):
 
 
 class PelicanSvgState(State):
+    # [CLASS DOC]
+    # Episode state: task_id of the sampled task and whether the single submission has been made.
     """Internal state of an episode.
 
     Attributes:

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# ASGI app for the BrowserGym environment. Reads BROWSERGYM_* environment variables at import (benchmark default
+# "miniwob", optional task name, headless, viewport size, timeout ms, include screenshot), the port (SBX_SERVICE_PORT
+# or BROWSERGYM_PORT, default 8000) and MAX_CONCURRENT_ENVS (default 8), and builds the app with a partially applied
+# BrowserGymEnvironment constructor as the per-session factory. Uses absolute browsergym_env imports.
 """FastAPI server for the BrowserGym environment."""
 
 import os
@@ -43,6 +48,9 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Starts uvicorn. If SBX_PROXY_DIR is set, serves on a Unix domain socket "<port>.sock" in that directory (creating
+    # the directory and removing a stale socket file); otherwise listens on 0.0.0.0:<port>. Blocks.
     """Main entry point for running the server."""
     import uvicorn
 

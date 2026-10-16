@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Maintenance script: rebuilds historical sdist releases of the "openenv-core" PyPI
+# project under the "openenv" project name. For each selected version it downloads the
+# sdist, safely extracts it, replaces the old project name with the new one in every text
+# file, builds with python -m build, runs twine check (unless disabled) and uploads with
+# twine only when --upload is given.
 """Backfill historical ``openenv-core`` PyPI releases to ``openenv``.
 
 This script rebuilds existing source releases from the historical PyPI project
@@ -37,12 +43,17 @@ DEFAULT_FROM_VERSION = "0.2.0"
 
 @dataclass(frozen=True)
 class ReleaseFile:
+    # [CLASS DOC]
+    # Frozen record of one PyPI release file: filename, download URL and package type.
     filename: str
     url: str
     packagetype: str
 
 
 def numeric_version_key(version: str) -> tuple[int, ...]:
+    # [FUNCTION DOC]
+    # Returns a tuple of ints for a dotted numeric version string.
+    # Raises: ValueError for non-numeric versions (e.g. pre-releases).
     """Return a sortable key for numeric release versions."""
     if not re.fullmatch(r"\d+(?:\.\d+)*", version):
         raise ValueError(f"Only numeric release versions are supported: {version}")
@@ -50,6 +61,9 @@ def numeric_version_key(version: str) -> tuple[int, ...]:
 
 
 def fetch_pypi_json(project: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # GETs https://pypi.org/pypi/<project>/json (30 s timeout) and returns the parsed JSON.
+    # Returns {"releases": {}} on HTTP 404; re-raises other HTTP errors.
     """Fetch project metadata from PyPI's JSON API."""
     url = f"https://pypi.org/pypi/{project}/json"
     try:
@@ -62,6 +76,9 @@ def fetch_pypi_json(project: str) -> dict[str, Any]:
 
 
 def read_current_project_version(repo_root: Path) -> str:
+    # [FUNCTION DOC]
+    # Reads repo_root/pyproject.toml and returns the first line-anchored version = "..." value.
+    # Raises: RuntimeError if not found.
     """Read the current root project version from pyproject.toml."""
     pyproject = repo_root / "pyproject.toml"
     version_re = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
@@ -80,6 +97,12 @@ def select_versions(
     before_version: str,
     skip_existing: bool,
 ) -> list[str]:
+    # [FUNCTION DOC]
+    # Chooses versions to rebuild: the explicit list if given, else source versions in
+    # [from_version, before_version). Sorted numerically. Already-present target versions are
+    # skipped (with a message) when skip_existing, else rejected.
+    # Returns: list of version strings. Raises: RuntimeError if a version is missing from the
+    # source or present on the target without skip_existing; ValueError for non-numeric versions.
     """Select source versions that should be rebuilt for the target project."""
     lower = numeric_version_key(from_version)
     upper = numeric_version_key(before_version)
@@ -109,6 +132,9 @@ def select_versions(
 
 
 def find_sdist(release_files: list[dict[str, Any]], version: str) -> ReleaseFile:
+    # [FUNCTION DOC]
+    # Returns the first sdist entry of a release's file list as a ReleaseFile.
+    # Raises: RuntimeError if none exists.
     """Return the source distribution file for a PyPI release."""
     for release_file in release_files:
         if release_file.get("packagetype") == "sdist":
@@ -121,12 +147,18 @@ def find_sdist(release_files: list[dict[str, Any]], version: str) -> ReleaseFile
 
 
 def download_file(url: str, destination: Path) -> None:
+    # [FUNCTION DOC]
+    # Downloads url (60 s timeout) and writes the bytes to destination.
     """Download a URL to a local destination."""
     with urllib.request.urlopen(url, timeout=60) as response:
         destination.write_bytes(response.read())
 
 
 def safe_extract_tarball(tarball: Path, destination: Path) -> Path:
+    # [FUNCTION DOC]
+    # Creates destination, rejects any tar member resolving outside it, extracts all members
+    # and returns the single top-level directory (ignoring __MACOSX dirs).
+    # Raises: RuntimeError on unsafe paths or if there is not exactly one root directory.
     """Extract a tarball and return the single top-level directory."""
     destination.mkdir(parents=True, exist_ok=True)
     destination_root = destination.resolve()
@@ -151,6 +183,9 @@ def safe_extract_tarball(tarball: Path, destination: Path) -> Path:
 
 
 def _rewrite_text_file(path: Path, source_project: str, target_project: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: replaces all occurrences of source_project with target_project in a file,
+    # writing only if changed; silently skips files that are not valid UTF-8.
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -161,6 +196,10 @@ def _rewrite_text_file(path: Path, source_project: str, target_project: str) -> 
 
 
 def rewrite_source_tree(source_root: Path, source_project: str, target_project: str) -> None:
+    # [FUNCTION DOC]
+    # Removes all *.egg-info directories, rewrites the project name in every file under
+    # source_root, then verifies pyproject.toml declares name = "<target>".
+    # Raises: RuntimeError if pyproject.toml is missing or the name was not rewritten.
     """Rewrite a historical source release to publish as the target project."""
     pyproject = source_root / "pyproject.toml"
     if not pyproject.exists():
@@ -180,6 +219,8 @@ def rewrite_source_tree(source_root: Path, source_project: str, target_project: 
 
 
 def run_command(command: list[str], cwd: Path) -> None:
+    # [FUNCTION DOC]
+    # Prints the command prefixed by "+ " and runs it in cwd. Raises: CalledProcessError on failure.
     """Run a command with a readable prefix."""
     print(f"+ {' '.join(command)}")
     subprocess.run(command, cwd=cwd, check=True)
@@ -192,6 +233,9 @@ def build_release(
     python: str,
     check: bool,
 ) -> None:
+    # [FUNCTION DOC]
+    # Runs python -m build into output_dir from source_root and, if check, twine check on all
+    # files in output_dir.
     """Build a rewritten source release and optionally run twine check."""
     run_command([python, "-m", "build", "--outdir", str(output_dir)], cwd=source_root)
     if check:
@@ -200,6 +244,8 @@ def build_release(
 
 
 def upload_release(*, output_dir: Path, python: str, repository: str) -> None:
+    # [FUNCTION DOC]
+    # Runs twine upload to the named repository with all files in output_dir.
     """Upload built artifacts with twine."""
     artifacts = sorted(str(path) for path in output_dir.iterdir())
     run_command(
@@ -215,6 +261,11 @@ def backfill_version(
     args: argparse.Namespace,
     work_root: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Processes one version: creates work dirs under work_root/version and output dir
+    # out_dir/version, downloads and extracts the sdist, rewrites it, builds (and checks),
+    # then uploads if --upload, else prints where artifacts are.
+    # Raises: FileExistsError if the downloads dir already exists; any step's errors.
     """Download, rewrite, build, and optionally upload one version."""
     version_workdir = work_root / version
     version_workdir.mkdir(parents=True, exist_ok=True)
@@ -248,6 +299,10 @@ def backfill_version(
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Parses CLI options (source/target project, version range or explicit list, output dir,
+    # python executable, repository, skip-existing, no-check, upload, keep-workdir). The default
+    # upper bound is read from the repo's pyproject.toml version. Returns: Namespace.
     repo_root = Path(__file__).resolve().parents[1]
     default_before_version = read_current_project_version(repo_root)
 
@@ -315,6 +370,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    # [FUNCTION DOC]
+    # Entry point: fetches source and target PyPI metadata, selects versions, and backfills each
+    # inside a temporary work directory; with --keep-workdir copies it to out_dir/_workdir.
+    # Returns: exit code 0 (also when nothing is selected).
     args = parse_args()
     args.out_dir = args.out_dir.resolve()
 

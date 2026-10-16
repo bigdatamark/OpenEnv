@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Regression tests for token-in/token-out (TITO) training supervision through the capture stack:
+# partial loss masks across both export paths, parent linking independent of arrival order,
+# training-array validation, shared concurrent engine probes, explicit sampling policy enforcement
+# across dialects, model-call budgets, output-token clamping, and HarborEnv rollout argument
+# serialisation.
 """Regression tests for exact captured supervision and concurrent session isolation."""
 
 import asyncio
@@ -23,6 +29,9 @@ from openenv.harbor.models import HarborRolloutResult, turns_from_document
 
 
 def node(name, prompt, completion):
+    # [FUNCTION DOC]
+    # HELPER: Builds a TurnNode with the given id, prompt and completion ids, logprob -0.2 per completion
+    # token, one tool and fixed request/response messages.
     return TurnNode(
         name,
         prompt,
@@ -35,6 +44,10 @@ def node(name, prompt, completion):
 
 
 def test_partial_mask_survives_both_public_exports_and_wire_roundtrip():
+    # [FUNCTION DOC]
+    # A hand-edited partial loss mask survives contract.to_trace_entries and the Harbor result JSON
+    # round trip into harbor to_trace_entries; contract.to_turn_records rejects partial masks
+    # (ValueError "partial").
     session = SessionRegistry().create()
     session.graph.add_turn(node("a", [1, 2], [3, 4]))
     document = export_session(session, include_messages=True)
@@ -54,6 +67,9 @@ def test_partial_mask_survives_both_public_exports_and_wire_roundtrip():
 
 
 def test_shared_node_with_conflicting_masks_cannot_depend_on_path_order():
+    # [FUNCTION DOC]
+    # Two sequences over the same node with different masks raise ValueError ("inconsistent") in both
+    # exporters.
     session = SessionRegistry().create()
     session.graph.add_turn(node("a", [1, 2], [3, 4]))
     document = export_session(session, include_messages=True)
@@ -67,6 +83,9 @@ def test_shared_node_with_conflicting_masks_cannot_depend_on_path_order():
 
 
 def test_fatal_rollout_cannot_export_otherwise_valid_tokens_for_training():
+    # [FUNCTION DOC]
+    # A result with a FATAL finding raises ValueError ("fatal validation") on export; with only a WARN
+    # finding the tokens are exported even though ok is False.
     session = SessionRegistry().create()
     session.graph.add_turn(node("a", [1, 2], [3, 4]))
     document = export_session(session, include_messages=True)
@@ -91,6 +110,9 @@ def test_fatal_rollout_cannot_export_otherwise_valid_tokens_for_training():
 
 @pytest.mark.parametrize("order", list(permutations("abc")))
 def test_longest_exact_parent_is_independent_of_response_arrival(order):
+    # [FUNCTION DOC]
+    # Parametrized over all insertion orders: each node's parent is the longest node whose ids prefix its
+    # prompt, and the leaf sequence's input ids are the full chain.
     graph = RolloutGraph()
     nodes = {
         "a": node("a", [1], [2]),
@@ -121,16 +143,24 @@ def test_longest_exact_parent_is_independent_of_response_arrival(order):
     ],
 )
 def test_malformed_training_arrays_fail_before_export(prompt, completion, lp, mask):
+    # [FUNCTION DOC]
+    # Parametrized: NaN/-inf/missing logprobs, bool or negative ids, and bad masks make
+    # validate_training_turn raise ValueError.
     with pytest.raises(ValueError):
         validate_training_turn(prompt, completion, lp, mask)
 
 
 def test_concurrent_probe_is_shared_and_waiter_cancellation_is_isolated(monkeypatch):
+    # [FUNCTION DOC]
+    # With a blocking stub probe, 100 concurrent resolves of one engine share a single probe and client
+    # even when the first waiter is cancelled; a different api key triggers a second probe and client.
     pool = server.UpstreamPool(default_client=None, default_level="tokens")
     started, release = threading.Event(), threading.Event()
     calls = []
 
     def probe(upstream):
+        # [FUNCTION DOC]
+        # HELPER: Records the cache key, signals start, blocks until released (5s max), returns ("m", "tokens").
         calls.append(upstream.cache_key)
         started.set()
         assert release.wait(5)
@@ -139,6 +169,8 @@ def test_concurrent_probe_is_shared_and_waiter_cancellation_is_isolated(monkeypa
     monkeypatch.setattr(pool, "_probe", probe)
 
     async def check():
+        # [FUNCTION DOC]
+        # HELPER: Async body performing the cancellation/concurrency assertions described above.
         endpoint = Upstream("http://engine.invalid", "m", "key-a")
         cancelled = asyncio.create_task(pool.resolve(endpoint))
         assert await asyncio.to_thread(started.wait, 5)
@@ -172,6 +204,9 @@ def test_concurrent_probe_is_shared_and_waiter_cancellation_is_isolated(monkeypa
     ],
 )
 def test_training_sampling_rejects_unrecomputable_policies(sampling):
+    # [FUNCTION DOC]
+    # Parametrized: empty, zero/bool/infinite temperature, top_p override or seed make training_sampling
+    # raise ValueError.
     with pytest.raises(ValueError):
         training_sampling(sampling)
 
@@ -198,10 +233,17 @@ def test_training_sampling_rejects_unrecomputable_policies(sampling):
     ],
 )
 def test_explicit_training_policy_reaches_engine_across_dialects(path, body):
+    # [FUNCTION DOC]
+    # Parametrized per dialect: with a session sampling policy of temperature 0.8, a request asking for
+    # temperature 0 is forwarded to a mocked engine with temperature 0.8 and logprobs on; the captured
+    # node records both the enforced and requested params and the response hides internal fields.
     app = server.create_app(llm_url="http://engine.invalid", model="m")
     sent = []
 
     async def handle(request):
+        # [FUNCTION DOC]
+        # HELPER: Mock engine transport; records the JSON body and returns a fixed chat completion with
+        # prompt/token ids and logprobs.
         import json
 
         data = json.loads(request.content)
@@ -252,17 +294,27 @@ def test_explicit_training_policy_reaches_engine_across_dialects(path, body):
 def test_rollout_cancellation_releases_session_and_applies_call_budget(
     monkeypatch, tmp_path
 ):
+    # [FUNCTION DOC]
+    # Installs a fake harbor.trial.trial module whose Trial records the session's max_model_calls and
+    # whose run is cancelled; asserts the CancelledError propagates, agent_step_limit 3 became the call
+    # budget, and the session was removed.
     registry = SessionRegistry()
     module = ModuleType("harbor.trial.trial")
     observed = []
 
     class Trial:
         @classmethod
+        # [CLASS DOC]
+        # HELPER: Fake harbor Trial.
         async def create(cls, config):
+            # [FUNCTION DOC]
+            # HELPER: Records the only session's max_model_calls and returns an instance.
             observed.append(registry.get(registry.list_ids()[0]).max_model_calls)
             return cls()
 
         async def run(self):
+            # [FUNCTION DOC]
+            # HELPER: Raises asyncio.CancelledError.
             raise asyncio.CancelledError()
 
     module.Trial = Trial
@@ -306,6 +358,9 @@ def test_rollout_cancellation_releases_session_and_applies_call_budget(
     ],
 )
 def test_constrained_logits_are_rejected_without_spending_call_budget(field, value):
+    # [FUNCTION DOC]
+    # Parametrized: logit-constraining request fields yield 400 under a training policy and do not
+    # increment model_calls.
     app = server.create_app(llm_url="http://engine.invalid", model="m")
     with TestClient(app) as client:
         sid = client.post("/sessions", json={"sampling": {"temperature": 0.8}}).json()[
@@ -331,9 +386,15 @@ def test_constrained_logits_are_rejected_without_spending_call_budget(field, val
 
 
 def test_policy_changing_compatibility_fallback_cannot_produce_training_data():
+    # [FUNCTION DOC]
+    # When the engine rejects temperature, the proxy returns 502, records a "sampling_policy_changed"
+    # finding and captures no node instead of retrying without the policy.
     app = server.create_app(llm_url="http://engine.invalid", model="m")
 
     async def handle(request):
+        # [FUNCTION DOC]
+        # HELPER: Mock engine returning 400 unsupported_parameter when temperature is present, else an empty
+        # 200 completion.
         import json
 
         if "temperature" in json.loads(request.content):
@@ -368,10 +429,14 @@ def test_policy_changing_compatibility_fallback_cannot_produce_training_data():
 
 
 def test_model_call_budget_holds_under_concurrent_requests():
+    # [FUNCTION DOC]
+    # 100 concurrent completions on a session with budget 7 all return 200 but only 7 reach the engine.
     app = server.create_app(llm_url="http://engine.invalid", model="m")
     forwarded = []
 
     async def completion(request):
+        # [FUNCTION DOC]
+        # HELPER: Stubbed inference completion recording requests and returning a stop reply.
         forwarded.append(request)
         await asyncio.sleep(0)
         return {
@@ -386,6 +451,8 @@ def test_model_call_budget_holds_under_concurrent_requests():
     app.state.inference.completion = completion
 
     async def check():
+        # [FUNCTION DOC]
+        # HELPER: Async body driving the app through an ASGI transport and asserting the budget.
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://capture"
         ) as client:
@@ -410,6 +477,9 @@ def test_model_call_budget_holds_under_concurrent_requests():
 
 
 def test_every_output_limit_alias_is_capped_and_missing_limits_are_bounded():
+    # [FUNCTION DOC]
+    # clamp_output_tokens caps all three max-token aliases in place, returns the largest original value,
+    # and inserts max_tokens when none is set.
     request = {
         "max_tokens": 16384,
         "max_completion_tokens": 64000,
@@ -427,10 +497,15 @@ def test_every_output_limit_alias_is_capped_and_missing_limits_are_bounded():
 
 
 def test_client_serializes_sampling_in_the_mcp_rollout_arguments():
+    # [FUNCTION DOC]
+    # HarborEnv.run_rollout (on an uninitialised instance with a stub _call) sends tool "run_rollout"
+    # with sampling and agent_step_limit, omitting unset provider/purpose/eval_sampling.
     client = object.__new__(HarborEnv)
     sent = {}
 
     def call(name, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records tool name and kwargs; returns an empty result dump.
         sent.update(tool=name, **kwargs)
         return HarborRolloutResult().model_dump()
 
@@ -443,10 +518,14 @@ def test_client_serializes_sampling_in_the_mcp_rollout_arguments():
 
 
 def test_client_never_drops_explicit_new_provider_semantics():
+    # [FUNCTION DOC]
+    # Explicit provider, purpose and empty eval_sampling are forwarded.
     client = object.__new__(HarborEnv)
     sent = {}
 
     def call(name, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Records kwargs; returns an empty result dump.
         sent.update(kwargs)
         return HarborRolloutResult().model_dump()
 

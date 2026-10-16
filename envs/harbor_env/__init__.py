@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# Deployment package for harbor_env (run Harbor benchmark tasks with token-level
+# capture). Contains no logic: re-exports the client (HarborEnv) and result
+# models (HarborConversation, HarborRolloutResult, HarborTaskRef, HarborTurn)
+# from openenv.harbor.
 """harbor_env: run Harbor tasks with token-level capture.
 
 The implementation lives in `openenv.harbor` and `openenv.core.harness.capture`; this package is

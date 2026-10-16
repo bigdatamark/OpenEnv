@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# BrowserGym environment package (MiniWoB++, WebArena, VisualWebArena, WorkArena via one API). Eagerly re-exports
+# the client and models; the harness helpers (BrowserGymSessionFactory, build_browsergym_action_tool_call) are
+# loaded lazily on first attribute access through a module-level attribute hook.
 """BrowserGym Environment for OpenEnv.
 
 BrowserGym is a unified framework for web-based agent tasks that provides
@@ -91,6 +95,9 @@ _LAZY_ATTRS = {
 
 
 def __getattr__(name: str):
+    # [FUNCTION DOC]
+    # Module attribute hook: for a lazily exported name, imports the harness submodule, caches the attribute in the
+    # module globals and returns it. Raises AttributeError for any other name.
     if name not in _LAZY_ATTRS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -102,4 +109,6 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
+    # [FUNCTION DOC]
+    # Returns the sorted union of the module's globals and its public export list.
     return sorted(set(globals().keys()) | set(__all__))

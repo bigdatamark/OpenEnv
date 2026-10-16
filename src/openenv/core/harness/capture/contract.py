@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Converts a captured rollout (RolloutGraph plus its exported document dict) into
+# trainer-facing formats: typed TrainingTrace, trace-entry dicts carrying engine
+# prompt ids and loss masks, and legacy (prompt_ids, output_ids, logprobs) tuples.
+# Also measures how far a local chat-template re-tokenization drifts from the
+# engine's prompt ids. Never emits rewards. Logs warnings for skipped turns.
 """What a rollout hands a trainer.
 
 The typed training contract is `to_training_trace`: one engine prompt, sampled completion,
@@ -32,6 +38,9 @@ BUDGET_STOP_MESSAGE = "Step budget exhausted; stopping."
 
 
 def _usable(node: TurnNode) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True when the node has non-empty sampled ids and logprobs of equal length
+    # and check_turn on (prompt_ids, sampled_ids, logprobs) reports ok.
     """Whether this turn's sampled ids and logprobs describe the same tokens.
 
     The same guard `sequence_for` applies before masking a turn in, applied here too. These adapters
@@ -53,6 +62,9 @@ def _usable(node: TurnNode) -> bool:
 
 
 def _require_trainable(document: dict[str, Any]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Raises ValueError if document["rollout_type"] (default "train") is "eval",
+    # naming capture_level; eval captures carry no token ids/logprobs.
     """Refuse to build a training contract out of an eval rollout.
 
     An eval document has an empty `sequences` list, so every converter here would return `[]` and the
@@ -74,6 +86,9 @@ def _require_trainable(document: dict[str, Any]) -> None:
 
 
 def _warn_skipped(nodes: list[TurnNode]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Logs a warning naming up to five node ids of turns that fail _usable.
+    # Side effects: logging only.
     """Say out loud how many turns are being left out, and why."""
     skipped = [n.node_id for n in nodes if not _usable(n)]
     if skipped:
@@ -87,6 +102,10 @@ def _warn_skipped(nodes: list[TurnNode]) -> None:
 
 
 def _agent_nodes(graph: RolloutGraph, document: dict[str, Any]) -> list[TurnNode]:
+    # [FUNCTION DOC]
+    # HELPER: Collects node ids from every document sequence whose role is "agent" and
+    # returns the graph's nodes (in graph.nodes() arrival order) whose ids are in that
+    # set, deduplicated. Returns [] if no agent sequences.
     """Every agent turn, in arrival order, excluding auxiliary calls and discarded retries.
 
     All agent sequences, not just the first. A rollout can have several: a harness that rewrites its
@@ -109,6 +128,17 @@ def _agent_nodes(graph: RolloutGraph, document: dict[str, Any]) -> list[TurnNode
 def to_trace_entries(
     graph: RolloutGraph, document: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Converts the rollout to a list of trace-entry dicts, one per usable agent turn.
+    # Each entry has request (messages, tools), response (single choice with message and
+    # finish_reason), prompt_token_ids, completion_token_ids, per_token_logps, loss_mask
+    # (zeros over the prompt followed by the reconciled completion mask) and metadata
+    # (node_id, index, model, n_tools, harness_session_id, sampling params copies).
+    # Each turn is checked with validate_training_turn before emission.
+    # Raises: ValueError for eval rollouts, inconsistent masks, or validation failures.
+    # Side effects: logs skipped turns.
+    # KNOWN ISSUE: an inline comment claims the mask is simply all-ones across the sample,
+    # but the code uses the reconciled per-node mask, which may be partial.
     """Rollout graph -> `list[TraceEntry]`, carrying the ENGINE's own prompt tokenization.
 
     Every entry includes `prompt_token_ids` and `loss_mask`, so a consumer never re-tokenizes. This
@@ -182,6 +212,11 @@ def to_trace_entries(
 def _completion_masks(
     graph: RolloutGraph, document: dict[str, Any]
 ) -> dict[str, list[int]]:
+    # [FUNCTION DOC]
+    # HELPER: Builds node_id -> completion-slice loss mask from agent sequences. Uses
+    # row["loss_mask"] or, when absent, graph.sequence_for(last node).loss_mask; slices
+    # [len(prompt_ids), +len(sampled_ids)).
+    # Raises: ValueError if a slice is short, or a shared node gets different masks.
     """Read authoritative masks after reconciliation, deduplicating shared nodes."""
     masks: dict[str, list[int]] = {}
     for row in document["sequences"]:
@@ -206,6 +241,11 @@ def _completion_masks(
 
 
 def to_training_trace(graph: RolloutGraph, document: dict[str, Any]) -> TrainingTrace:
+    # [FUNCTION DOC]
+    # Builds a validated TrainingTrace from the rollout.
+    # Raises: ValueError if any document["validation"] finding contains "[FATAL", the
+    # rollout is eval, or any agent node fails _usable. Otherwise returns
+    # TrainingTrace.from_entries(to_trace_entries(...)).
     """Return validated agent calls once each, including shared graph prefixes."""
     if any("[FATAL" in finding for finding in document.get("validation", [])):
         raise ValueError("cannot train a capture with fatal validation findings")
@@ -218,6 +258,11 @@ def to_training_trace(graph: RolloutGraph, document: dict[str, Any]) -> Training
 def to_turn_records(
     graph: RolloutGraph, document: dict[str, Any]
 ) -> list[tuple[list[int], list[int], list[float]]]:
+    # [FUNCTION DOC]
+    # Returns (prompt_ids, sampled_ids, logprobs) tuples for usable agent turns whose
+    # completion mask has any 1; fully masked turns are skipped.
+    # Raises: ValueError for eval rollouts or if any mask is partial (mixed 0/1).
+    # Side effects: logs skipped turns.
     """Rollout graph -> `(prompt_ids, output_ids, output_log_probs)` per turn, losslessly.
 
     For fully supervised completions only. Fully masked calls are skipped; partial masks raise
@@ -249,6 +294,15 @@ def measure_retokenization_skew(
     chat_template: str | None = None,
     chat_template_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Measures retokenization drift: for each agent node (including unusable ones),
+    # re-renders request messages (with tool-call JSON-string arguments decoded) and
+    # tools through tokenizer.apply_chat_template (generation prompt on, tokenized,
+    # optional chat_template and kwargs) and compares with node.prompt_ids.
+    # Returns: dict with n_turns, n_errors (template exceptions), exact_match_frac,
+    # max_abs_delta, min_prefix_match_frac (prefix match / engine length) and turns (per
+    # turn: turn, engine_len, and either error or rebuilt_len, delta, prefix_match, exact).
+    # Never raises for template errors; they are recorded.
     """Compare TRL's re-tokenized prompt against the engine's, per turn. The number nobody has had.
 
     Reproduces `_turns_from_trace` exactly, including the `_decode_tool_call_arguments` step (the
@@ -263,6 +317,10 @@ def measure_retokenization_skew(
     import json as _json
 
     def decode_arguments(messages):
+        # [FUNCTION DOC]
+        # HELPER: Returns a copy of messages where any tool call whose arguments (under
+        # "function" or at top level) is a JSON string is replaced by the parsed value ({}
+        # on decode failure).
         out = []
         for message in messages:
             calls = message.get("tool_calls")
@@ -289,6 +347,8 @@ def measure_retokenization_skew(
         return out
 
     def prefix_len(a, b):
+        # [FUNCTION DOC]
+        # HELPER: Length of the common prefix of two sequences.
         n = min(len(a), len(b))
         i = 0
         while i < n and a[i] == b[i]:

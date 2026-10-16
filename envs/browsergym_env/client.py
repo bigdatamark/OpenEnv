@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket client for the BrowserGym environment server.
 """Client for the BrowserGym environment."""
 
 from typing import Any, Dict
@@ -11,6 +13,9 @@ from .models import BrowserGymAction, BrowserGymObservation, BrowserGymState
 class BrowserGymEnv(
     EnvClient[BrowserGymAction, BrowserGymObservation, BrowserGymState]
 ):
+    # [CLASS DOC]
+    # Typed EnvClient for BrowserGym: serializes action strings and parses observations/state. Benchmark and task are
+    # chosen server-side (environment variables or reset kwargs), not by the client.
     """Client for interacting with the BrowserGym environment.
 
     BrowserGym provides unified access to multiple web navigation benchmarks:
@@ -76,6 +81,8 @@ class BrowserGymEnv(
     """
 
     def _step_payload(self, action: BrowserGymAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a dict with the action's action_str and metadata.
         """Convert a BrowserGymAction to the JSON payload for the server."""
         return {
             "action_str": action.action_str,
@@ -85,6 +92,10 @@ class BrowserGymEnv(
     def _parse_result(
         self, payload: Dict[str, Any]
     ) -> StepResult[BrowserGymObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult with a BrowserGymObservation (text, url, screenshot, goal, axtree_txt, pruned_html,
+        # error, last_action_error, defaulting to empty/None/False). Metadata prefers the top-level "metadata".
+        # Returns: StepResult with reward (may be None), done (default False), top-level metadata.
         """Parse the server response into a StepResult."""
         obs_data = payload.get("observation", {})
 
@@ -110,6 +121,9 @@ class BrowserGymEnv(
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> BrowserGymState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a BrowserGymState from a state response with defaults for missing fields (empty strings, None,
+        # cum_reward 0.0).
         """Parse the server state response into a BrowserGymState object."""
         return BrowserGymState(
             episode_id=payload.get("episode_id"),

@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Atari (Arcade Learning Environment) environment package. Re-exports the AtariEnv client and the action,
+# observation and state models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: compares several LLMs (via the HF Inference Providers router,
+# using the OpenAI client) playing Kuhn Poker against a random bot in the
+# OpenSpiel environment. Module constants configure the router URL, API key
+# (API_KEY or HF_TOKEN env vars), model list, game count, token limit and verbosity.
+# Running main starts an OpenSpiel Docker container, plays MAX_GAMES games per
+# model and prints a ranked comparison table.
+# KNOWN ISSUE: the module docstring's usage says examples/kuhn_poker_inference.py
+# and suggests starting a local server, but main always launches a Docker image.
 """
 Compare multiple LLMs playing Kuhn Poker via HF Inference Providers.
 
@@ -70,6 +79,11 @@ Your action (0 or 1):"""
 
 
 def decode_card(info_state):
+    # [FUNCTION DOC]
+    # HELPER: decodes the player's private card from the OpenSpiel info_state vector.
+    # Returns "Jack"/"Queen"/"King" for the first of positions 0..2 equal to 1.0;
+    # otherwise the name of the argmax of the first three entries; "Unknown" if the
+    # vector has fewer than 3 entries.
     """Extract card from info_state (one-hot encoded in positions [0:3])."""
     card_names = ["Jack", "Queen", "King"]
 
@@ -85,6 +99,9 @@ def decode_card(info_state):
 
 
 def parse_action(text, legal_actions):
+    # [FUNCTION DOC]
+    # HELPER: finds standalone "0"/"1" tokens in the model text and returns the first
+    # that is in legal_actions (as int). Falls back to 0 (PASS) if legal, else 1.
     """Parse action (0 or 1) from model output."""
     numbers = re.findall(r"\b[01]\b", text)
     for num in numbers:
@@ -94,6 +111,15 @@ def parse_action(text, legal_actions):
 
 
 def play_kuhn_poker_game(env, client, model_name, game_num):
+    # [FUNCTION DOC]
+    # Plays one Kuhn Poker game: resets env, and on each turn builds a prompt with the
+    # decoded card and the betting history (opponent and own moves), asks the model
+    # (one chat completion) for an action, parses it and steps the env.
+    # Inputs: env (OpenSpielEnv client), client (OpenAI), model_name, game_num (0-based, for logging).
+    # Returns: tuple (final reward, defaulting to 0.0; list of the agent's "PASS"/"BET" names).
+    # Side effects: network calls to the LLM and env; prints when VERBOSE. LLM errors are
+    # swallowed and the action defaults to PASS (or BET if PASS illegal).
+    # KNOWN ISSUE: the temperature is hardcoded to 0.8 instead of using TEMPERATURE.
     """Play a single Kuhn Poker game with history tracking."""
     result = env.reset()
     obs = result.observation
@@ -168,6 +194,13 @@ def play_kuhn_poker_game(env, client, model_name, game_num):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Entry point: creates the OpenAI client and an OpenSpielEnv from the
+    # openenv-openspiel-env Docker image, plays MAX_GAMES rounds where every model plays
+    # each round, then computes per-model wins/losses/pushes, total and average chips and
+    # PASS/BET percentages, and prints a ranking sorted by average chips, the best model
+    # and a strategy breakdown. Always closes the env.
+    # Side effects: starts a Docker container, network calls, stdout output.
     """Evaluate multiple models on Kuhn Poker and compare performance."""
     print(f"Kuhn Poker Model Comparison")
     print(f"Testing {len(MODELS)} models with {MAX_GAMES} games each")

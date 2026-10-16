@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Pinned entry point producing runtime-validation evidence locally and in CI. Checks the
+# pinned Python and uv versions from tests/validation_runtime/toolchain.json, creates a
+# uniquely named evidence directory, records a run manifest (git state, toolchain, hashes),
+# runs the selected pytest suite (fast, protocol, or docker, which first builds an exact-source
+# OpenEnv wheel, an offline Linux wheelhouse, a served-probe Docker image and an Echo canary
+# build context), then writes SHA256SUMS over all evidence and optionally verifies completeness.
 """One pinned entry point for local and CI runtime-validation evidence."""
 
 import argparse
@@ -25,10 +32,15 @@ MAX_LOG_BYTES = 1024 * 1024
 
 
 def digest(path):
+    # [FUNCTION DOC]
+    # HELPER: returns the SHA-256 hex digest of a file's bytes.
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def command_digest(argv, *, cwd=ROOT, timeout=600):
+    # [FUNCTION DOC]
+    # HELPER: runs a command (stdout to a temp file, stderr captured, no stdin) and returns the
+    # SHA-256 of its stdout. Raises: CalledProcessError on nonzero exit, TimeoutExpired.
     with tempfile.TemporaryFile() as output:
         subprocess.run(
             [str(arg) for arg in argv],
@@ -44,6 +56,9 @@ def command_digest(argv, *, cwd=ROOT, timeout=600):
 
 
 def hashes(root):
+    # [FUNCTION DOC]
+    # HELPER: returns a mapping from root-relative path to SHA-256 for every file under root
+    # (sorted, excluding __pycache__ directories).
     return {
         str(path.relative_to(root)): digest(path)
         for path in sorted(root.rglob("*"))
@@ -52,11 +67,21 @@ def hashes(root):
 
 
 def write_json(path, value):
+    # [FUNCTION DOC]
+    # HELPER: writes value as indented, key-sorted JSON (trailing newline), creating parent dirs.
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
 def run(argv, *, cwd=ROOT, timeout=600, log=None, env=None):
+    # [FUNCTION DOC]
+    # HELPER: runs a command in its own process group, draining stdout/stderr on threads and
+    # keeping only the last MAX_LOG_BYTES of each. On timeout or any interruption kills the
+    # process group and re-raises. Afterwards kills the group if readers are still blocked
+    # (descendants holding pipes). Redacts token-like strings (hf_, ghp_, github_pat_, sk-) and,
+    # if log is given, writes the combined tail there.
+    # Returns: stripped, redacted stdout. Raises: RuntimeError with the diagnostics tail on
+    # nonzero exit; TimeoutExpired.
     process = subprocess.Popen(
         [str(arg) for arg in argv],
         cwd=cwd,
@@ -70,6 +95,8 @@ def run(argv, *, cwd=ROOT, timeout=600, log=None, env=None):
     stderr_tail = bytearray()
 
     def drain(stream, tail):
+        # [FUNCTION DOC]
+        # HELPER: reads a pipe in 8 KiB chunks into a bounded tail buffer, closing it at the end.
         try:
             while chunk := stream.read(8192):
                 tail.extend(chunk)
@@ -131,6 +158,10 @@ def run(argv, *, cwd=ROOT, timeout=600, log=None, env=None):
 
 
 def snapshot_source(destination):
+    # [FUNCTION DOC]
+    # Copies pyproject.toml, README.md, LICENSE and src/ (without caches/egg-info) into a new
+    # destination directory and returns its file hashes.
+    # Raises: RuntimeError if any symlink exists in src or the copy.
     """Hash exactly the files used for the wheel, including local source edits."""
     if any(path.is_symlink() for path in (ROOT / "src").rglob("*")):
         raise RuntimeError("Source snapshots do not permit symlinks")
@@ -149,6 +180,10 @@ def snapshot_source(destination):
 
 
 def select_linux_requirements(path, arch):
+    # [FUNCTION DOC]
+    # Rewrites a hash-pinned requirements file in place, keeping only requirement blocks (first
+    # line plus indented hash continuation lines) whose environment markers evaluate true for
+    # Linux, the given architecture and CPython 3.12.13, and dropping their markers.
     """Evaluate lock markers for the target, not pip's macOS host environment."""
     from packaging.markers import default_environment
     from packaging.requirements import Requirement
@@ -185,6 +220,11 @@ def select_linux_requirements(path, arch):
 def download_linux_wheels(
     requirements, wheelhouse, base_image, docker_platform, *, log
 ):
+    # [FUNCTION DOC]
+    # Pulls the base image for the Docker platform, runs it sandboxed (no network, read-only,
+    # unprivileged) to list pip's supported platform tags, then downloads hash-verified binary
+    # wheels for CPython 3.12 for those tags into the wheelhouse.
+    # Returns: list of platform tags. Side effects: docker and pip subprocesses, logs.
     # Linux compatibility depends on the target image's libc, not the host or
     # a fixed shortlist of manylinux versions. The image digest pins this pip.
     # Pull separately so cold-cache progress cannot contaminate the JSON probe.
@@ -242,6 +282,16 @@ def download_linux_wheels(
 
 
 def stage_image(work, output, pins, manifest):
+    # [FUNCTION DOC]
+    # Builds the served-probe image: snapshots the source and builds one wheel with uv (removing
+    # uv's .gitignore marker), reinstalls it into the current interpreter, exports locked
+    # dependencies (excluding openenv), detects Docker architecture, filters requirements for
+    # Linux, downloads the wheelhouse, adds the wheel and its hash pin, assembles a build context
+    # with the probe fixture, Dockerfile, openenv.yaml and validation files, checks the
+    # Dockerfile uses the pinned base image, and builds via DockerValidationProvider. Records
+    # hashes, platform and image ref in the manifest.
+    # Returns: (context path, image ref). Raises: RuntimeError on unexpected wheel count,
+    # unsupported architecture or base image drift.
     source = work / "source"
     manifest["wheel_source_hashes"] = snapshot_source(source)
     wheel_dir = output / "wheel"
@@ -351,6 +401,13 @@ def stage_image(work, output, pins, manifest):
 
 
 def stage_echo_canary(work, context, output, manifest):
+    # [FUNCTION DOC]
+    # Builds the Echo canary context from envs/echo_env without importing it: copies the sources
+    # (verifying they are unchanged), reuses the probe's wheelhouse and requirements, derives the
+    # Dockerfile by two exact substitutions, overlays the validation execution JSON into
+    # openenv.yaml and copies the overlay validation files. Records provenance in the manifest and
+    # echo-canary-source.json. Returns: the context path.
+    # Raises: RuntimeError on symlinks, source changes or if a substitution does not match once.
     """Stage unchanged reference-environment sources without importing them."""
     import yaml
 
@@ -401,6 +458,15 @@ def stage_echo_canary(work, context, output, manifest):
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point (--suite fast|protocol|docker, --require-complete, --output). Validates the
+    # toolchain pins (parser error otherwise), creates output/<run id>, copies the acceptance
+    # inventory, builds the manifest, and runs pytest with a cleaned environment (no PYTHONPATH or
+    # PYTEST_ADDOPTS; artifact/require-complete variables set) writing junit.xml. RuntimeError,
+    # TimeoutExpired and OSError are recorded as the manifest error. Always writes the manifest and
+    # SHA256SUMS. With --require-complete and success, runs verify_artifacts and on failure marks
+    # the run failed and rewrites manifest and checksums.
+    # Returns: 0 on success, 1 on failure (prints PASS/FAIL with the output path).
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--suite", required=True, choices=("fast", "protocol", "docker")

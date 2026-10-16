@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the OpenSpiel environment. Defines OpenSpielEnv, which serializes OpenSpielAction and
+# parses observation/state JSON into the typed models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,8 @@ if TYPE_CHECKING:
 
 
 class OpenSpielEnv(EnvClient[OpenSpielAction, OpenSpielObservation, OpenSpielState]):
+    # [CLASS DOC]
+    # EnvClient subclass for one OpenSpiel game session; implements the payload/parsing hooks only.
     """
     Client for OpenSpiel Environment.
 
@@ -51,6 +56,8 @@ class OpenSpielEnv(EnvClient[OpenSpielAction, OpenSpielObservation, OpenSpielSta
     """
 
     def _step_payload(self, action: OpenSpielAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a mapping with action_id, game_name and game_params from the action.
         """
         Convert OpenSpielAction to JSON payload for step request.
 
@@ -69,6 +76,10 @@ class OpenSpielEnv(EnvClient[OpenSpielAction, OpenSpielObservation, OpenSpielSta
     def _parse_result(
         self, payload: Dict[str, Any]
     ) -> StepResult[OpenSpielObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult with an OpenSpielObservation from the nested "observation" mapping
+        # (info_state, legal_actions default empty, game_phase default "playing", current_player_id default 0,
+        # opponent_last_action) plus top-level done (default False), reward and metadata (top level preferred).
         """
         Parse server response into StepResult[OpenSpielObservation].
 
@@ -99,6 +110,9 @@ class OpenSpielEnv(EnvClient[OpenSpielAction, OpenSpielObservation, OpenSpielSta
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> OpenSpielState:
+        # [FUNCTION DOC]
+        # HELPER: Builds an OpenSpielState from the state response with defaults: step_count 0, game_name
+        # "unknown", agent_player 0, opponent_policy "random", game_params empty, num_players 1.
         """
         Parse server response into OpenSpielState object.
 

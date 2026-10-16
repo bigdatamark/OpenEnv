@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Generic MCP tool executor for the calendar server. Every MCP tool name equals the
+# name of a FastAPI endpoint function; a tool call is executed by finding that route,
+# substituting path params, splitting remaining arguments into JSON body vs query
+# params, and making an HTTP request back to this same server
+# (http://localhost:<API_PORT env, default 8004>). Loads .env at import time.
+# Exports MCP_TOOLS_LIST (the tool schemas) and TOOL_HANDLERS (tool name ->
+# execute_tool_generic for every tool).
 """
 MCP Tool Handlers - Generic API Caller for Calendar API
 
@@ -19,6 +27,12 @@ load_dotenv()
 
 
 def log_tool_response(tool_name, tool_input, result, database_id):
+    # [FUNCTION DOC]
+    # HELPER: debug logger. Only when database_id contains "test" (case-insensitive):
+    # appends an entry {timestamp, tool_name, database_id, input, result} to the JSON list in
+    # tests/tool_responses/tool_responses_<YYYYMMDD>.json (creates dir, rewrites file).
+    # Returns None; swallows all exceptions.
+    # KNOWN ISSUE: mkdir is not recursive, so it silently does nothing if "tests/" does not exist in the cwd.
     """Log tool responses to file for debugging"""
     try:
         # Only log during test runs (when database_id looks like test ID)
@@ -67,6 +81,13 @@ def log_tool_response(tool_name, tool_input, result, database_id):
 
 
 def get_query_parameters_for_tool(tool_name: str) -> set:
+    # [FUNCTION DOC]
+    # HELPER: finds the route (across calendars, calendarList, events, colors, users,
+    # settings, acl routers) whose endpoint function name equals tool_name and returns the
+    # set of its query parameter names (aliases preferred) from FastAPI's dependant; if none
+    # found there, falls back to inspecting the signature for Query() defaults (skipping
+    # calendarId, eventId, x_database_id). Returns an empty set when no route matches.
+    # KNOWN ISSUE: the freebusy router is not inspected here (unlike get_api_endpoint_for_tool), so freebusy tools always get an empty set.
     """
     Automatically determine which parameters should be query parameters
     by inspecting the FastAPI route dependencies and parameters
@@ -137,6 +158,11 @@ from calendar_mcp.tools import MCP_TOOLS
 
 # Dynamic endpoint mapping based on FastAPI router inspection
 def get_api_endpoint_for_tool(tool_name: str) -> tuple:
+    # [FUNCTION DOC]
+    # HELPER: searches all API routers (including freebusy) for a route whose endpoint
+    # function name equals tool_name and returns (http_method, path) using the first method
+    # in the route's method set (default "GET"), or None if no route matches.
+    # KNOWN ISSUE: return annotation says tuple but None may be returned; with routes registering several methods the chosen method is arbitrary (set order).
     """
     Dynamically determine API endpoint by matching tool name to router function names.
     This eliminates the need for static mapping and ensures consistency.
@@ -180,6 +206,20 @@ def get_api_endpoint_for_tool(tool_name: str) -> tuple:
 async def execute_tool_generic(
     tool_name: str, arguments: Dict, database_id: str, user_id: str
 ) -> Dict:
+    # [FUNCTION DOC]
+    # Async handler used for every tool. Steps: verify tool exists in MCP_TOOLS; resolve
+    # endpoint; substitute path parameters (missing ones yield an error result); send an
+    # HTTP request with headers Content-Type, x-database-id, x-user-id (30s timeout): GET
+    # sends body+query args as query params, DELETE sends only query params, others send JSON
+    # body plus query params.
+    # Returns a dict {"text", "isError", optionally "status_code"}: 204 -> success message;
+    # 2xx -> pretty-printed JSON (or generic success if not JSON); errors -> friendly text from
+    # FastAPI "detail" string, a reformatted validation-error list ("Validation errors:" with
+    # dotted field paths and simplified messages), Google-style error.message, a synthesized
+    # 404 calendar message for /calendars paths, or a fallback "API Error: <json>" / "HTTP <code>: <text>".
+    # Never raises: request errors and any other exception become isError results.
+    # Side effects: outbound HTTP request to the local API, debug file logging via log_tool_response.
+    # KNOWN ISSUE: if httpx.RequestError occurs before full_url is assigned it cannot happen, but a non-httpx error before full_url (e.g. in substitution) is fine; however the RequestError message references full_url which is always set by then. Bare excepts swallow JSON decode issues silently.
     """
     Generic tool executor that dynamically calls API endpoints based on tool configuration.
     This eliminates the need for individual handler functions.
@@ -405,6 +445,8 @@ async def execute_tool_generic(
 
 
 def extract_api_endpoint(description: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER (unused here): returns the path from an "API Endpoint: METHOD /path" pattern in a description, or "".
     """Extract API endpoint from tool description"""
     import re
 
@@ -417,6 +459,8 @@ def extract_api_endpoint(description: str) -> str:
 
 
 def extract_http_method(description: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER (unused here): returns METHOD from an "API Endpoint: METHOD /..." pattern in a description, default "GET".
     """Extract HTTP method from tool description"""
     import re
 
@@ -429,6 +473,10 @@ def extract_http_method(description: str) -> str:
 
 
 def substitute_path_parameters(endpoint: str, arguments: Dict) -> str:
+    # [FUNCTION DOC]
+    # HELPER: replaces each {param} in the endpoint with a truthy argument value looked up as
+    # param, param+"Id", or param with "Id" removed (stringified). Returns the filled path,
+    # or the sentinel string "ERROR_MISSING_PARAM_<param>" for the first missing/empty one.
     """Replace path parameters like {calendarId} with actual values"""
     import re
 
@@ -463,6 +511,12 @@ def substitute_path_parameters(endpoint: str, arguments: Dict) -> str:
 def prepare_request_data(
     arguments: Dict, endpoint: str, tool_name: str
 ) -> tuple[Dict, Dict]:
+    # [FUNCTION DOC]
+    # HELPER: splits arguments into (body_data, query_data): drops keys that match a path
+    # parameter (directly, with "Id" appended, or with "Id" removed); keys that the route
+    # declares as query params go to query_data, the rest to body_data.
+    # Side effects: imports routers via get_query_parameters_for_tool.
+    # KNOWN ISSUE: key.replace("Id", "") also matches unrelated keys whose Id-stripped form equals a path param, which may drop arguments unintentionally.
     """Prepare request data by separating body and query parameters"""
     import re
 

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Template FastAPI entry point. Builds the module-level ASGI app via openenv's create_app with the template
+# environment, action and observation classes (max 1 concurrent WebSocket session). Raises ImportError with an
+# install hint if openenv is missing. When run as a script, parses --port and starts uvicorn.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -54,6 +58,9 @@ app = create_app(
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):
+    # [FUNCTION DOC]
+    # Starts uvicorn serving the module-level app on the given host (default "0.0.0.0") and port (default 8000).
+    # Blocks until the server stops.
     """
     Entry point for direct execution via uv run or python -m.
 

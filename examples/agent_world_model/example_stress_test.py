@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Stress-test script simulating one large-scale agentic RL step against a running Agent World Model (AWM) server.
+# Launches many AWMEnv client sessions concurrently; each connects, resets into a scenario/task, lists tools,
+# performs a random number of random tool calls (empty arguments) separated by simulated LLM "think" sleeps,
+# then calls the "done" tool and closes. Collects per-phase latencies, samples CPU/memory of client and server
+# process tree via psutil, logs a report, and exits non-zero if any episode failed.
+# Module globals (BASE_URL, CLIENT_TIMEOUT, MIN/MAX_TURNS, LLM_THINK_MIN/MAX) are overwritten from CLI args in main.
+# Side effects: network I/O to the server, logging to stderr, process inspection via psutil.
 """
 Stress test simulating large-scale agentic RL with AWM environments.
 
@@ -76,6 +84,10 @@ LLM_THINK_MAX = 20.0
 # ---------------------------------------------------------------------------
 @dataclass
 class SessionResult:
+    # [CLASS DOC]
+    # Dataclass recording one episode's outcome: identifiers (session id, scenario, task index), planned and completed
+    # turn counts, per-phase durations in seconds (connect, reset, list_tools, done, total), the list of individual
+    # tool-call latencies, success flag, error string (None on success), and the number/names of tools discovered.
     session_id: int
     scenario: str
     task_idx: int
@@ -97,9 +109,15 @@ class SessionResult:
 # System resource monitor
 # ---------------------------------------------------------------------------
 class ResourceMonitor:
+    # [CLASS DOC]
+    # Background asyncio task that periodically samples system CPU percent, system memory percent/used GB, the client
+    # process RSS, and (when a server PID is given) the summed RSS and child count of the server process tree.
+    # Samples accumulate in an in-memory list that summary() aggregates.
     """Periodically samples CPU and memory in a background task."""
 
     def __init__(self, interval: float = 2.0):
+        # [FUNCTION DOC]
+        # Stores the sampling interval (seconds), creates an empty sample list, no task yet, and a psutil handle to the current process.
         self._interval = interval
         self._samples: list[dict] = []
         self._task: asyncio.Task | None = None
@@ -107,10 +125,14 @@ class ResourceMonitor:
         self._server_pid: int | None = None
 
     def start(self, server_pid: int | None = None):
+        # [FUNCTION DOC]
+        # Records the optional server PID and schedules the sampling loop as an asyncio task. Must be called inside a running event loop.
         self._server_pid = server_pid
         self._task = asyncio.create_task(self._loop())
 
     async def stop(self):
+        # [FUNCTION DOC]
+        # Cancels the sampling task (if started) and awaits it, swallowing the resulting CancelledError.
         if self._task:
             self._task.cancel()
             try:
@@ -119,6 +141,10 @@ class ResourceMonitor:
                 pass
 
     async def _loop(self):
+        # [FUNCTION DOC]
+        # HELPER: Infinite loop appending one resource sample dictionary per interval. Server-tree memory/children are
+        # included only if the server process is accessible; NoSuchProcess/AccessDenied errors are ignored per process.
+        # Side effects: mutates the sample list; sleeps between samples.
         while True:
             sample = {
                 "time": time.monotonic(),
@@ -147,6 +173,9 @@ class ResourceMonitor:
             await asyncio.sleep(self._interval)
 
     def summary(self) -> dict:
+        # [FUNCTION DOC]
+        # Aggregates samples into a dictionary: sample count, CPU mean/max, system memory GB min/max, client memory MB min/max,
+        # plus server tree memory min/max and peak subprocess count when those were sampled. Returns empty dict if no samples.
         if not self._samples:
             return {}
         cpu_vals = [s["system_cpu_pct"] for s in self._samples]
@@ -187,6 +216,9 @@ class ResourceMonitor:
 # Helpers
 # ---------------------------------------------------------------------------
 def latency_stats(values: list[float]) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Computes latency statistics for a list of seconds: count, min, p50, p90, p99 (index-based on the sorted
+    # list, no interpolation), max and mean, all rounded to 3 decimals. Returns empty dict for an empty list.
     if not values:
         return {}
     s = sorted(values)
@@ -202,6 +234,10 @@ def latency_stats(values: list[float]) -> dict:
 
 
 async def check_server(url: str) -> int | None:
+    # [FUNCTION DOC]
+    # GETs the server's /docs page (raises httpx errors on failure/non-2xx), then scans running processes for a uvicorn
+    # command line containing the URL's port (default 8899). Returns that process PID, or None if not found.
+    # KNOWN ISSUE: port matching is a plain substring test on the command line, so it can match unrelated processes.
     """Check server is up, return server PID if available."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{url}/docs", timeout=10)
@@ -221,6 +257,8 @@ async def check_server(url: str) -> int | None:
 
 
 async def fetch_server_stats(url: str) -> dict | None:
+    # [FUNCTION DOC]
+    # HELPER: GETs the server's /stats endpoint and returns the parsed JSON, or None on any exception.
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{url}/stats", timeout=5)
@@ -234,6 +272,8 @@ async def fetch_server_stats(url: str) -> dict | None:
 # ---------------------------------------------------------------------------
 @dataclass
 class ProgressCounters:
+    # [CLASS DOC]
+    # Dataclass of shared mutable counters (episodes done, ok, failed, resets done, turns done) updated by all episodes for progress logging.
     """Shared counters updated by each session for live progress reporting."""
 
     done: int = 0
@@ -252,6 +292,15 @@ async def run_rl_episode(
     interact_semaphore: asyncio.Semaphore,
     counters: ProgressCounters,
 ) -> SessionResult:
+    # [FUNCTION DOC]
+    # Runs a single simulated episode with a fresh AWMEnv client. Phases: connect+reset under reset_semaphore (returns
+    # early with an error if the reset observation's reward_type is not reset_ok/reset_warning), list tools (tool names
+    # collected from dict entries, falling back to a placeholder name), num_turns iterations of random sleep plus a random
+    # tool call with empty args (exceptions ignored, latency recorded) under interact_semaphore, then a "done" tool call.
+    # Inputs: session id, scenario name, task index, number of turns, two semaphores, shared counters.
+    # Returns: the populated SessionResult. Exceptions are caught and recorded as "[phase] Type: message" (truncated).
+    # Side effects: network I/O, mutates counters; always closes the client.
+    # KNOWN ISSUE: on early reset failure counters.done is incremented twice (once in the branch, once in finally).
     """Simulate a full RL episode: reset -> list_tools -> N tool calls -> done."""
     r = SessionResult(
         session_id=session_id,
@@ -362,6 +411,9 @@ async def progress_reporter(
     monitor: ResourceMonitor,
     interval: float = 10.0,
 ):
+    # [FUNCTION DOC]
+    # Infinite loop that every interval seconds logs elapsed time, episode/turn progress, in-flight count, server session
+    # count from /stats, and the latest resource sample. Reads the monitor's private sample list. Runs until cancelled.
     """Periodically log progress while the test runs."""
     start = time.monotonic()
     while True:
@@ -400,6 +452,12 @@ async def run_rl_step(
     min_turns: int,
     max_turns: int,
 ) -> tuple[list[SessionResult], dict]:
+    # [FUNCTION DOC]
+    # Runs one full simulated RL step: checks the server and finds its PID, starts the resource monitor and progress
+    # reporter, assigns each of scale episodes a scenario (round-robin), task index (i mod 10) and random turn count in
+    # [min_turns, max_turns], runs them all concurrently (resets bounded by concurrency), then stops background tasks and
+    # logs success counts, latency distributions, resource summary, turn distribution and up to 20 failures.
+    # Returns: tuple of the list of SessionResults and the resource summary dict. Raises if the server check fails.
     """Run one RL step: launch `scale` episodes in parallel."""
 
     log.info("=" * 78)
@@ -521,6 +579,8 @@ async def run_rl_step(
 # CLI
 # ---------------------------------------------------------------------------
 def parse_args():
+    # [FUNCTION DOC]
+    # Builds and parses the CLI arguments (scale, concurrency, min/max turns, think min/max, url, client timeout). Returns the argparse namespace.
     p = argparse.ArgumentParser(
         description="AWM stress test — simulates large-scale agentic RL"
     )
@@ -575,6 +635,9 @@ def parse_args():
 
 
 async def main():
+    # [FUNCTION DOC]
+    # Entry point: parses args, overwrites module-level configuration globals, verifies the server (exit 1 if unreachable),
+    # runs the RL step, logs a final summary, and exits with status 1 if any episode failed.
     args = parse_args()
     global BASE_URL, CLIENT_TIMEOUT, MIN_TURNS, MAX_TURNS, LLM_THINK_MIN, LLM_THINK_MAX
     BASE_URL = args.url

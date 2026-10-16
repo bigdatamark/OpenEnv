@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# ACL (access control) operations for calendars on a caller-provided SQLAlchemy Session:
+# list (paginated and incremental sync), get, insert, update, patch, delete rules, ACL
+# watch channels and expired channel cleanup. Changes trigger webhook notifications via
+# services.notification_service. Rules are scoped to the acting user (ACLs.user_id).
 import base64
 import json
 import logging
@@ -27,11 +32,17 @@ logger = logging.getLogger(__name__)
 
 
 class ACLManager:
+    # [CLASS DOC]
+    # Manager wrapping a Session (self.db, owned by the caller) and the acting user_id.
     def __init__(self, db: Session, user_id: str):
+        # [FUNCTION DOC]
+        # Stores the session and user_id.
         self.db = db
         self.user_id = user_id
 
     def validate_calendar_id(self, calendar_id, user_id):
+        # [FUNCTION DOC]
+        # Returns True if a non-deleted calendar with calendar_id is owned by user_id, else False.
         calendar = (
             self.db.query(Calendar)
             .filter(
@@ -53,6 +64,15 @@ class ACLManager:
         show_deleted: bool = False,
         sync_token: Optional[str] = None,
     ) -> ACLListResponse:
+        # [FUNCTION DOC]
+        # Lists ACL rules of the calendar created by the acting user. With sync_token, delegates
+        # to _handle_sync_request. Otherwise excludes role "none" unless show_deleted, orders by
+        # created_at/id, paginates using a page token that is base64 of the integer offset (fetches
+        # max_results+1 to detect a next page), builds nextSyncToken as base64 JSON
+        # {calendar_id, timestamp of latest updated_at}, and returns ACLListResponse with a random
+        # etag and ACLRule items.
+        # Raises: ValueError "Invalid pageToken" for undecodable tokens; re-raises others after logging.
+        # KNOWN ISSUE: item.scope.type is an Enum compared to the string "default", so the default-scope branch never triggers (harmless since value is None then).
         """
         List ACL rules for a calendar with pagination and filtering support.
 
@@ -158,6 +178,13 @@ class ACLManager:
     def _handle_sync_request(
         self, calendar_id: str, sync_token: str, max_results: int, show_deleted: bool
     ) -> ACLListResponse:
+        # [FUNCTION DOC]
+        # HELPER: decodes the base64 JSON sync token, checks its calendar_id matches, rejects
+        # tokens older than 7 days with HTTPException 410, returns rules (including deleted ones)
+        # updated after the token time, up to max_results, with a new sync token from the latest
+        # updated_at (or the same token if nothing changed) and no page token.
+        # Raises: ValueError for mismatched/invalid tokens.
+        # KNOWN ISSUE: builds ACLRule.scope from ScopeInput instead of ScopeOutput, which may fail validation or re-run scope validation; JSONDecodeError handling misses base64/Unicode errors.
         """
         Handle incremental synchronization request.
 
@@ -252,6 +279,8 @@ class ACLManager:
             raise
 
     def get_rule(self, calendar_id: str, rule_id: str):
+        # [FUNCTION DOC]
+        # Returns the ACLs row with rule_id and calendar_id created by the acting user, or None.
         """
         Retrieve a specific ACL rule by calendar ID and rule ID (must be owned).
         """
@@ -264,6 +293,13 @@ class ACLManager:
     def insert_rule(
         self, calendar_id: str, rule: ACLRuleInput, send_notifications: bool = True
     ):
+        # [FUNCTION DOC]
+        # Looks up an existing Scope matching the rule's type (and value when given), creates an
+        # ACLs row (random id and quoted etag, naive UTC timestamps) for the acting user, commits,
+        # optionally sends an "insert" notification, and returns a Google aclRule dict
+        # {kind "calendar#aclRule", etag, id, scope {type, value unless "public"}, role}.
+        # Raises: ValueError if no matching scope exists.
+        # KNOWN ISSUE: a None role violates the NOT NULL column and fails at commit; scopes are never created here, only reused.
         """
         Insert a new ACL rule after validating scope existence.
 
@@ -345,6 +381,12 @@ class ACLManager:
         rule: ACLRuleInput,
         send_notifications: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Full update: sets role (if given) and mutates the linked Scope's type and value (for
+        # user/group values requires an existing active user with that email), bumps updated_at,
+        # commits, optionally notifies "update", and returns the aclRule dict; None if not found.
+        # Raises: ValueError for unknown email or missing scope object.
+        # KNOWN ISSUE: mutates the shared Scope row in place, affecting every other ACL using that scope.
         """
         Fully replace an existing ACL rule's role and scope.
 
@@ -417,6 +459,10 @@ class ACLManager:
         rule: PatchACLRuleInput,
         send_notifications: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Partial update with the same logic as update_rule but using PatchACLRuleInput (scope
+        # and role optional). Returns the aclRule dict or None if not found.
+        # KNOWN ISSUE: same shared-Scope mutation as update_rule.
         """
         Partially update an ACL rule's role or scope if provided.
 
@@ -484,6 +530,9 @@ class ACLManager:
         return response
 
     def delete_rule(self, calendar_id: str, rule_id: str) -> bool:
+        # [FUNCTION DOC]
+        # Deletes the rule if the calendar is owned by the acting user; commits and sends a
+        # "delete" notification. Returns True, or False if not found. Rolls back and re-raises on errors.
         """
         Delete an ACL rule by ID and calendar ID. Only the calendar owner can delete ACLs.
 
@@ -535,6 +584,13 @@ class ACLManager:
     def watch_acl(
         self, user_id: str, calendar_id: str, watch_request: Dict[str, Any]
     ) -> Channel:
+        # [FUNCTION DOC]
+        # Creates an "acl" WatchChannel for a calendar owned by user_id: resource id
+        # "acl-<calendar>-<8 hex>", uri "/calendars/<calendar>/acl", expiration now+24h, webhook
+        # details from watch_request (an object with id/address/token/type/params despite the
+        # Dict annotation). Commits and returns a Channel with ISO expiration plus "Z".
+        # Raises: ValueError if the calendar is not owned by the user or the channel id exists; rolls back on error.
+        # KNOWN ISSUE: requested params.ttl is ignored (always 24h).
         """
         Set up watch notifications for ACL changes.
 
@@ -619,6 +675,9 @@ class ACLManager:
             raise
 
     def cleanup_expired_channels(self) -> int:
+        # [FUNCTION DOC]
+        # Marks active watch channels of the acting user whose expires_at passed as inactive,
+        # commits if any and returns the count; returns 0 on errors (rolled back).
         """
         Clean up expired watch channels for this user
 
@@ -660,6 +719,10 @@ class ACLManager:
     def _send_acl_notification(
         self, calendar_id: str, change_type: str, acl_data: Dict[str, Any]
     ):
+        # [FUNCTION DOC]
+        # HELPER: asks the notification service to notify all watchers of the calendar about an
+        # ACL change (insert/update/delete with rule data). Swallows and logs all errors.
+        # Side effects: outbound webhook calls and DB updates performed by the service.
         """
         Send ACL change notification to all active watch channels for the calendar
 
@@ -685,4 +748,6 @@ class ACLManager:
 
 
 def get_acl_manager(db: Session, user_id: str) -> ACLManager:
+    # [FUNCTION DOC]
+    # HELPER: factory returning ACLManager(db, user_id).
     return ACLManager(db, user_id)

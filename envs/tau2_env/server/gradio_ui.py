@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Gradio web UI for tau2-bench with four tabs: browse tasks (explorer + hidden task page + policy), run an
+# LLM agent on a task via Hugging Face Inference Providers, play as the agent manually, and review /
+# download / compare finished runs. Each UI session uses its own Tau2Environment and run history.
+# Constants: selectable domains and splits, fallback model list, extra agent instructions appended to the
+# policy, max 60 agent turns per run, max 4 compared runs, placeholders, and the assets directory
+# (tau2.css, explorer.js).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -69,10 +76,15 @@ ASSETS = Path(__file__).parent / "assets"
 
 
 def plural(count: int, noun: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns "<count> <noun>" with an "s" appended unless count is 1.
     return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
 def skeleton(schema: dict[str, Any]) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: placeholder value for one JSON-schema property: first enum value, else recursion into the first
+    # anyOf branch, else a zero/empty value by type (0, False, empty list/mapping), defaulting to "".
     """A placeholder of the right type for one JSON-schema property."""
     if "enum" in schema:
         return schema["enum"][0]
@@ -85,6 +97,12 @@ def skeleton(schema: dict[str, Any]) -> Any:
 
 @lru_cache(maxsize=1)
 def model_choices() -> list[tuple[str, str]]:
+    # [FUNCTION DOC]
+    # Fetches the HF router model list (20 s timeout) and returns (label, id) pairs for models with at least
+    # one live provider that supports tools. Label includes provider count and the cheapest input/output
+    # price. Sorted with the default model first, then by provider count descending. Falls back to the static
+    # model list on network/parse errors or an empty result. Cached for the process lifetime.
+    # Side effects: one HTTP request on first call.
     """Chat models on Inference Providers that call tools, as `(label, id)`, widest-served first."""
     try:
         with urllib.request.urlopen(f"{HF_ROUTER}/models", timeout=20) as response:
@@ -114,9 +132,18 @@ def model_choices() -> list[tuple[str, str]]:
 
 
 class Catalog:
+    # [CLASS DOC]
+    # Static UI data for one domain/split: tasks by id, dropdown choices, first task id, MCP tools by name,
+    # domain tool names (excluding respond_to_user/done), a default tool for the tool panel, tool read/write
+    # types, and the domain policy with markdown headings demoted by three levels.
     """What the UI shows about one domain and split: tasks, tools and policy."""
 
     def __init__(self, env: Tau2Environment):
+        # [FUNCTION DOC]
+        # Loads tasks from the tau2 registry, lists tools by stepping env with ListToolsAction, picks
+        # get_user_details or the first read-like tool (get_/find_/list_/search_) or the first tool as default,
+        # and builds tool types and policy from a fresh domain environment. Raises IndexError if the split has no
+        # tasks or the domain has no tools.
         self.domain, self.split = env.domain, env.split
         self.tasks = {
             t.id: t for t in registry.get_tasks_loader(self.domain)(self.split)
@@ -152,15 +179,24 @@ class Catalog:
         )
 
     def page(self, task_id: str) -> str:
+        # [FUNCTION DOC]
+        # Returns the task detail HTML for task_id (KeyError if unknown).
         return task_html(self.tasks[task_id], self.tool_types, self.domain)
 
     def summary(self, task_id: str) -> str:
+        # [FUNCTION DOC]
+        # Returns the compact summary HTML for task_id.
         return summary_html(self.tasks[task_id], self.tool_types)
 
     def explorer(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the explorer HTML for all tasks.
         return explorer_html(list(self.tasks.values()), self.tool_types)
 
     def tool_help(self, name: str) -> tuple[str, str]:
+        # [FUNCTION DOC]
+        # Returns (markdown help, JSON example) for a tool: its description plus one bullet per parameter with type
+        # and an optional flag, and a pretty-printed example object holding skeleton values for required params.
         tool = self.tools[name]
         props = tool.input_schema.get("properties", {})
         required = tool.input_schema.get("required", [])
@@ -175,9 +211,15 @@ class Catalog:
 
 
 class Episode:
+    # [CLASS DOC]
+    # A conversation in progress: the environment, task id, initial observation, the list of UI events
+    # (customer/agent messages and tool rows), start time and counters of messages and tool calls.
     """A conversation in progress: the environment and the events the UI draws."""
 
     def __init__(self, env: Tau2Environment, task_id: str):
+        # [FUNCTION DOC]
+        # Resets env on task_id; ValueError/RuntimeError are re-raised as gr.Error. Seeds events with the
+        # customer's opening message and starts the timer/counters.
         self.env = env
         self.task_id = task_id
         # e.g. the customer has no credential, or its provider rejects it
@@ -193,6 +235,11 @@ class Episode:
         self.tool_calls = 0
 
     def act(self, name: str, arguments: dict):
+        # [FUNCTION DOC]
+        # Steps the env with a CallToolAction. Result text is "Error: <message>" on error, else the first content
+        # item's text. For respond_to_user: counts a message, records the agent's text, then either an error tool
+        # row or the customer's reply (end tokens removed, skipped if empty). For done: records nothing. Other
+        # tools: counts and records a tool row. Returns (observation, result text).
         """Run one agent action and record what it shows in the conversation."""
         observation = self.env.step(CallToolAction(tool_name=name, arguments=arguments))
         if observation.error is not None:
@@ -222,6 +269,8 @@ class Episode:
         return observation, result
 
     def stats(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a summary string of messages sent, tool calls and elapsed seconds.
         return (
             f"{plural(self.messages, 'message')} to the customer · "
             f"{plural(self.tool_calls, 'tool call')} · "
@@ -229,6 +278,9 @@ class Episode:
         )
 
     def side(self, observation, running: bool = False) -> str:
+        # [FUNCTION DOC]
+        # Returns side-panel HTML: if the observation is done, a "no score" status when reward_info is empty or
+        # otherwise the scoring result; else a status line (with spinner if running).
         if observation is not None and observation.done:
             if not observation.metadata["reward_info"]:  # the simulated customer failed
                 return status_html(f"Ended without a score · {self.stats()}", False)
@@ -238,6 +290,9 @@ class Episode:
         return status_html(self.stats(), running)
 
     def record(self, run_id: str, model: str, catalog: Catalog, observation) -> dict:
+        # [FUNCTION DOC]
+        # Returns the run record mapping kept in session history: id, finish time, domain, split, task id and
+        # title, agent model, user model, reward, reward_info, stats and events.
         """The finished run, as kept in the session's history and downloaded as JSON."""
         return {
             "id": run_id,
@@ -256,6 +311,9 @@ class Episode:
 
 
 def parse_arguments(raw: str | None) -> dict | None:
+    # [FUNCTION DOC]
+    # Parses a tool call's JSON arguments string (None treated as "{}"). Returns the mapping, or None if the
+    # JSON is invalid or not an object.
     """A tool call's arguments, or `None` when the model sent invalid JSON or not an object."""
     try:
         arguments = json.loads(raw or "{}")
@@ -265,6 +323,11 @@ def parse_arguments(raw: str | None) -> dict | None:
 
 
 def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Blocks]:
+    # [FUNCTION DOC]
+    # Returns a Gradio builder callable (the signature create_app expects) that constructs the full UI.
+    # Inputs: make_env - environment factory accepting domain/split/user_provider/user_model/hf_token overrides.
+    # Side effects: reads the CSS and JS asset files immediately; catalogs are cached per (domain, split) for
+    # the life of the closure (their environments are never closed).
     """
     Build the UI's Gradio builder.
 
@@ -277,12 +340,16 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
 
     @lru_cache(maxsize=None)
     def catalog(domain: str, split: str) -> Catalog:
+        # [FUNCTION DOC]
+        # HELPER: cached Catalog for a (domain, split), built from a new environment.
         return Catalog(make_env(domain=domain, split=split))
 
     css = (ASSETS / "tau2.css").read_text()
     explorer_js = (ASSETS / "explorer.js").read_text()
 
     def header(cat: Catalog) -> str:
+        # [FUNCTION DOC]
+        # HELPER: header HTML with a description and the task and tool counts of a catalog.
         return (
             '<div class="t2-head"><div><p>A customer-service agent solves the request of an '
             "LLM-simulated customer with the domain's tools while following its policy. "
@@ -294,6 +361,9 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         )
 
     def switch(domain: str, split: str):
+        # [FUNCTION DOC]
+        # On domain/split change: returns the 13 updated values for header, explorer, task page, selected task,
+        # both task dropdowns, both summaries, tool dropdown, tool help, example arguments and both policy panels.
         """Everything that depends on the domain and split, for the new ones."""
         cat = catalog(domain, split)
         help_text, example = cat.tool_help(cat.default_tool)
@@ -315,6 +385,9 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         )
 
     def hf_token(oauth_token: gr.OAuthToken | None) -> str:
+        # [FUNCTION DOC]
+        # Returns the token to run conversations with: on a Space (SPACE_ID set) the visitor's OAuth token, else
+        # HF_TOKEN. Raises gr.Error if none.
         """The visitor's token on a Space, where signing in is required, else `HF_TOKEN`."""
         if os.environ.get("SPACE_ID"):
             # The Space's own secret, if any, stays for the API: visitors pay for their runs.
@@ -338,6 +411,15 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         runs,
         oauth_token: gr.OAuthToken | None,
     ):
+        # [FUNCTION DOC]
+        # Generator for the Run tab. Starts an Episode with HF-provider user model and the visitor's token, then
+        # loops up to MAX_AGENT_TURNS calling the agent model through litellm (HF router, temperature 0, tools =
+        # all MCP tools, system prompt = policy + agent instructions). Plain-text replies are converted into a
+        # respond_to_user call; invalid JSON arguments get an error tool message without acting. Each action is
+        # executed via Episode.act and its result appended as a tool message. Yields (timeline HTML, side HTML,
+        # runs) after each action; on done, appends a run record if scored and stops; after the turn limit yields
+        # a stopped status. Always closes the environment in a finally block (also on cancel).
+        # Side effects: network LLM calls, environment simulation.
         cat = catalog(domain, split)
         token = hf_token(oauth_token)
         episode = Episode(
@@ -464,6 +546,9 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
     def play_start(
         previous, domain, split, user_model, task_id, oauth_token: gr.OAuthToken | None
     ):
+        # [FUNCTION DOC]
+        # Starts a new manual-play Episode (gr.Error on missing token or reset failure), then closes the previous
+        # one. Returns (episode, timeline HTML, side HTML).
         token = hf_token(oauth_token)
         episode = Episode(
             make_env(
@@ -483,10 +568,15 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         )
 
     def close_episode(episode: Episode | None) -> None:
+        # [FUNCTION DOC]
+        # Closes the episode's environment if an episode is given.
         if episode is not None:
             episode.env.close()
 
     def play_act(episode: Episode, name: str, arguments: dict):
+        # [FUNCTION DOC]
+        # Runs one action in manual play. Returns two no-op updates if there is no episode or it is done, else the
+        # new timeline HTML and side HTML.
         if episode is None or episode.env.state.done:
             return gr.update(), gr.update()
         observation, _ = episode.act(name, arguments)
@@ -495,12 +585,18 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         )
 
     def play_say(episode: Episode, message: str):
+        # [FUNCTION DOC]
+        # Sends a non-blank message via respond_to_user and clears the textbox. Blank input returns no-op updates
+        # and keeps the text.
         if not message.strip():
             return gr.update(), gr.update(), message
         view, side = play_act(episode, "respond_to_user", {"message": message})
         return view, side, ""
 
     def play_tool(episode: Episode, name: str, arguments: str):
+        # [FUNCTION DOC]
+        # Parses the JSON arguments text (empty = {}); invalid JSON returns a no-op view and an error status.
+        # Otherwise calls play_act with the selected tool.
         try:
             args = json.loads(arguments or "{}")
         except ValueError:
@@ -509,10 +605,15 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
 
     # Runs --------------------------------------------------------------------
     def runs_changed(runs):
+        # [FUNCTION DOC]
+        # Returns the runs list HTML and a reset CheckboxGroup whose choices are the runs (newest first).
         choices = [(run_label(r), r["id"]) for r in reversed(runs)]
         return runs_html(runs), gr.CheckboxGroup(choices=choices, value=[])
 
     def open_run(runs, evt: gr.SelectData):
+        # [FUNCTION DOC]
+        # Finds the selected run (StopIteration if missing), writes it as JSON into a new temp directory and returns
+        # (result + timeline HTML, a visible DownloadButton for that file). Side effects: creates a temp file.
         run = next(r for r in runs if r["id"] == evt.value)
         # A directory per download, so visitors' runs with the same name don't collide.
         path = (
@@ -527,6 +628,8 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
         )
 
     def compare(runs, picked):
+        # [FUNCTION DOC]
+        # Returns comparison HTML for up to four picked runs (in history order).
         chosen = [r for r in runs if r["id"] in picked][:MAX_COMPARED]
         return compare_html(chosen)
 
@@ -535,6 +638,12 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
     def builder(
         web_manager, action_fields, metadata, is_chat_env, display_title, quick_start_md
     ):
+        # [FUNCTION DOC]
+        # Gradio builder invoked by the web interface (its arguments are ignored). Creates a default env to find
+        # the default domain/split/user model, builds the Tasks, Run a model, Play as the agent and Runs tabs with
+        # controls (domain, split, simulated-customer model, login button on Spaces), and wires all events. Returns
+        # the gr.Blocks.
+        # KNOWN ISSUE: the default environment created here is never closed.
         default = make_env()
         home = catalog(default.domain, default.split)
         help_text, example = home.tool_help(home.default_tool)
@@ -698,6 +807,9 @@ def build_ui(make_env: Callable[..., Tau2Environment]) -> Callable[..., gr.Block
                 )
 
             def open_task(domain, split, evt: gr.SelectData):
+                # [FUNCTION DOC]
+                # On explorer selection: returns (task id, task page HTML, task id, task id) to update the selected state,
+                # detail panel and both task dropdowns.
                 page = catalog(domain, split).page(evt.value)
                 return evt.value, page, evt.value, evt.value
 

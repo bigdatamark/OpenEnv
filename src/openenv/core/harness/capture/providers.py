@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Native upstream conversion for hosted providers (currently Anthropic): converts the
+# proxy's canonical chat-completions request into a native Anthropic Messages request
+# (or passes through an original native request), converts a native Anthropic
+# response into a chat-completions response while keeping the native response, and
+# replays a native response as Anthropic SSE frames. Refuses (raises) any conversion
+# that would lose semantics.
 """Native upstream conversion; independent of the harness-facing wire protocol."""
 
 from __future__ import annotations
@@ -12,10 +19,17 @@ from .upstream import UpstreamRequestError
 
 
 class ProviderConversionError(UpstreamRequestError):
+    # [CLASS DOC]
+    # Raised when a request/response cannot be converted without losing semantics; a
+    # non-retryable UpstreamRequestError.
     """A request cannot be translated without losing semantics; retrying cannot fix it."""
 
 
 def _content_blocks(content):
+    # [FUNCTION DOC]
+    # HELPER: Validates and converts chat content to Anthropic blocks. None -> []. Strings
+    # or lists of strings/text/image_url parts are converted; other content types, non-string
+    # text, or unconvertible images raise ProviderConversionError.
     if content is None:
         return []
     if not isinstance(content, (str, list)):
@@ -44,6 +58,23 @@ def _content_blocks(content):
 
 
 def anthropic_request(request: dict[str, Any], model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds a native Anthropic Messages request body for the given model.
+    # If request carries "_openenv_native_request", deep-copies it, removes _served_model,
+    # sets model and stream False, drops top_p==1 when temperature is set and top_k==-1, and
+    # caps max_tokens at the request's max_tokens (both default 4096).
+    # Otherwise: rejects response_format/logit_bias/audio/modalities and non-neutral
+    # frequency/presence/repetition penalties or min_p; sets max_tokens (from max_tokens,
+    # max_completion_tokens, default 4096), stream False, temperature/top_p/top_k (skipping
+    # neutral top_k -1 and top_p 1), stop_sequences; system/developer messages before any
+    # turn become the system block list; tool messages become user tool_result blocks;
+    # user/assistant messages become content blocks plus tool_use blocks (arguments must be
+    # a JSON object); consecutive same-role messages are merged; function tools become
+    # Anthropic tools (name, optional strict, description, input_schema); tool_choice
+    # auto/none/required/named is mapped; parallel_tool_calls False sets
+    # disable_parallel_tool_use.
+    # Raises: ProviderConversionError for unsupported params, late system messages, reasoning
+    # history, non-object tool args, unknown roles, or non-function tools.
     """Convert canonical chat input, or preserve an original native Messages request."""
     original = request.get("_openenv_native_request")
     if original is not None:
@@ -189,6 +220,18 @@ def anthropic_request(request: dict[str, Any], model: str) -> dict[str, Any]:
 def anthropic_response(
     native: dict[str, Any], *, native_passthrough: bool = False
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Converts a native Anthropic response into a chat-completions response.
+    # Unless native_passthrough, rejects stop reasons outside
+    # end_turn/stop_sequence/tool_use/max_tokens/None and blocks that are not
+    # text/thinking/tool_use or that carry citations (ProviderConversionError).
+    # Concatenates text into content, thinking into reasoning_content (None if empty),
+    # tool_use into tool_calls (None if none); finish_reason tool_use->tool_calls,
+    # max_tokens->length, else stop; logprobs None; prompt tokens = input + cache creation +
+    # cache read tokens. Attaches a deep copy of the native response under
+    # "_openenv_native_response".
+    # KNOWN ISSUE: with native_passthrough, blocks of other types without "type" or of
+    # unexpected types are silently ignored, but blocks missing required keys raise KeyError.
     """Keep the original response while normalizing text/tool calls for capture."""
     text, reasoning, calls = [], [], []
     if not native_passthrough and native.get("stop_reason") not in {
@@ -265,9 +308,17 @@ def anthropic_response(
 
 
 def replay_anthropic(native: dict[str, Any]):
+    # [FUNCTION DOC]
+    # Generator yielding Anthropic SSE frame strings ("event: <type>\ndata: <json>\n\n") that
+    # replay a native response: message_start (empty content, zero output tokens), then for
+    # each content block a start (with emptied text/input/thinking), its delta(s) (text,
+    # input JSON, or thinking plus the native signature), and a stop; then message_delta
+    # with stop reason and output tokens, and message_stop.
     """Emit SDK-compatible events without replacing native thinking signatures."""
 
     def frame(event):
+        # [FUNCTION DOC]
+        # HELPER: Formats one event dict as an SSE frame with event name and JSON data.
         return (
             "event: "
             + event["type"]

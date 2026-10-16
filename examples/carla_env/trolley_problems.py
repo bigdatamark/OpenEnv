@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# LLM inference on CARLA trolley-problem scenarios (blog examples and micro-benchmarks): the model sees the scene
+# description (optionally a camera image) and makes a single decision via one of three tools (emergency_stop,
+# lane_change, observe), which is executed once and its outcome/reward reported. Also supports a no-model mode that
+# drives straight while capturing frames, and saving image sequences. Model keys may be presets or Hugging Face ids
+# loaded locally. Side effects: sys.path changes, LLM calls, CARLA server calls, image files, stdout.
 """
 LLM Inference: Trolley Problem Scenarios
 
@@ -62,6 +68,9 @@ from config import MODELS, ModelConfig, TROLLEY_SCENARIOS, BLOG_EXAMPLES
 
 @dataclass
 class EpisodeResult:
+    # [CLASS DOC]
+    # Dataclass with one episode's result: model name, scenario description, decision (tool name or "none"), reasoning
+    # text (<=200 chars), outcome scene description (<=200 chars), reward, and step count.
     """Result of one episode."""
     model: str
     scenario: str
@@ -73,6 +82,8 @@ class EpisodeResult:
 
 
 def _resolve_model(model_key: str) -> ModelConfig:
+    # [FUNCTION DOC]
+    # HELPER: Returns the preset ModelConfig for a known key, otherwise a "local" provider config using the key as a Hugging Face model id.
     """Resolve a model key to a ModelConfig.
 
     If model_key is a known preset (e.g. "claude-sonnet-4.5"), returns the
@@ -90,6 +101,11 @@ def _resolve_model(model_key: str) -> ModelConfig:
     )
 
 async def _capture_sequence_async(env, output_path, prefix, num_frames=20, verbose=True, drive_straight=False):
+    # [FUNCTION DOC]
+    # HELPER: For up to num_frames frames, sends either a full-throttle straight control action (drive_straight) or an
+    # observe action, then captures and saves a JPEG named prefix_NNN.jpg; stops early when the step reports done.
+    # Returns the last non-capture step result (None if num_frames is 0).
+    # KNOWN ISSUE: with num_frames of 0 and verbose on, the final print references an unbound loop variable (NameError).
     """Capture a sequence of images by ticking the simulation forward.
 
     Each frame sends an action then captures an image.
@@ -125,6 +141,10 @@ def run_trolley_no_model(
     num_frames: int = 20,
     scenario_config_overrides: Optional[Dict] = None,
 ) -> EpisodeResult:
+    # [FUNCTION DOC]
+    # Runs a scenario without an LLM: creates the output dir, resets with merged overrides, drives straight capturing
+    # num_frames frames, and returns an EpisodeResult with decision "observe (no model)", the final scene description and
+    # reward (0.0 if None). Exceptions are printed (verbose) and re-raised.
     """Run a trolley scenario without LLM — vehicle goes straight and collides.
 
     Useful for generating video frames showing the collision sequence.
@@ -194,6 +214,15 @@ def run_trolley_episode(
     scenario_config_overrides: Optional[Dict] = None,
     num_frames: int = 20,
 ) -> EpisodeResult:
+    # [FUNCTION DOC]
+    # Resolves the model config, disables vision with a warning for non-vision models, lazily imports and creates the LLM
+    # client, then runs the async episode: reset with merged overrides; when saving images, captures 5 approach frames and
+    # refreshes the observation; builds an ethical-dilemma prompt from the scene description (optionally a vision message);
+    # asks the LLM once (2048 tokens). With a tool call, maps it to emergency_stop, lane_change (direction default "left") or
+    # observe (also for unknown names), executes it, optionally captures num_frames post-decision frames, and returns an
+    # EpisodeResult with the outcome and reward (0.0 if None); without a tool call returns decision "none" and reward 0.0.
+    # Exceptions are printed (verbose) and re-raised.
+    # KNOWN ISSUE: the reported outcome/reward come from the single decision step, before any post-decision frames advance the simulation.
     """Run one trolley problem episode with LLM decision-making.
 
     Args:
@@ -409,6 +438,10 @@ Make your decision by calling one of the available tools."""
         raise
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry: parses model, scenario, run-all-blog-examples, base url, no-model, image, frame, vision and camera options.
+    # Dispatches to no-model mode (needs scenario), all blog trolley examples (failures recorded, summary printed), a single
+    # model+scenario run, or prints help.
     parser = argparse.ArgumentParser(
         description="Run LLM inference on trolley problem scenarios",
         formatter_class=argparse.RawDescriptionHelpFormatter,

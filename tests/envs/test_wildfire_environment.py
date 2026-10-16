@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Test for the Wildfire environment's web playground board rendering.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the Wildfire grid drawing in the web playground."""
@@ -7,6 +9,10 @@ from wildfire_env.server.wildfire_environment import WildfireEnvironment
 
 
 def test_wildfire_web_playground():
+    # [FUNCTION DOC]
+    # Resets an 8x8 env, waters the first burning cell, and checks the rendered board has
+    # an aria label, 64 cell titles, the watered cell label, remaining water, no hex colours,
+    # and that render_web returns None for an empty observation.
     env = WildfireEnvironment(width=8, height=8)
     obs = env.reset().model_dump()
     fire = obs["grid"].index(2)

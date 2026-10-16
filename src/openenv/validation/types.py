@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Core enums for environment validation: levels, lanes, per-check statuses, policy severities,
+# overall verdicts, package signature kinds, and provider capabilities. Graders emit statuses;
+# only the severity policy maps checks to severities.
+
 """Core enums and small frozen types for environment validation (RFC 008).
 
 The type split carries the central invariant: graders emit [`~openenv.validation.types.CheckStatus`];
@@ -9,6 +14,8 @@ from enum import Enum, IntEnum
 
 
 class Level(IntEnum):
+    # [CLASS DOC]
+    # Integer enum of validation levels ordered by cost: STATIC=1, RUNTIME=2, SEMANTIC=3, STATISTICAL=4 (reserved).
     """
     Validation levels, ordered by cost budget.
 
@@ -23,6 +30,8 @@ class Level(IntEnum):
 
 
 class Lane(str, Enum):
+    # [CLASS DOC]
+    # String enum of who runs a check: "local" or "hub".
     """
     Who runs a check.
 
@@ -36,6 +45,8 @@ class Lane(str, Enum):
 
 
 class CheckStatus(str, Enum):
+    # [CLASS DOC]
+    # String enum of grader results: pass, fail, skip, error.
     """
     What a grader may return for a single check.
 
@@ -50,6 +61,8 @@ class CheckStatus(str, Enum):
 
 
 class Severity(str, Enum):
+    # [CLASS DOC]
+    # String enum of policy severities: fail, warn, advisory.
     """What only the severity policy may assign to a check id."""
 
     FAIL = "fail"
@@ -58,6 +71,8 @@ class Severity(str, Enum):
 
 
 class Verdict(str, Enum):
+    # [CLASS DOC]
+    # String enum of overall run outcomes: pass, warn, fail.
     """Overall outcome of a validation run. WARN means only warn/advisory findings."""
 
     PASS = "pass"
@@ -66,6 +81,9 @@ class Verdict(str, Enum):
 
 
 class SignatureKind(str, Enum):
+    # [CLASS DOC]
+    # String enum of package formats whose values are the well-known filenames: openenv.yaml,
+    # task.toml, task.md.
     """
     Recognized package formats, named by their well-known file.
 
@@ -79,6 +97,9 @@ class SignatureKind(str, Enum):
 
 
 class ProviderCapability(str, Enum):
+    # [CLASS DOC]
+    # String enum of capabilities a validation provider may declare: network_policy, exec,
+    # image_build, gpu, remote.
     """Capabilities a validation provider may declare; graders require them by name."""
 
     NETWORK_POLICY = "network_policy"

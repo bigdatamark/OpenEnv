@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Pydantic schema of the normalized validation manifest (schema 1 and 2): reward
+# contract, judge pin, oracle, verifier binding, resources, network policy, task
+# distribution pins, capabilities and type tags, plus the schema-2 execution declaration.
+# Parsers build it; graders read it. All models forbid extra keys; validators raise
+# ValueError (surfaced as pydantic ValidationError).
 """The normalized manifest: the entire interface between a package format and every grader.
 
 One document, produced only by parsers, consumed only by graders. Capabilities select
@@ -15,6 +21,9 @@ from .types import SignatureKind
 
 
 class ManifestError(Exception):
+    # [CLASS DOC]
+    # Exception raised by parsers when declarations are readable but invalid; message is
+    # the errors joined by "; ". Carries errors (list of strings) and optional remediation.
     """
     A package's declarations do not produce a valid normalized manifest.
 
@@ -31,12 +40,17 @@ class ManifestError(Exception):
     """
 
     def __init__(self, errors: list[str], *, remediation: str | None = None):
+        # [FUNCTION DOC]
+        # Stores errors and remediation and sets the joined message.
         super().__init__("; ".join(errors))
         self.errors = errors
         self.remediation = remediation
 
 
 class RewardDeclaration(BaseModel):
+    # [CLASS DOC]
+    # Reward contract: range (default 0..1), oracle_tolerance (>=0, default 0),
+    # floor_margin (>=0, required), optional variance_tolerance (>=0).
     """
     Author-declared reward contract. Graders normalize measurements against it.
 
@@ -64,6 +78,8 @@ class RewardDeclaration(BaseModel):
 
     @model_validator(mode="after")
     def _range_increasing(self) -> "RewardDeclaration":
+        # [FUNCTION DOC]
+        # HELPER: validator requiring range low < high; raises ValueError otherwise.
         low, high = self.range
         if not low < high:
             raise ValueError(
@@ -73,6 +89,8 @@ class RewardDeclaration(BaseModel):
 
 
 class JudgePin(BaseModel):
+    # [CLASS DOC]
+    # Pinned LLM judge: model, version and free-form params.
     """
     Pinned judge configuration. Required iff `capabilities.llm_judged`.
 
@@ -88,6 +106,9 @@ class JudgePin(BaseModel):
 
 
 class OracleDeclaration(BaseModel):
+    # [CLASS DOC]
+    # Oracle declaration: form "injected_state" or "script", and its package-relative location
+    # (containment is not checked here).
     """
     How the package demonstrates max reward.
 
@@ -107,6 +128,8 @@ class OracleDeclaration(BaseModel):
 
 
 class VerifierBinding(BaseModel):
+    # [CLASS DOC]
+    # Verifier invocation: kind "reward_channel" or "script" with optional entry path.
     """
     How "evaluate this state" is invoked.
 
@@ -125,6 +148,8 @@ class VerifierBinding(BaseModel):
 
     @model_validator(mode="after")
     def _entry_matches_kind(self) -> "VerifierBinding":
+        # [FUNCTION DOC]
+        # HELPER: validator requiring entry for "script" and forbidding it for "reward_channel".
         if self.kind == "script" and self.entry is None:
             raise ValueError(
                 "verifier.entry is required when verifier.kind is 'script'"
@@ -137,6 +162,9 @@ class VerifierBinding(BaseModel):
 
 
 class ResourceDeclaration(BaseModel):
+    # [CLASS DOC]
+    # Declared budget: cpu, memory_mb, disk_mb, episode_timeout_s (all > 0), gpus (>= 0,
+    # default 0) and gpu_types.
     """
     Declared resource budget; measured usage must fall within it (#778 test #10).
 
@@ -156,12 +184,16 @@ class ResourceDeclaration(BaseModel):
 
     @model_validator(mode="after")
     def _gpu_types_require_gpus(self) -> "ResourceDeclaration":
+        # [FUNCTION DOC]
+        # HELPER: validator rejecting non-empty gpu_types when gpus is 0.
         if self.gpu_types and self.gpus == 0:
             raise ValueError("gpu_types is declared but gpus is 0")
         return self
 
 
 class NetworkPolicy(BaseModel):
+    # [CLASS DOC]
+    # Network posture: mode public (default), no-network or allowlist, with allowed_hosts.
     """
     Declared network posture, following the Harbor `task.toml` (schema 1.4)
     `network_mode` precedent.
@@ -182,6 +214,8 @@ class NetworkPolicy(BaseModel):
 
     @model_validator(mode="after")
     def _hosts_require_allowlist(self) -> "NetworkPolicy":
+        # [FUNCTION DOC]
+        # HELPER: validator: allowed_hosts only with allowlist mode, and allowlist needs at least one host.
         if self.mode != "allowlist" and self.allowed_hosts:
             raise ValueError("allowed_hosts is only valid when mode is 'allowlist'")
         if self.mode == "allowlist" and not self.allowed_hosts:
@@ -190,6 +224,8 @@ class NetworkPolicy(BaseModel):
 
 
 class TaskDistributionPin(BaseModel):
+    # [CLASS DOC]
+    # Optional pins for generated/external tasks: generator seed, dataset version, generator model.
     """Pins for generated or externally sourced task distributions (#778 test #42)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -200,6 +236,10 @@ class TaskDistributionPin(BaseModel):
 
 
 class CapabilitiesSpec(BaseModel):
+    # [CLASS DOC]
+    # Declared capabilities used to select graders: optional oracle, required verifier,
+    # flags set_state/llm_judged/rubric_tree/task_api, optional canaries path, declared tool
+    # names and per-split task counts.
     """
     Declared capabilities; these select the contract graders.
 
@@ -243,6 +283,8 @@ class CapabilitiesSpec(BaseModel):
 
     @model_validator(mode="after")
     def _injected_state_requires_set_state(self) -> "CapabilitiesSpec":
+        # [FUNCTION DOC]
+        # HELPER: validator rejecting an injected_state oracle unless set_state is true.
         if (
             self.oracle is not None
             and self.oracle.form == "injected_state"
@@ -256,6 +298,8 @@ class CapabilitiesSpec(BaseModel):
 
 
 class TypeSpec(BaseModel):
+    # [CLASS DOC]
+    # Non-empty list of non-empty type tags used to select domain graders.
     """
     Type tags; these select domain graders.
 
@@ -269,6 +313,10 @@ class TypeSpec(BaseModel):
 
 
 class NormalizedManifest(BaseModel):
+    # [CLASS DOC]
+    # Schema-1 manifest: schema version "1", name, optional version, signature (provenance),
+    # reward, optional judge, resources, optional task distribution, network (default public),
+    # capabilities and types.
     """
     The one document every grader reads. Produced only by parsers.
 
@@ -292,6 +340,9 @@ class NormalizedManifest(BaseModel):
 
     @model_validator(mode="after")
     def _judge_pin_iff_llm_judged(self) -> "NormalizedManifest":
+        # [FUNCTION DOC]
+        # HELPER: validator: when llm_judged, a judge pin and reward.variance_tolerance are
+        # required; otherwise a judge pin is forbidden.
         if self.capabilities.llm_judged:
             if self.judge is None:
                 raise ValueError(
@@ -309,6 +360,9 @@ class NormalizedManifest(BaseModel):
 
 
 class ExecutionDeclaration(BaseModel):
+    # [CLASS DOC]
+    # Frozen schema-2 runtime binding: kind "openenv_ws", probe JSON path, Dockerfile path,
+    # build context, agent_boundary "api" and a strict bool requires_credentials (default false).
     """
     Author-declared runtime binding, introduced by manifest schema 2.
 
@@ -345,6 +399,9 @@ class ExecutionDeclaration(BaseModel):
     @field_validator("probe_path", "dockerfile", "context")
     @classmethod
     def _package_relative(cls, value: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: validator for probe_path/dockerfile/context: rejects empty, backslashes, colons,
+        # NUL, absolute paths and ".." components. Does not check symlinks.
         path = PurePosixPath(value)
         if (
             not value
@@ -360,12 +417,16 @@ class ExecutionDeclaration(BaseModel):
     @field_validator("probe_path", "dockerfile")
     @classmethod
     def _file_path(cls, value: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: validator for probe_path/dockerfile: must not be "." (must name a file).
         if PurePosixPath(value) == PurePosixPath("."):
             raise ValueError("must name a file")
         return value
 
 
 class NormalizedManifestV2(NormalizedManifest):
+    # [CLASS DOC]
+    # Schema-2 manifest: NormalizedManifest with version "2" and a required execution declaration.
     """
     Version 2 adds the runtime execution declaration without changing schema 1.
 
@@ -379,6 +440,9 @@ class NormalizedManifestV2(NormalizedManifest):
 
     @model_validator(mode="after")
     def _finite_declarations(self) -> "NormalizedManifestV2":
+        # [FUNCTION DOC]
+        # HELPER: validator that walks the dumped model iteratively and raises ValueError if
+        # any float is NaN or infinite.
         pending = [self.model_dump()]
         while pending:
             value = pending.pop()

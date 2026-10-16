@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Template FastAPI app for a generated environment. At import time it builds the
+# module-level app via create_app with the environment class, action and
+# observation models, env name and max_concurrent_envs = 1 (raising ImportError
+# with an install hint if openenv cannot be imported). Imports work both as a
+# package and as top-level modules.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -50,6 +56,9 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default 8000) from the command
+    # line and runs the app with uvicorn (blocking).
     """
     Entry point for direct execution via uv run or python -m.
 

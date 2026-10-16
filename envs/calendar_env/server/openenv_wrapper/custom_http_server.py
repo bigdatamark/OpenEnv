@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Custom OpenEnv HTTP server for MCP-backed environments. Extends HTTPEnvServer with
+# header-aware /reset (which also drops, recreates and re-seeds the SQLite database),
+# /step and /state (which can run verification SQL queries) endpoints. Header names,
+# session manager and seed data come from config.py.
 """
 Generic HTTP Environment Server for MCP Integration.
 
@@ -28,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 
 class MCPHTTPEnvServer(HTTPEnvServer):
+    # [CLASS DOC]
+    # HTTPEnvServer subclass that keeps one shared environment instance for the HTTP
+    # endpoints (separate from per-WebSocket instances) and a session manager instance used
+    # to locate database files.
     """
     Generic HTTP Environment Server for any MCP integration.
 
@@ -39,6 +48,10 @@ class MCPHTTPEnvServer(HTTPEnvServer):
     """
 
     def __init__(self, env, action_cls, observation_cls):
+        # [FUNCTION DOC]
+        # Stores action/observation classes, calls the base constructor, then instantiates the
+        # shared env from the stored factory (or uses the instance as-is), and instantiates the
+        # configured session manager class.
         """Initialize custom HTTP server with MCP session manager."""
         # Store classes before calling super().__init__()
         self.action_cls = action_cls
@@ -62,6 +75,10 @@ class MCPHTTPEnvServer(HTTPEnvServer):
         self.session_manager = SessionManagerClass()
 
     def _get_header_value(self, headers: dict, header_key: str) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: returns the value of the HTTP header configured for header_key in HTTP_HEADERS
+        # (headers dict expected lowercased), falling back to HTTP_HEADER_DEFAULTS[header_key]
+        # when missing; logs a warning and returns the default if the key is not configured.
         """
         Get header value using configured header name.
 
@@ -84,6 +101,9 @@ class MCPHTTPEnvServer(HTTPEnvServer):
         return value
 
     def register_routes(self, app: Any) -> None:
+        # [FUNCTION DOC]
+        # Registers POST /reset, POST /step and GET /state on the given FastAPI app, closing over self.
+        # Raises: TypeError if app is not a FastAPI instance.
         if not isinstance(app, FastAPI):
             raise TypeError("app must be a FastAPI instance")
 
@@ -92,6 +112,13 @@ class MCPHTTPEnvServer(HTTPEnvServer):
         async def reset_with_database_refresh(
             request: Request, body: Optional[Dict[str, Any]] = Body(default=None)
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /reset. database_id comes from body "database_id", else the configured header,
+            # else default; access token from header. Resets the DB via _reset_database (optionally
+            # with body "sql_content"), sets the env request context, runs env.reset in a thread
+            # executor, and returns {"observation": dumped observation, "done", "reward"} with
+            # observation.metadata.database_reset_result set to the reset result dict.
+            # Side effects: destroys and reseeds the SQLite DB; mutates the shared env.
             """
             Reset the environment and optionally reset the database.
 
@@ -162,6 +189,12 @@ class MCPHTTPEnvServer(HTTPEnvServer):
         async def step_with_headers(
             request: Request, body: Dict[str, Any] = Body(...)
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /step. Reads database_id/access token from headers (logs a warning if no token),
+            # sets env request context, takes the action from body["action"] or the whole body, and
+            # builds action_cls from it. On deserialization failure returns an error observation dict
+            # with success False and reward -1.0. Otherwise runs env.step in a thread executor and
+            # returns {"observation", "done", "reward"}.
             # Extract headers using dynamic header names from config
             headers = dict(request.headers)
             database_id = self._get_header_value(headers, "database_id")
@@ -225,6 +258,13 @@ class MCPHTTPEnvServer(HTTPEnvServer):
         async def get_state(
             request: Request, verify_queries: List[str] = Query(default=[])
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # GET /state. Returns {"episode_id", "step_count", "database_id"} for the shared env, where
+            # database_id is the x-database-id header (default "default"). For each verify_queries
+            # query parameter, executes the raw SQL on that database file and appends
+            # {"query", "result": rows as dicts, "success"} or {"query", "error", "success": False}
+            # to "verification_results"; connection errors set "db_error".
+            # KNOWN ISSUE: header name is hard-coded instead of using HTTP_HEADERS; and arbitrary SQL (including writes, never committed) is executed from query params.
             headers = dict(request.headers)
             database_id = headers.get("x-database-id", "default")
 
@@ -274,6 +314,15 @@ class MCPHTTPEnvServer(HTTPEnvServer):
     def _reset_database(
         self, database_id: str, sql_content: Optional[str] = None
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Drops every non-sqlite_ table in the database file for database_id, recreates tables via
+        # session_manager.init_database(create_tables=True), then seeds it with sql_content if
+        # given, else with the configured seed function's SQL. Seeding strips blank lines and
+        # lines starting with "--", joins all lines and splits on ";" to execute statements one by one.
+        # Returns a dict {success, message, database_id, seeded, used_custom_sql,
+        # statements_executed} or, on any exception, {success False, message, database_id,
+        # seeded False, used_custom_sql}. Never raises.
+        # KNOWN ISSUE: calls session_manager.dispose_engine only if present, but CalendarSessionManager names it close_session, so cached engines are never disposed; naive splitting on ";" breaks string literals containing semicolons or "--"; a failed statement leaves the DB partially seeded (no rollback of drops).
         """
         Reset database to clean state with seed data.
 

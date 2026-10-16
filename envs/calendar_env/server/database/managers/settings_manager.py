@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# SQLAlchemy-based manager for user settings and settings watch channels in a per-database_id calendar DB.
 """
 Setting Manager - Database operations for settings management using SQLAlchemy
 """
@@ -17,13 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 class SettingManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id; constructs sessions per call via session_utils.
     """Manager for settings database operations using SQLAlchemy"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id and calls init_database, which only creates/caches the engine (no table creation).
         self.database_id = database_id
         init_database(database_id)
 
     def list_settings(self, user_id: str) -> list[SettingItem]:
+        # [FUNCTION DOC]
+        # Returns all Settings rows for user_id converted to SettingItem models.
+        # Raises: re-raises any DB/validation exception after logging. Session always closed.
         """List all settings"""
         session = get_session(self.database_id)
         try:
@@ -36,6 +45,9 @@ class SettingManager:
             session.close()
 
     def get_setting_by_id(self, setting_id: str, user_id: str) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Returns the formatted setting dict (see _format_setting) for the given setting id and
+        # user, or None if not found. Re-raises DB errors after logging.
         """Get a setting by its ID"""
         session = get_session(self.database_id)
         try:
@@ -56,6 +68,8 @@ class SettingManager:
             session.close()
 
     def _format_setting(self, setting: Settings) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: returns {"kind": "calendar#setting", etag, id, value, user_id} for a Settings row.
         """Format a setting for API response"""
         return {
             "kind": "calendar#setting",
@@ -68,6 +82,15 @@ class SettingManager:
     def watch_settings(
         self, watch_request: SettingsWatchRequest, user_id: str
     ) -> Channel:
+        # [FUNCTION DOC]
+        # Creates a WatchChannel row of resource_type "settings" for user_id: generates
+        # resource_id "settings-<user>-<8 hex>", resource_uri "/calendars/<user>/settings",
+        # expiration now+24h (naive UTC), stores webhook address/token/type and params as JSON.
+        # Returns a Channel model (kind "api#channel", id, resourceId, resourceUri, token,
+        # expiration ISO string with "Z").
+        # Raises: ValueError if a channel with the same id already exists; other DB errors.
+        # Side effects: DB insert/commit; rollback on error; logging.
+        # KNOWN ISSUE: expiration is always now+24h; any requested ttl in params is ignored despite the docstring/comment implying it is only a default. resource_uri also differs from the "/settings" documented in the tool definition.
         """
         Set up a watch channel for settings changes
 

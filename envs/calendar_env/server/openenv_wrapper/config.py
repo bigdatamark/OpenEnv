@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Calendar-specific configuration for the generic openenv_wrapper: constants naming the
+# MCP (MCP_NAME="Calendar"), import paths for the session manager, tool list, tool
+# handlers, seed data function and user manager, database dir/prefix, the HTTP header
+# names (x-database-id, x-access-token) and their defaults. Also provides lazy import
+# helpers that resolve those paths with importlib.
 """
 OpenEnv Wrapper Configuration for MCP Integration
 
@@ -103,6 +109,9 @@ HTTP_HEADER_DEFAULTS = {
 
 
 def get_session_manager_class():
+    # [FUNCTION DOC]
+    # HELPER: imports SESSION_MANAGER_MODULE and returns its SESSION_MANAGER_CLASS attribute.
+    # Raises ImportError/AttributeError if missing.
     """Dynamically import and return the SessionManager class"""
     import importlib
 
@@ -111,6 +120,8 @@ def get_session_manager_class():
 
 
 def get_mcp_tools():
+    # [FUNCTION DOC]
+    # HELPER: imports MCP_TOOLS_MODULE and returns its MCP_TOOLS_EXPORT list.
     """Dynamically import and return the MCP tools list"""
     import importlib
 
@@ -119,6 +130,8 @@ def get_mcp_tools():
 
 
 def get_tool_handlers():
+    # [FUNCTION DOC]
+    # HELPER: imports TOOL_HANDLERS_MODULE and returns a dict with its "MCP_TOOLS_LIST" and "TOOL_HANDLERS".
     """Dynamically import and return tool handlers"""
     import importlib
 
@@ -130,6 +143,8 @@ def get_tool_handlers():
 
 
 def get_seed_data_function():
+    # [FUNCTION DOC]
+    # HELPER: imports SEED_DATA_MODULE and returns the SEED_DATA_FUNCTION callable (returns seed SQL text).
     """Dynamically import and return the seed data function"""
     import importlib
 
@@ -138,6 +153,13 @@ def get_seed_data_function():
 
 
 def get_user_manager_class():
+    # [FUNCTION DOC]
+    # Imports and returns the configured UserManager class after monkey-patching
+    # compatibility aliases onto it: if it has get_first_user_from_db but not
+    # get_first_user_token, adds get_first_user_token(self, db_id); if it has
+    # get_user_by_access_token but not get_user_by_static_token, adds
+    # get_user_by_static_token(self, token, db_id=None).
+    # Side effects: mutates the class globally (persisting across calls).
     """
     Dynamically import and return the UserManager class with compatibility wrappers.
 
@@ -159,6 +181,10 @@ def get_user_manager_class():
     ):
 
         def get_first_user_token_wrapper(self, db_id: str):
+            # [FUNCTION DOC]
+            # HELPER: patched method; ignores db_id, returns the "static_token" from
+            # get_first_user_from_db()'s dict, or None if there is no user.
+            # KNOWN ISSUE: UserManager.get_first_user_from_db returns _format_user_response output, which has no "static_token" key, so this always returns None and the token fallback in MCPEnvironment never works.
             """Wrapper to get first user's token - Calendar compatibility"""
             user_dict = self.get_first_user_from_db()
             if user_dict:
@@ -177,6 +203,8 @@ def get_user_manager_class():
     ):
 
         def get_user_by_static_token_wrapper(self, token: str, db_id: str = None):
+            # [FUNCTION DOC]
+            # HELPER: patched method; ignores db_id and returns get_user_by_access_token(token).
             """Wrapper to get user by static token - Calendar compatibility"""
             return self.get_user_by_access_token(token)
 

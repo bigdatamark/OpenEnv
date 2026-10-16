@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Defines the abstract turn-based adapter that wraps an external agentic harness
+# (e.g. a CLI coding agent) as a long-lived process, plus the harness error hierarchy.
+# Concrete adapters implement process lifecycle, tool injection and streaming turns;
+# the base class provides the non-streaming send_message on top of the stream.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Turn-based adapter interface for external agentic harnesses (RFC 005)."""
@@ -13,22 +18,36 @@ from .events import HarnessEvent, HarnessEventType, HarnessResponse
 
 
 class HarnessError(Exception):
+    # [CLASS DOC]
+    # Base exception for all harness failures. No extra behavior.
     """Base error for agentic harness failures."""
 
 
 class HarnessStartupError(HarnessError):
+    # [CLASS DOC]
+    # Raised when the harness process fails to start or become ready in time.
     """The harness process failed to start or become ready in time."""
 
 
 class HarnessNotRunningError(HarnessError):
+    # [CLASS DOC]
+    # Raised when an operation needs a running harness but none is alive.
     """An operation required a running harness but none was alive."""
 
 
 class HarnessTurnTimeoutError(HarnessError):
+    # [CLASS DOC]
+    # Raised when a single conversational turn exceeds its wall-clock budget.
     """A single conversational turn exceeded its wall-clock budget."""
 
 
 class AgenticHarnessAdapter(ABC):
+    # [CLASS DOC]
+    # Abstract base for turn-based harness adapters. Holds the HarnessConfig in
+    # self.config. Subclasses override BUILTIN_TOOL_NAMES (a frozenset of the harness's
+    # own tool names, empty by default) so callers can detect name conflicts with
+    # injected environment tools. Abstract methods: start, stop, inject_tools,
+    # send_message_streaming, is_alive. Concrete: send_message.
     """
     Abstract adapter for a turn-based external agentic harness.
 
@@ -51,10 +70,15 @@ class AgenticHarnessAdapter(ABC):
     BUILTIN_TOOL_NAMES: frozenset[str] = frozenset()
 
     def __init__(self, config: HarnessConfig):
+        # [FUNCTION DOC]
+        # Stores the given HarnessConfig on self.config. No other side effects.
         self.config = config
 
     @abstractmethod
     async def start(self, working_directory: str) -> None:
+        # [FUNCTION DOC]
+        # Abstract. Must launch the harness process in the given working directory.
+        # Raises: HarnessStartupError on failure to start or become ready.
         """
         Start the harness process.
 
@@ -70,6 +94,9 @@ class AgenticHarnessAdapter(ABC):
 
     @abstractmethod
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Abstract. Must stop the process and release resources; must be idempotent
+        # (no error if never started or already stopped).
         """
         Stop the harness process and clean up resources.
 
@@ -82,6 +109,10 @@ class AgenticHarnessAdapter(ABC):
     async def inject_tools(
         self, tools: list[Tool], bridge_url: Optional[str] = None
     ) -> None:
+        # [FUNCTION DOC]
+        # Abstract. Must make the given tool definitions (and optional bridge URL) known to
+        # the harness before start(), via a harness-specific mechanism (config files,
+        # CLI flags, env vars).
         """
         Inject environment MCP tool definitions into the harness configuration.
 
@@ -100,6 +131,10 @@ class AgenticHarnessAdapter(ABC):
 
     @abstractmethod
     def send_message_streaming(self, message: str) -> AsyncIterator[HarnessEvent]:
+        # [FUNCTION DOC]
+        # Abstract. Must send one user message and return an async iterator of
+        # HarnessEvent objects for the turn; the last event must be TURN_COMPLETE with
+        # data keys "response" and optionally "done".
         """
         Send a message and stream intermediate events for one turn.
 
@@ -119,10 +154,17 @@ class AgenticHarnessAdapter(ABC):
 
     @abstractmethod
     async def is_alive(self) -> bool:
+        # [FUNCTION DOC]
+        # Abstract. Must return True if the harness process is still running.
         """Check whether the harness process is still running."""
         ...
 
     async def send_message(self, message: str) -> HarnessResponse:
+        # [FUNCTION DOC]
+        # Runs one turn non-streaming: drains send_message_streaming(message) into a list.
+        # Returns: HarnessResponse whose response is str(terminal.data["response"]) (default
+        # ""), events is the full event list, done is bool(terminal.data["done"]) (default False).
+        # Raises: HarnessError if no events were produced or the last event is not TURN_COMPLETE.
         """
         Send a message and collect the complete response for one turn.
 

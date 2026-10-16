@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the TextArena environment server: serialises TextArenaAction and parses observation/state
+# payloads.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -27,6 +30,8 @@ from .models import (
 
 
 class TextArenaEnv(EnvClient[TextArenaAction, TextArenaObservation, TextArenaState]):
+    # [CLASS DOC]
+    # EnvClient for TextArena; implements only the serialisation hooks.
     """
     HTTP client for the TextArena Environment.
 
@@ -52,6 +57,8 @@ class TextArenaEnv(EnvClient[TextArenaAction, TextArenaObservation, TextArenaSta
     """
 
     def _step_payload(self, action: TextArenaAction) -> Dict:
+        # [FUNCTION DOC]
+        # Returns a mapping with the action's "message".
         """
         Convert TextArenaAction to JSON payload for step request.
 
@@ -66,6 +73,11 @@ class TextArenaEnv(EnvClient[TextArenaAction, TextArenaObservation, TextArenaSta
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[TextArenaObservation]:
+        # [FUNCTION DOC]
+        # Builds TextArenaMessage objects from the observation's "messages" (non-mapping items skipped; defaults
+        # sender -1, empty content, category "MESSAGE") and a TextArenaObservation with prompt, current player,
+        # legal players and info, reward/done from the envelope and metadata from envelope or observation.
+        # Returns: StepResult with observation, reward, done (default False) and envelope metadata.
         """
         Parse server response into StepResult[TextArenaObservation].
 
@@ -105,6 +117,8 @@ class TextArenaEnv(EnvClient[TextArenaAction, TextArenaObservation, TextArenaSta
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> TextArenaState:
+        # [FUNCTION DOC]
+        # Returns a TextArenaState from the payload with defaults (env_id "unknown", 1 player, turn 0, etc.).
         return TextArenaState(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),

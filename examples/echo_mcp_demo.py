@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+# [MODULE DOC]
+# Demo of MCP tool usage through the step API (simulation mode) using an in-process EchoEnvironment: lists tools, calls
+# echo_message and echo_with_length, calls a non-existent tool to show error handling, then prints a summary.
+# Side effects: sys.path changes, imports the server-side environment directly, prints to stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -33,6 +37,8 @@ from openenv.core.env_server.mcp_types import (
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the demo described in the module doc, asserting observation types (AssertionError if unexpected).
     """Demonstrate MCP tool usage with EchoEnvironment."""
     print("=" * 60)
     print("Echo MCP Demo - Canonical SIM Mode Pattern")

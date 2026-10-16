@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests that .claude/hooks/lint.sh only reports formatting problems and never modifies
+# the working tree. Runs the real hook in a throwaway git repo with a stub "uv" on PATH
+# that rewrites/reports a NEEDSFORMAT marker in .py and .md files.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """`.claude/hooks/lint.sh` must never modify the working tree.
@@ -59,6 +63,11 @@ MARKER = "def keep_me():\n    return 'uncommitted work'\n"
 
 @pytest.fixture
 def repo(tmp_path: pathlib.Path) -> pathlib.Path:
+    # [FUNCTION DOC]
+    # Fixture: creates a temp git repo (hermetic config, hooks disabled) with committed
+    # src/mod.py and envs/demo_env/README.md containing the marker, plus a stub uv script in
+    # a sibling stubbin dir. Skips if git is missing. Returns: the repo path.
+    # Side effects: filesystem, git subprocesses.
     """A git repo whose committed files are already 'unformatted'."""
     if shutil.which("git") is None:  # pragma: no cover
         pytest.skip("git is required")
@@ -99,6 +108,9 @@ def repo(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def _run_hook(repo: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    # [FUNCTION DOC]
+    # HELPER: Runs lint.sh with bash in the repo, PATH limited to the stub dir and system
+    # bins and HOME set to the repo's parent. Returns: the CompletedProcess (text output).
     env = {
         "PATH": f"{repo.parent / 'stubbin'}:/usr/bin:/bin:/usr/sbin:/sbin",
         "HOME": str(repo.parent),
@@ -113,6 +125,9 @@ def _run_hook(repo: pathlib.Path) -> subprocess.CompletedProcess[str]:
 
 
 def _dirty(repo: pathlib.Path) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the non-empty lines of git status --porcelain for the repo.
+    # Raises CalledProcessError if git fails.
     out = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=repo,
@@ -124,6 +139,8 @@ def _dirty(repo: pathlib.Path) -> list[str]:
 
 
 def test_hook_preserves_uncommitted_python_edits(repo: pathlib.Path) -> None:
+    # [FUNCTION DOC]
+    # Appends uncommitted code to src/mod.py, runs the hook, asserts the code survives.
     """The author's uncommitted work must survive a hook run.
 
     This is the data-loss case: `git checkout -- $CHANGED` restores from HEAD,
@@ -142,6 +159,8 @@ def test_hook_preserves_uncommitted_python_edits(repo: pathlib.Path) -> None:
 
 
 def test_hook_leaves_no_files_modified(repo: pathlib.Path) -> None:
+    # [FUNCTION DOC]
+    # Clean tree stays clean after a hook run (Markdown included).
     """A run on a clean tree must leave it clean, Markdown included.
 
     The old restore step filtered to `*.py`, so reformatted Markdown was left
@@ -158,6 +177,8 @@ def test_hook_leaves_no_files_modified(repo: pathlib.Path) -> None:
 
 
 def test_hook_still_fails_when_formatting_is_needed(repo: pathlib.Path) -> None:
+    # [FUNCTION DOC]
+    # Hook exits non-zero and mentions "format" when the marker is present.
     """Not writing must not mean not reporting: the gate still has to fail."""
     result = _run_hook(repo)
 
@@ -166,6 +187,8 @@ def test_hook_still_fails_when_formatting_is_needed(repo: pathlib.Path) -> None:
 
 
 def test_hook_passes_when_everything_is_formatted(repo: pathlib.Path) -> None:
+    # [FUNCTION DOC]
+    # After replacing the marker and committing, the hook exits 0 and leaves the tree clean.
     """And it must still succeed when there is nothing to fix."""
     for path in repo.rglob("*"):
         if path.is_file() and path.suffix in {".py", ".md"}:

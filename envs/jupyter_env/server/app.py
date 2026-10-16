@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# FastAPI entry point for the Jupyter environment. At import time loads the
+# env-local .env file into os.environ (without overriding), defaults
+# ENABLE_WEB_INTERFACE to "true", and builds the app with MCP call-tool action
+# and observation types, a generic reset observation, up to
+# MAX_CONCURRENT_ENVS (default 4) sessions and a custom Gradio UI builder.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -24,6 +30,10 @@ except ImportError:  # pragma: no cover
 
 
 def _load_env_file() -> None:
+    # [FUNCTION DOC]
+    # HELPER: Reads envs/jupyter_env/.env if present; for each non-empty,
+    # non-comment "KEY=VALUE" line, strips whitespace and surrounding quotes and
+    # sets the variable only if not already set. Side effect: mutates os.environ.
     """Load env-local .env values for local development only."""
 
     candidate = Path(__file__).resolve().parents[1] / ".env"
@@ -55,6 +65,8 @@ app = create_app(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Runs uvicorn serving the app on 0.0.0.0:8000 (blocking).
     """Entrypoint for direct local serving."""
 
     import uvicorn

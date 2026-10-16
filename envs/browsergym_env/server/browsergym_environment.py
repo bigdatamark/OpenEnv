@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Server-side BrowserGym environment: wraps a BrowserGym gymnasium env (Playwright browser) and converts its raw
+# observations (accessibility tree, DOM, screenshot, goal messages) to BrowserGymObservation. Every BrowserGym call
+# is funneled through one module-wide single-thread executor because the sync Playwright instance is thread-bound.
+# Also provides a web-playground renderer.
 """BrowserGym Environment implementation for OpenEnv.
 
 This module wraps the BrowserGym framework to provide a compatible interface
@@ -36,11 +41,17 @@ _PLAYWRIGHT_THREAD = ThreadPoolExecutor(max_workers=1, thread_name_prefix="brows
 
 
 def _on_playwright_thread(fn, *args, **kwargs):
+    # [FUNCTION DOC]
+    # HELPER: Submits a callable with arguments to the single Playwright thread and blocks for its result (re-raising
+    # its exceptions).
     """Run `fn` on the thread that owns the BrowserGym Playwright instance."""
     return _PLAYWRIGHT_THREAD.submit(fn, *args, **kwargs).result()
 
 
 def _to_jsonable(value: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively converts values to JSON-safe objects: primitives pass through, dict keys become strings, lists/
+    # tuples become lists, array-likes via tolist(), scalars via item(), anything else via str().
     """Convert BrowserGym payload values into JSON-safe Python objects."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -62,6 +73,9 @@ def _to_jsonable(value: Any) -> Any:
 
 
 def _get_axtree_txt(obs: Dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the observation's "axtree_txt" if non-empty, else flattens "axtree_object" with BrowserGym's
+    # utility; returns "" if neither is available or conversion fails (logged).
     """Extract accessibility tree text from BrowserGym observation.
 
     BrowserGym returns raw `axtree_object` which needs to be converted to text
@@ -88,6 +102,9 @@ def _get_axtree_txt(obs: Dict[str, Any]) -> str:
 
 
 def _get_pruned_html(obs: Dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the observation's "pruned_html" if non-empty, else flattens "dom_object" to HTML and prunes it with
+    # BrowserGym utilities; returns "" on absence or failure (logged).
     """Extract pruned HTML from BrowserGym observation.
 
     BrowserGym returns raw `dom_object` which needs to be converted to text
@@ -126,6 +143,10 @@ _MINIWOB_LOAD_HELP = (
 
 
 class BrowserGymEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment around one BrowserGym gym env. Supports concurrent sessions but requires single-thread
+    # execution. Tracks benchmark, task, browser settings, extra gym kwargs, state (episode id, steps, goal, URL,
+    # cumulative reward) and the last raw observation/info.
     """BrowserGym environment wrapper for OpenEnv.
 
     This environment wraps BrowserGym's Gymnasium-compatible environments to
@@ -146,6 +167,12 @@ class BrowserGymEnvironment(Environment):
         include_screenshot: bool = False,
         **gym_kwargs: Any,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration, imports the benchmark's browsergym package (registering its gym ids; unknown benchmarks import
+        # plain browsergym), builds the env id and creates the gym env, and initializes state.
+        # Raises: ValueError if the benchmark package is missing or gym.make fails.
+        # KNOWN ISSUE: gym.make is called on the caller's thread, not the Playwright thread (works only if env creation does
+        # not touch Playwright).
         """Initialize the BrowserGym environment.
 
         Args:
@@ -206,11 +233,16 @@ class BrowserGymEnvironment(Environment):
         self._last_info: Optional[Dict[str, Any]] = None
 
     def _build_env_id(self, task_name: Optional[str]) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "browsergym/<benchmark>.<task>" or "browsergym/<benchmark>" when no task is given.
         if task_name:
             return f"browsergym/{self.benchmark}.{task_name}"
         return f"browsergym/{self.benchmark}"
 
     def _create_gym_env(self, env_id: str):
+        # [FUNCTION DOC]
+        # HELPER: Calls gym.make with headless flag, viewport dict, timeout and extra gym kwargs. Raises ValueError (with an
+        # install hint) on any failure.
         try:
             return gym.make(
                 env_id,
@@ -232,6 +264,9 @@ class BrowserGymEnvironment(Environment):
             raise ValueError(message) from e
 
     def _switch_task_if_needed(self, requested_task: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: If the requested task differs from the current one, creates a new gym env for it, swaps it in (updating task
+        # name and env id), then closes the previous env on the Playwright thread (failures logged).
         if requested_task == (self.task_name or ""):
             return
 
@@ -255,6 +290,12 @@ class BrowserGymEnvironment(Environment):
         seed: Optional[int] = None,
         task_name: Optional[str] = None,
     ) -> BrowserGymObservation:
+        # [FUNCTION DOC]
+        # Starts an episode. Inputs: optional seed (passed to gym reset), optional task_name (else the current task).
+        # Switches task if needed, creates a fresh state with a new UUID, resets the gym env on the Playwright thread. If reset
+        # raises an AttributeError mentioning "context", closes the env and retries once. For MiniWoB, a "core is not defined"
+        # error is re-raised as ValueError with setup help. Returns the converted observation with reward 0.0, done False.
+        # KNOWN ISSUE: passing an empty task_name cannot switch back to "no task" once a task is set (falls back to current).
         """Reset the environment with a specific task.
 
         Args:
@@ -304,6 +345,12 @@ class BrowserGymEnvironment(Environment):
         return self._create_observation(obs, info, done=False, reward=0.0)
 
     def step(self, action: BrowserGymAction) -> BrowserGymObservation:
+        # [FUNCTION DOC]
+        # Increments step_count and executes action_str in the gym env on the Playwright thread. On success updates
+        # cumulative reward and goal (from info), returns the converted observation with done = terminated or truncated.
+        # On any exception returns an observation with the error message, last_action_error True, done False, reward 0.0, and
+        # text/url taken from the last raw observation's "text"/"url" keys.
+        # KNOWN ISSUE: raw BrowserGym observations usually have no "text" key, so the error observation's text is typically empty.
         """Execute an action in the environment.
 
         Args:
@@ -353,6 +400,11 @@ class BrowserGymEnvironment(Environment):
         done: bool,
         reward: float,
     ) -> BrowserGymObservation:
+        # [FUNCTION DOC]
+        # HELPER: Converts a raw BrowserGym observation and info into a BrowserGymObservation: axtree text and pruned HTML,
+        # text = axtree text else pruned HTML (or the obs itself if it is a string), URL, goal (joined text parts of
+        # goal_object messages, else legacy "goal"), screenshot only if enabled, last_action_error flag, and metadata with the
+        # JSON-safe raw observation (minus DOM/axtree/screenshot) and info. Side effects: updates state current_url and goal.
         """Convert BrowserGym observation to OpenEnv format.
 
         Args:
@@ -446,6 +498,10 @@ class BrowserGymEnvironment(Environment):
         )
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web-playground hook: returns an HTML card with escaped goal, URL, the screenshot as an 800px-max JPEG data URI and the
+        # last action error (observation error or raw last_action_error). Returns None if there is no screenshot key or both
+        # screenshot and goal are empty. Raises KeyError if expected observation keys are missing.
         """Draw the page screenshot with the goal, the URL and the last action error."""
         if "screenshot" not in observation:
             return None
@@ -488,10 +544,14 @@ class BrowserGymEnvironment(Environment):
 
     @property
     def state(self) -> BrowserGymState:
+        # [FUNCTION DOC]
+        # Property returning the live BrowserGymState.
         """Get the current environment state."""
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the gym env on the Playwright thread if one exists; failures are logged.
         """Clean up environment resources."""
         if hasattr(self, "gym_env"):
             try:

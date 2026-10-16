@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines the "static.manifest" grader comparing manifest-declared reward tolerances and
+# episode timeout against the severity policy's declaration bounds.
 """The `static.manifest` grader."""
 
 import time
@@ -9,6 +12,9 @@ from ...types import CheckStatus, Level, ProviderCapability
 
 
 class StaticManifestGrader:
+    # [CLASS DOC]
+    # Static-level grader with no requirements or dependencies, configured with
+    # DeclarationBounds from the policy.
     """Checks declared tolerances against the severity policy bounds."""
 
     check_id = "static.manifest"
@@ -18,12 +24,22 @@ class StaticManifestGrader:
     depends_on: tuple[str, ...] = ()
 
     def __init__(self, bounds: DeclarationBounds):
+        # [FUNCTION DOC]
+        # Stores the bounds.
         self._bounds = bounds
 
     def applies_to(self, manifest: NormalizedManifest) -> bool:
+        # [FUNCTION DOC]
+        # Always returns True.
         return True
 
     def run(self, subject) -> CheckResult:
+        # [FUNCTION DOC]
+        # Fails if oracle_tolerance > max_oracle_tolerance, floor_margin < min_floor_margin,
+        # variance_tolerance (when set) > max_variance_tolerance, or resources.episode_timeout_s
+        # > max_episode_timeout_s; each violation becomes an evidence line. Returns a
+        # CheckResult with measured values and bounds, PASS/FAIL, remediation on failure and
+        # elapsed duration. No side effects.
         started = time.monotonic()
         reward = subject.manifest.reward
         bounds = self._bounds

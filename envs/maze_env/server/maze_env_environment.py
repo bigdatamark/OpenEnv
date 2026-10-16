@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# OpenEnv Environment implementation wrapping the Maze game engine. Provides an 8x8 default maze
+# layout, builds MazeObservations with legal actions and metadata (maze grid, status, exit cell,
+# step), and offers optional web playground hooks (action buttons and an HTML board render).
+# Raises ImportError at import time if numpy is missing.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -50,6 +55,9 @@ DEFAULT_MAZE = np.array(
 
 
 class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
+    # [CLASS DOC]
+    # Server-side maze environment; one Maze instance per environment, supports concurrent sessions.
+    # Tracks a MazeState (episode id, step count, done, position, exit, status) kept in sync with the engine.
     """
     A maze environment built on a simple gridworld.
 
@@ -68,6 +76,11 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
         start_cell: Tuple[int, int] = (0, 0),
         exit_cell: Optional[Tuple[int, int]] = None,
     ):
+        # [FUNCTION DOC]
+        # Inputs: maze_array - optional 2D grid (default DEFAULT_MAZE); start_cell - (col, row), default
+        # (0, 0); exit_cell - optional (col, row), default bottom-right. Creates the Maze engine without
+        # rendering, a fresh MazeState with a random UUID, and syncs state. Raises engine exceptions for
+        # invalid start/exit cells.
         """Initialize the Maze environment."""
         self._maze_array = np.array(
             maze_array if maze_array is not None else DEFAULT_MAZE, dtype=int
@@ -99,6 +112,12 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> MazeObservation:
+        # [FUNCTION DOC]
+        # Starts a new episode. Inputs: seed - if given, seeds numpy's global RNG (global side effect);
+        # start_cell - overrides the configured start; episode_id - ignored. Resets the engine, creates a
+        # new MazeState with a fresh UUID (not episode_id), increments the reset counter, syncs state.
+        # Returns: MazeObservation with reward 0.0, done False and status "playing".
+        # Raises: engine Exception for an invalid start cell.
         """
         Reset the environment.
 
@@ -126,6 +145,9 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> MazeObservation:
+        # [FUNCTION DOC]
+        # Applies action.action (cast to int) to the engine, increments step_count, marks done on WIN or
+        # LOSE, syncs state, and returns the observation with the step reward. timeout_s is ignored.
         """
         Execute a step in the environment.
 
@@ -147,6 +169,10 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
     def _build_observation(
         self, reward: float, done: bool, status: Status
     ) -> MazeObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds a MazeObservation from the engine: current/previous positions, legal actions
+        # (empty when done), reward, done, and metadata with the maze grid as nested lists, lowercase
+        # status name, exit cell and step count.
         legal_actions = (
             [int(a) for a in self.env.possible_actions()] if not done else []
         )
@@ -168,6 +194,9 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns a list of (label, action payload) pairs, one per legal action in
+        # sorted order, labelled with the index and direction name.
         """The legal moves as buttons, named by direction."""
         names = {0: "up", 1: "down", 2: "left", 3: "right"}
         return [
@@ -176,6 +205,10 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns an HTML grid string drawing walls, free cells, the outlined exit
+        # and the agent dot, using CSS theme variables; returns None if the observation has no current_position.
+        # Raises KeyError if the observation lacks metadata.maze or metadata.exit_cell.
         """Draw the maze: walls, free cells, the exit (outlined) and the agent (dot)."""
         if "current_position" not in observation:
             return None
@@ -205,6 +238,8 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
         )
 
     def _sync_state(self, done: bool) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Copies done, current position, exit cell and lowercase status from the engine into the state.
         self._state.done = done
         self._state.current_position = [int(x) for x in self.env.current_cell]
         self._state.exit_cell = list(self.env.exit_cell)
@@ -212,6 +247,8 @@ class MazeEnvironment(Environment[MazeAction, MazeObservation, MazeState]):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property: returns the current MazeState object (not a copy).
         """
         Get the current environment state.
 

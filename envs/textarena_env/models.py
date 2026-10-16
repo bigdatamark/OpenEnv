@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for TextArena games: a message, the action, the observation and the state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -20,6 +22,9 @@ from pydantic import BaseModel, Field
 
 
 class TextArenaMessage(BaseModel):
+    # [CLASS DOC]
+    # One message seen by a player: sender id (-1 for the game), content text and category name (e.g.
+    # PROMPT, MESSAGE).
     """Single message observed by a player."""
 
     sender_id: int
@@ -28,12 +33,17 @@ class TextArenaMessage(BaseModel):
 
 
 class TextArenaAction(Action):
+    # [CLASS DOC]
+    # Action carrying the agent's raw text move in "message" (e.g. a bracketed Wordle guess).
     """Action issued by the agent for TextArena games."""
 
     message: str
 
 
 class TextArenaObservation(Observation):
+    # [CLASS DOC]
+    # Observation with the prompt (game instructions), converted messages, current player id, sorted legal
+    # player ids and an info mapping (TextArena step info plus any reward_signals).
     """Observation returned from any TextArena game."""
 
     prompt: str
@@ -44,6 +54,9 @@ class TextArenaObservation(Observation):
 
 
 class TextArenaState(State):
+    # [CLASS DOC]
+    # Server state: episode id, step count, TextArena env id, number of players, optional max turns, current
+    # turn, last reward, last info and a raw snapshot of the underlying TextArena state.
     """Structured state snapshot for the server."""
 
     episode_id: Optional[str] = None

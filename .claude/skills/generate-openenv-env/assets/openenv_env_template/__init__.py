@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Template package root for a generated OpenEnv environment (placeholders like __ENV_NAME__ are
+# substituted by the generate-openenv-env skill). Re-exports the client and the action/observation models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

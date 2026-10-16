@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Orchestrates `openenv validate`: detects the package signature, digests the source,
+# parses the manifest, runs static graders, optionally builds/starts the package via a
+# validation provider and runs runtime graders over collected wire evidence, fills in
+# SKIP results for policy checks without graders, guards against the source changing
+# during the run, applies the severity policy and builds the (optionally bundled) report.
 """Validation orchestration: parse → grade → apply policy → report."""
 
 import hashlib
@@ -34,6 +40,13 @@ _DIGEST_EXCLUDED_DIRS = {".git", "__pycache__", ".venv", ".worktrees", "outputs"
 
 
 def source_digest(package_root: Path) -> str:
+    # [FUNCTION DOC]
+    # Computes a sha256 hex digest over the package tree: walks all paths except those under
+    # .git, __pycache__, .venv, .worktrees or outputs; hashes each regular file's relative
+    # POSIX path, NUL, contents, NUL in sorted path order. Opens files with O_NOFOLLOW/O_NONBLOCK
+    # and verifies the opened file is the same regular file seen during the walk.
+    # Raises ValueError on symlinks, non-regular non-directory entries, or files that changed
+    # between walk and read; OSError on I/O failures.
     """
     Deterministic sha256 over the package tree (relative paths + file contents).
 
@@ -78,6 +91,8 @@ def source_digest(package_root: Path) -> str:
 
 
 def default_parser_registry() -> ParserRegistry:
+    # [FUNCTION DOC]
+    # Returns a ParserRegistry containing only the openenv.yaml parser.
     """The parsers shipped in this build."""
     registry = ParserRegistry()
     registry.register(OpenEnvYamlParser())
@@ -85,6 +100,9 @@ def default_parser_registry() -> ParserRegistry:
 
 
 def default_grader_registry(policy: SeverityPolicy) -> GraderRegistry:
+    # [FUNCTION DOC]
+    # Returns a GraderRegistry with the static manifest grader (using the policy's bounds)
+    # and the three runtime graders (reward, observation schema, state contract).
     """The graders shipped in this build, including their selection metadata."""
     registry = GraderRegistry()
     registry.register(StaticManifestGrader(policy.bounds))
@@ -95,6 +113,9 @@ def default_grader_registry(policy: SeverityPolicy) -> GraderRegistry:
 
 
 def _outcome(check_id, status, reason, *, started=None, measured=None):
+    # [FUNCTION DOC]
+    # HELPER: builds a CheckResult with a single evidence line, optional measured values and
+    # duration since started (0 when started is None).
     return CheckResult(
         check_id=check_id,
         status=status,
@@ -105,6 +126,10 @@ def _outcome(check_id, status, reason, *, started=None, measured=None):
 
 
 def _applicable(check_id, manifest):
+    # [FUNCTION DOC]
+    # HELPER: decides whether a policy check id without a selected grader applies to the
+    # manifest: always true without a manifest; rubric checks need rubric_tree; the task
+    # declaration check needs task_api or declared task counts; everything else true.
     if manifest is None:
         return True
     if check_id in {"runtime.rubric_introspectable", "runtime.reward_attribution"}:
@@ -117,6 +142,22 @@ def _applicable(check_id, manifest):
 
 
 def _runtime(subject, graders, *, skip_build, provider):
+    # [FUNCTION DOC]
+    # HELPER: runtime phase. Produces a "runtime.startup" result plus runtime grader results.
+    # Skips (SKIP startup) when skip_build, the manifest is not schema 2, credentials are
+    # required, the provider cannot enforce the network mode, lacks GPU when GPUs are declared,
+    # or lacks image build. Loads the runtime plan, defaults provider to Docker (lazy import),
+    # pre-validates a LaunchSpec with a placeholder image and random run id, builds, starts,
+    # inspects, and collects runtime evidence within the episode timeout; startup is PASS
+    # or FAIL if collection reported a failure reason; then executes runtime graders with the
+    # startup result as prior. Exception mapping: RuntimePlanError/StartupError -> FAIL
+    # (message truncated to 4096), other ProviderError -> ERROR, KeyboardInterrupt (keeping
+    # partial evidence from RuntimeCollectionInterrupted) -> ERROR "validation interrupted"
+    # (the interrupt is swallowed), any other Exception -> ERROR with the type name.
+    # Always stops a started subject; a teardown failure turns startup into ERROR and is
+    # recorded in cleanup. Returns (results, attempted build flag, plan, evidence,
+    # inspection dict, cleanup dict).
+    # Side effects: builds images and starts/stops containers via the provider; network I/O.
     """Own build/start/collection/stop and retain failure evidence through teardown."""
     manifest = subject.manifest
     plan = None
@@ -265,6 +306,21 @@ def run_validation(
     provider=None,
     artifacts_dir: Path | None = None,
 ) -> ValidationReport | ValidationReportV2:
+    # [FUNCTION DOC]
+    # Validates a package directory and returns a report.
+    # Chooses policy v2 for runtime/semantic ceilings else v1 when none given; raises
+    # PolicyError if a runtime run uses a policy without runtime.startup. Detects signature
+    # (SignatureError/UnsupportedPackageError propagate), digests source (failure -> ERROR
+    # static.manifest and no parse), parses the manifest (ManifestError -> FAIL static.manifest
+    # with errors and remediation), selects graders up to max_level, runs static graders, and
+    # for runtime levels runs _runtime (adding RUNTIME to levels_run if a build was attempted).
+    # For runtime runs it also adds SKIP results for every local policy check at runtime/
+    # semantic level within the ceiling that produced no result and applies (reason: not
+    # implemented, invalid manifest, or unmet dependencies), and re-digests the source: if
+    # unverifiable or changed, replaces runtime.startup with an ERROR and turns every grader
+    # transitively depending on it into SKIP. Builds a V2 report for runtime runs or V2
+    # manifests, else V1, with verdict from apply_policy in the local lane. If artifacts_dir
+    # is set, writes a redacted runtime reproduction bundle there.
     """
     Validate a package end to end and return the report.
 

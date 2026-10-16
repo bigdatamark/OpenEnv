@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Self-contained FastAPI server (no openenv dependency) used by the opt-in ACA integration
+# test. Implements GET /health and a WebSocket /ws speaking the OpenEnv simulation
+# protocol (reset/step/state/close). Episode state is a module-level mapping shared by all
+# connections. Run directly to serve on 0.0.0.0:8000.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Minimal OpenEnv-protocol server used by the opt-in ACA integration test.
@@ -26,11 +31,20 @@ _episode = {"steps": 0, "open": False}
 
 @app.get("/health")
 def health() -> dict:
+    # [FUNCTION DOC]
+    # Returns {"status": "ok"}.
     return {"status": "ok"}
 
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
+    # [FUNCTION DOC]
+    # Accepts the socket and loops over JSON text messages: "reset" zeroes steps, marks the
+    # episode open and replies with an observation echoing data (reward 0); "step" increments
+    # steps and replies with an observation including the step count (reward 1.0); "state"
+    # replies with steps/open/ready; "close" marks closed, acks and closes the socket; any
+    # other type replies with an UNKNOWN_TYPE error. On disconnect marks the episode closed.
+    # Side effects: mutates the module-level episode mapping.
     await websocket.accept()
     try:
         while True:

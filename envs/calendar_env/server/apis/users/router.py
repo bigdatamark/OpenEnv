@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI routers for user lookups: "router" (prefix /users) for lookup by email using the x-database-id header, and
+# "api_router" for GET /api/user-info authenticated by access token.
 """
 User API endpoints for user management operations
 """
@@ -17,6 +20,8 @@ api_router = APIRouter(tags=["user-info"])
 
 
 def get_user_manager(database_id: str) -> UserManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new UserManager for the database id.
     """Get user manager for the specified database"""
     return UserManager(database_id)
 
@@ -25,6 +30,9 @@ def get_user_manager(database_id: str) -> UserManager:
 async def get_user_by_email(
     email: str, x_database_id: str = Header(alias="x-database-id")
 ):
+    # [FUNCTION DOC]
+    # GET /users/email/{email}: returns the user record for the email. Raises: HTTPException 400 if the database header is
+    # empty, 404 if no user, 500 on other errors.
     """
     Get user details by email address
 
@@ -59,6 +67,9 @@ async def get_user_by_email(
 async def get_authenticated_user_info(
     auth_context: tuple[str, str] = Depends(authenticate_user_with_token),
 ):
+    # [FUNCTION DOC]
+    # GET /api/user-info: resolves (database id, user id) from x-database-id/x-access-token via the auth dependency and
+    # returns user_id, name and email of that user. Raises: HTTPException 404 if not found, 500 on other errors.
     """
     Get authenticated user information using access token
 

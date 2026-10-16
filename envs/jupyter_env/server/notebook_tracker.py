@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# In-memory notebook cell history for one episode, used to render the UI and to
+# produce the text summary returned by the get_notebook_state tool.
 """
 Notebook state tracker.
 
@@ -13,6 +16,10 @@ from .e2b_sandbox import CellResult
 
 
 class NotebookTracker:
+    # [CLASS DOC]
+    # Holds an ordered list of cell dicts (keys: cell_id, cell_type, code, output,
+    # error, execution_count, has_image, images, success) and a running execution
+    # counter.
     """
     In-memory cell history for one episode.
 
@@ -23,6 +30,8 @@ class NotebookTracker:
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Starts with no cells and counter 0.
         self.cells: List[Dict[str, Any]] = []
         self._exec_count: int = 0
 
@@ -31,6 +40,9 @@ class NotebookTracker:
     # ──────────────────────────────────────────────────────────────────────────
 
     def add_code_cell(self, code: str, result: CellResult) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Increments the counter, appends a new "code" cell built from the code and
+        # result, and returns the cell dict.
         """Append a new code cell with its execution result."""
         self._exec_count += 1
         cell = self._make_cell("code", code, result)
@@ -38,6 +50,10 @@ class NotebookTracker:
         return cell
 
     def update_last_code_cell(self, code: str, result: CellResult) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Removes the last cell (of any type) if present and decrements the counter
+        # (not below 0), then appends the new code cell so it reuses the execution
+        # number. Returns the new cell dict.
         """
         Replace the last cell with a new code + result pair.
 
@@ -51,6 +67,9 @@ class NotebookTracker:
         return self.add_code_cell(code, result)
 
     def add_shell_cell(self, command: str, result: CellResult) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Increments the counter and appends a "shell" cell whose code is "$ <command>".
+        # Returns the cell dict.
         """Append a shell command cell."""
         self._exec_count += 1
         cell = self._make_cell("shell", f"$ {command}", result)
@@ -58,6 +77,8 @@ class NotebookTracker:
         return cell
 
     def reset(self) -> None:
+        # [FUNCTION DOC]
+        # Clears all cells and resets the counter.
         """Clear all cells — called on episode reset."""
         self.cells = []
         self._exec_count = 0
@@ -69,6 +90,12 @@ class NotebookTracker:
     def get_state_summary(
         self, max_cells: int = 10, include_images: bool = False
     ) -> str:
+        # [FUNCTION DOC]
+        # Returns "No cells executed yet." if empty; otherwise a newline-joined text of
+        # the last max_cells cells: a header with the execution count and the first 120
+        # code characters (newlines shown as an arrow), then the first 300 characters of
+        # output and of error if present, and an image count line; with include_images
+        # each image is appended as a PNG data URL.
         """
         Compact human-readable summary of recent cells for LLM context.
 
@@ -106,6 +133,9 @@ class NotebookTracker:
     def _make_cell(
         self, cell_type: str, code: str, result: CellResult
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a cell dict with a new UUID, the given type and code, formatted
+        # output, the result's error, current counter, image flag/list and success.
         return {
             "cell_id": str(uuid4()),
             "cell_type": cell_type,
@@ -120,6 +150,9 @@ class NotebookTracker:
 
     @staticmethod
     def _format_output(result: CellResult) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Static. Joins stripped stdout, the text results and an
+        # "[N image(s) generated]" note with newlines.
         parts: List[str] = []
         if result.stdout:
             parts.append(result.stdout.strip())

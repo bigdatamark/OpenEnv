@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server package for Grid World; re-exports GridWorldEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

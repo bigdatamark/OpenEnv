@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# OpenEnv wrapper package: re-exports the MCP-over-OpenEnv pieces (MCP_NAME config,
+# action/observation data models, MCPEnvironment, MCPHTTPEnvServer, MCPEnvClient) and
+# sets package metadata strings (__version__, __author__, __description__).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

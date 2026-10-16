@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for scripts/verify_private_spaces.py (imported via sys.path): Gradio HTML and reset
+# response checks, the gradio_web probe sequence, probe dispatch, and main() probing a
+# READY domain while the space runtime is APP_STARTING.
 """Tests for the Hugging Face Space verification helper."""
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ def make_response(
     status_code: int = 200,
     content_type: str = "text/html; charset=utf-8",
 ) -> Mock:
+    # [FUNCTION DOC]
+    # HELPER: Returns a Mock HTTP response with the given status code and Content-Type header.
     response = Mock()
     response.status_code = status_code
     response.headers = {"Content-Type": content_type}
@@ -25,6 +31,8 @@ def make_response(
 
 
 def test_gradio_web_ok_html_accepts_gradio_markers() -> None:
+    # [FUNCTION DOC]
+    # HTML containing a gradio-app element is accepted.
     response = make_response()
 
     assert verify_private_spaces.gradio_web_ok_html(
@@ -34,6 +42,8 @@ def test_gradio_web_ok_html_accepts_gradio_markers() -> None:
 
 
 def test_gradio_web_ok_html_rejects_non_gradio_html() -> None:
+    # [FUNCTION DOC]
+    # A Hub 404 HTML page is rejected.
     response = make_response()
 
     assert not verify_private_spaces.gradio_web_ok_html(
@@ -43,6 +53,8 @@ def test_gradio_web_ok_html_rejects_non_gradio_html() -> None:
 
 
 def test_gradio_web_ok_reset_requires_observation_payload() -> None:
+    # [FUNCTION DOC]
+    # Reset JSON is accepted only if it has an observation key.
     response = make_response(content_type="application/json")
 
     assert verify_private_spaces.gradio_web_ok_reset(
@@ -53,6 +65,9 @@ def test_gradio_web_ok_reset_requires_observation_payload() -> None:
 
 @patch("verify_private_spaces.run_probe_request")
 def test_probe_gradio_web_space_checks_root_and_reset(mock_run_probe_request) -> None:
+    # [FUNCTION DOC]
+    # With run_probe_request patched, the probe hits /, /web, /web/, /health, /metadata,
+    # /schema and finally POST /reset with no payload.
     mock_run_probe_request.side_effect = (
         lambda session, base_url, headers, method, path, timeout, payload=None, ok_fn=None: {
             "method": method,
@@ -84,6 +99,8 @@ def test_probe_gradio_web_space_checks_root_and_reset(mock_run_probe_request) ->
 
 @patch("verify_private_spaces.probe_gradio_web_space")
 def test_probe_space_dispatches_gradio_web(mock_probe_gradio_web_space) -> None:
+    # [FUNCTION DOC]
+    # probe_space with profile gradio_web delegates to probe_gradio_web_space.
     mock_probe_gradio_web_space.return_value = [{"ok": True}]
 
     result = verify_private_spaces.probe_space(
@@ -98,6 +115,9 @@ def test_probe_space_dispatches_gradio_web(mock_probe_gradio_web_space) -> None:
 
 
 def test_main_probes_ready_domain_while_app_starting(capsys) -> None:
+    # [FUNCTION DOC]
+    # With HfApi, token and probe_space patched, main() prints a JSON report for the space
+    # using its READY domain, and probe_space is called with the bearer header and 20 s timeout.
     runtime = SimpleNamespace(
         stage="APP_STARTING",
         raw={

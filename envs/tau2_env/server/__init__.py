@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# tau2-bench server subpackage. Re-exports Tau2Environment.
+# Side effects at import: disables loguru logging for the "tau2" logger and silences litellm debug info.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

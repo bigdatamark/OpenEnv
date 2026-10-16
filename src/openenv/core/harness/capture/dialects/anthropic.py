@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Anthropic Messages dialect: converts Anthropic requests into OpenAI
+# chat-completions requests for the inference backend, converts chat-completions
+# responses back to Anthropic message objects, and converts a streamed
+# chat-completions chunk sequence into Anthropic SSE events (message_start,
+# content_block_start/delta/stop, message_delta, message_stop) using a stateful
+# per-request stream state. Strips Claude Code's per-request billing-header line
+# from the system prompt so prompts stay prefix-stable across turns.
 """Anthropic Messages API transformer.
 
 Transforms between Anthropic Messages API and OpenAI Chat Completions API.
@@ -31,6 +39,10 @@ _CLAUDE_CODE_BILLING_HEADER_RE = re.compile(
 
 @dataclass
 class _AnthropicToolCallState:
+    # [CLASS DOC]
+    # HELPER: Mutable per-tool-call streaming state: tool call id, accumulated name,
+    # assigned Anthropic content block index (None until started), argument text buffered
+    # before the block starts, and whether the tool_use block has been opened.
     id: str
     name: str = ""
     anthropic_index: int | None = None
@@ -39,6 +51,10 @@ class _AnthropicToolCallState:
 
 
 class AnthropicStreamState:
+    # [CLASS DOC]
+    # Tracks open Anthropic content blocks (thinking, text, tool_use) across the chunks
+    # of one upstream chat-completions stream, assigns sequential block indices, records
+    # stop reason and output token count, and emits Anthropic SSE event dicts.
     """Per-request Anthropic streaming state.
 
     Anthropic SSE blocks are stateful across chunks: content blocks must be
@@ -48,6 +64,10 @@ class AnthropicStreamState:
     """
 
     def __init__(self, model: str, finish_to_stop_reason: dict[str, str]):
+        # [FUNCTION DOC]
+        # Initializes state for a stream: model name, finish_reason->stop_reason map, a new
+        # random "msg_<hex>" id, block counters/flags, empty thinking buffer and tool-call map,
+        # stop_reason "end_turn", output_tokens 0, completed False.
         self.model = model
         self.finish_to_stop_reason = finish_to_stop_reason
         self.message_id = f"msg_{uuid.uuid4().hex}"
@@ -66,6 +86,16 @@ class AnthropicStreamState:
     def process_chunk(
         self, chunk: dict[str, Any], is_first: bool = False
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Converts one OpenAI stream chunk into a list of Anthropic event dicts.
+        # Inputs: chunk - parsed chat-completions chunk; is_first - emit message_start first.
+        # Behavior: updates output_tokens from usage.completion_tokens; if no choices returns
+        # early; maps finish_reason to stop_reason (default "end_turn"); reasoning_content
+        # opens a thinking block if needed and emits thinking_delta (also buffered for the
+        # signature); content closes any open thinking block, opens a text block if needed and
+        # emits text_delta; each tool_calls delta (list or single dict) is passed to
+        # _process_tool_call.
+        # Returns: list of events. Side effects: mutates state.
         events: list[dict[str, Any]] = []
 
         if is_first:
@@ -138,6 +168,11 @@ class AnthropicStreamState:
         return events
 
     def finalize(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Closes the stream. Returns [] if already completed. Otherwise emits: thinking
+        # signature+stop, text block stop, stops for every started tool block (by tool index
+        # order), an empty text block start/stop if no block was ever started, a message_delta
+        # with stop_reason and output_tokens, and message_stop. Marks completed.
         if self.completed:
             return []
 
@@ -185,6 +220,9 @@ class AnthropicStreamState:
         return events
 
     def _open_text_block(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Opens a text block at the next index, marks it started; returns its
+        # content_block_start event.
         self.text_block_started = True
         self.text_block_index = self.next_block_index
         self.next_block_index += 1
@@ -196,6 +234,9 @@ class AnthropicStreamState:
         }
 
     def _close_text_block(self) -> dict[str, Any] | None:
+        # [FUNCTION DOC]
+        # HELPER: Returns a content_block_stop event for the open text block and clears it,
+        # or None if no text block is open.
         if not self.text_block_started or self.text_block_index is None:
             return None
 
@@ -205,6 +246,9 @@ class AnthropicStreamState:
         return event
 
     def _open_thinking_block(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Opens a thinking block (empty thinking and signature) at the next index;
+        # returns its content_block_start event.
         self.thinking_block_started = True
         self.thinking_block_index = self.next_block_index
         self.next_block_index += 1
@@ -216,6 +260,12 @@ class AnthropicStreamState:
         }
 
     def _close_thinking_block(self) -> list[dict[str, Any]] | None:
+        # [FUNCTION DOC]
+        # HELPER: If a thinking block is open, returns two events (a signature_delta whose
+        # signature is make_signature(thinking_buffer), then content_block_stop) and clears
+        # the open flag/index; otherwise None.
+        # KNOWN ISSUE: thinking_buffer is never reset, so a second thinking block's signature
+        # would cover the concatenation of all thinking text so far.
         if not self.thinking_block_started or self.thinking_block_index is None:
             return None
         idx = self.thinking_block_index
@@ -237,6 +287,15 @@ class AnthropicStreamState:
     def _process_tool_call(
         self, tool_call_delta: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Processes one streamed tool-call delta. Looks up/creates state by integer
+        # index (non-int -> 0), using the delta id or a generated "toolu_<24 hex>" id; updates
+        # id if a later delta carries one; appends name fragments; stringifies arguments
+        # (non-string values JSON-encoded) and buffers them. Once a name exists and the block
+        # is not started, closes open thinking and text blocks, opens a tool_use block at the
+        # next index and flushes buffered arguments as one input_json_delta. Later argument
+        # fragments are emitted directly as input_json_delta.
+        # Returns: list of events. Side effects: mutates state.
         events: list[dict[str, Any]] = []
 
         tool_index = tool_call_delta.get("index", 0)
@@ -323,6 +382,10 @@ class AnthropicStreamState:
 
 
 class AnthropicTransformer(BaseTransformer):
+    # [CLASS DOC]
+    # Transformer for the Anthropic Messages dialect. FINISH_TO_STOP_REASON maps OpenAI
+    # finish reasons to Anthropic stop reasons (stop->end_turn, length->max_tokens,
+    # tool_calls->tool_use, content_filter->refusal, stop_sequence->stop_sequence).
     """Transform between Anthropic and OpenAI API formats."""
 
     FINISH_TO_STOP_REASON: dict[str, str] = {
@@ -334,6 +397,18 @@ class AnthropicTransformer(BaseTransformer):
     }
 
     def transform_request(self, body: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts an Anthropic Messages request body into an OpenAI chat request.
+        # Behavior: flattens "system" to text, strips the billing-header line, and prepends it
+        # as a system message if non-empty; converts each message via _transform_message
+        # (lists are spliced); sets max_tokens (default 4096), model, temperature, top_p,
+        # top_k, stop (from stop_sequences), stream=True if requested; a thinking config of
+        # type enabled/adaptive sets chat_template_kwargs.enable_thinking=True; tools are
+        # converted and, only if the converted list is non-empty, tools and the converted
+        # tool_choice (default auto) are set. Finally applies _normalize_request with
+        # body["_served_model"].
+        # Raises: UpstreamRequestError if messages or tools is not a list of objects.
+        # Returns: new request dict.
         messages = []
 
         # Handle system message
@@ -414,6 +489,16 @@ class AnthropicTransformer(BaseTransformer):
         response: dict[str, Any],
         original_request: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts an OpenAI chat-completions response into an Anthropic message.
+        # Builds content blocks: a thinking block (with generated signature) from
+        # reasoning_content, text/image blocks from message content, and tool_use blocks from
+        # tool_calls (arguments parsed as JSON, {} on failure); an empty text block if none.
+        # Returns: dict with id "msg_<upstream id or random>", type, role, content, model
+        # (original request model, default "claude-3"), mapped stop_reason, usage converted
+        # to Anthropic form; or an Anthropic error dict if there are no choices.
+        # KNOWN ISSUE: tool_use id uses a get() default, so a present-but-null upstream id
+        # yields a null id (the streaming path guards against this).
         choices = response.get("choices", [])
         if not choices:
             return self._error_response("No choices in response")
@@ -470,6 +555,8 @@ class AnthropicTransformer(BaseTransformer):
     def create_stream_state(
         self, original_request: dict[str, Any]
     ) -> AnthropicStreamState:
+        # [FUNCTION DOC]
+        # Creates an AnthropicStreamState for the request's model (default "claude-3").
         return AnthropicStreamState(
             model=original_request.get("model", "claude-3"),
             finish_to_stop_reason=self.FINISH_TO_STOP_REASON,
@@ -481,6 +568,10 @@ class AnthropicTransformer(BaseTransformer):
         original_request: dict[str, Any],
         is_first: bool = False,
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Single-chunk fallback: creates a fresh stream state, processes the chunk, and
+        # finalizes immediately if the chunk carries a finish_reason. Returns the event list.
+        # Not suitable for multi-chunk streams since state is not retained.
         """Best-effort single-chunk Anthropic transform.
 
         The server uses `create_stream_state()` for request-scoped streaming.
@@ -494,6 +585,17 @@ class AnthropicTransformer(BaseTransformer):
         return events
 
     def _transform_message(self, msg: dict[str, Any]) -> Optional[dict | list]:
+        # [FUNCTION DOC]
+        # HELPER: Converts one Anthropic message to OpenAI form.
+        # String content -> {role, content}; non-list content -> stringified. For assistant
+        # messages with tool_use blocks: joins text blocks with newlines (None if none), adds
+        # reasoning_content from thinking blocks, and converts tool_use blocks to function
+        # tool_calls with JSON-encoded input. For user messages with tool_result blocks: emits
+        # one "tool" message per result (flattened text, prefixed "[Tool Error]" when
+        # is_error), followed by a user message with any image parts, then a trailing user
+        # message with joined text blocks; returns the list or None. Otherwise converts content
+        # blocks (keeping images) and adds reasoning_content for assistants.
+        # Returns: a message dict, a list of messages, or None.
         """Transform a single Anthropic message to OpenAI format."""
         role = msg.get("role", "user")
         content = msg.get("content", "")
@@ -596,6 +698,9 @@ class AnthropicTransformer(BaseTransformer):
         return result
 
     def _flatten_content(self, content: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Flattens Anthropic content (string, or list of strings/text blocks/nested
+        # tool_result blocks) to newline-joined text; other values are stringified.
         if isinstance(content, str):
             return content
         if isinstance(content, list):
@@ -612,6 +717,8 @@ class AnthropicTransformer(BaseTransformer):
         return str(content)
 
     def _image_parts(self, content: Any) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the image_url parts from an OpenAI content list ([] for non-lists).
         if not isinstance(content, list):
             return []
         return [
@@ -621,6 +728,10 @@ class AnthropicTransformer(BaseTransformer):
         ]
 
     def _transform_tools_to_openai(self, tools: list[dict]) -> list[dict]:
+        # [FUNCTION DOC]
+        # HELPER: Converts Anthropic tool definitions to OpenAI function tools. Skips server
+        # tools (a type other than custom/function and no input_schema) and tools without a
+        # non-empty string name. Uses description (default "") and input_schema (default {}).
         result = []
         for tool in tools:
             # Anthropic server tools (web_search_*, code_execution_*) carry an
@@ -649,6 +760,9 @@ class AnthropicTransformer(BaseTransformer):
         return result
 
     def _transform_tool_choice_to_openai(self, tool_choice: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Maps Anthropic tool_choice to OpenAI: auto->"auto", any->"required",
+        # none->"none", tool->function choice by name; anything else -> "auto".
         if isinstance(tool_choice, dict):
             tc_type = tool_choice.get("type")
             if tc_type == "auto":
@@ -665,12 +779,18 @@ class AnthropicTransformer(BaseTransformer):
         return "auto"
 
     def _parse_json_safe(self, s: str) -> dict:
+        # [FUNCTION DOC]
+        # HELPER: Parses a JSON string, returning {} on decode or type errors.
         try:
             return json.loads(s)
         except (json.JSONDecodeError, TypeError):
             return {}
 
     def _usage_to_anthropic(self, usage: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Converts OpenAI usage to Anthropic usage: input_tokens is prompt tokens
+        # minus cached tokens (floored at 0), output_tokens is completion tokens; adds
+        # cache_read_input_tokens and cache_creation_input_tokens when non-zero.
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
         cache_read = self._cached_prompt_tokens(usage)
@@ -690,6 +810,9 @@ class AnthropicTransformer(BaseTransformer):
         return result
 
     def _cached_prompt_tokens(self, usage: dict[str, Any]) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns cached prompt tokens from usage.prompt_tokens_details.cached_tokens
+        # or usage.cached_tokens if an int, else 0.
         details = usage.get("prompt_tokens_details")
         if isinstance(details, dict):
             cached = details.get("cached_tokens")
@@ -699,6 +822,8 @@ class AnthropicTransformer(BaseTransformer):
         return cached if isinstance(cached, int) else 0
 
     def _error_response(self, message: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns an Anthropic-style error object of type api_error with message.
         return {
             "type": "error",
             "error": {"type": "api_error", "message": message},

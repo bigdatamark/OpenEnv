@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for wire-dialect detection (openenv.core.harness.capture.detection.detect) and Harbor task
+# discovery in openenv.harbor.tasks (stable sorted ordering, nested groups, symlink handling,
+# validation, caching, HF repo spec classification), plus ATIF trace fallbacks in openenv.harbor.atif.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -24,6 +28,8 @@ detect = detection.detect
 
 
 def make_task(root, name: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Creates root/tasks/<name> with an environment/Dockerfile and a task.toml naming the task.
     """A directory shaped like a Harbor task, enough for discovery to list it."""
     task = root / "tasks" / name
     (task / "environment").mkdir(parents=True)
@@ -43,27 +49,37 @@ def make_task(root, name: str) -> None:
     ],
 )
 def test_path_decides_the_dialect(path, expected):
+    # [FUNCTION DOC]
+    # Parametrized: request path alone selects the expected APIType.
     assert detect(path, {}, {}) is expected
 
 
 def test_path_wins_over_a_misleading_body():
+    # [FUNCTION DOC]
+    # An explicit /v1/messages path wins over a Google-shaped body.
     """A body key must never override an explicit route."""
     assert detect("/v1/messages", {}, {"contents": []}) is APIType.ANTHROPIC
 
 
 def test_anthropic_header_is_used_when_the_path_is_unhelpful():
+    # [FUNCTION DOC]
+    # An anthropic-version header selects ANTHROPIC on an unknown path.
     assert (
         detect("/proxy", {"anthropic-version": "2023-06-01"}, {}) is APIType.ANTHROPIC
     )
 
 
 def test_header_matching_is_case_insensitive():
+    # [FUNCTION DOC]
+    # Header names are matched case-insensitively.
     assert (
         detect("/proxy", {"Anthropic-Version": "2023-06-01"}, {}) is APIType.ANTHROPIC
     )
 
 
 def test_body_shape_is_the_last_resort():
+    # [FUNCTION DOC]
+    # Body keys select GOOGLE (contents) or OPENAI_RESPONSES (input/instructions).
     assert detect("/x", {}, {"contents": [{"parts": []}]}) is APIType.GOOGLE
     assert detect("/x", {}, {"input": "hi", "instructions": "be brief"}) is (
         APIType.OPENAI_RESPONSES
@@ -71,6 +87,8 @@ def test_body_shape_is_the_last_resort():
 
 
 def test_unknown_requests_default_to_chat_completions():
+    # [FUNCTION DOC]
+    # Unrecognised requests default to OPENAI_CHAT.
     """The most common dialect, and the one the proxy normalises everything else into."""
     assert detect("/", {}, {}) is APIType.OPENAI_CHAT
     assert detect("/x", {}, {"messages": []}) is APIType.OPENAI_CHAT
@@ -78,6 +96,8 @@ def test_unknown_requests_default_to_chat_completions():
 
 # --- task discovery ---------------------------------------------------------
 def test_tasks_subdirectory_is_preferred_when_present(tmp_path):
+    # [FUNCTION DOC]
+    # Tasks under a "tasks" subdirectory are listed sorted.
     make_task(tmp_path, "b_task")
     make_task(tmp_path, "a_task")
     found = tasks._task_dirs_from_directory(tmp_path)
@@ -85,6 +105,8 @@ def test_tasks_subdirectory_is_preferred_when_present(tmp_path):
 
 
 def test_a_directory_of_tasks_works_without_a_tasks_subdir(tmp_path):
+    # [FUNCTION DOC]
+    # Task folders directly under the root are discovered when no "tasks" dir exists.
     for name in ("one", "two"):
         (tmp_path / name / "environment").mkdir(parents=True)
         (tmp_path / name / "task.toml").write_text("[task]\n")
@@ -92,6 +114,8 @@ def test_a_directory_of_tasks_works_without_a_tasks_subdir(tmp_path):
 
 
 def test_order_is_stable_and_sorted(tmp_path):
+    # [FUNCTION DOC]
+    # Repeated discovery returns the same sorted order.
     """Index is identity. Any ordering that depends on filesystem iteration is a data bug."""
     for name in ("zebra", "alpha", "mike", "0001", "0010", "0002"):
         make_task(tmp_path, name)
@@ -101,12 +125,16 @@ def test_order_is_stable_and_sorted(tmp_path):
 
 
 def test_hidden_directories_are_skipped(tmp_path):
+    # [FUNCTION DOC]
+    # Dot-directories are ignored.
     make_task(tmp_path, "real")
     (tmp_path / "tasks" / ".ipynb_checkpoints").mkdir(parents=True)
     assert [p.name for p in tasks._task_dirs_from_directory(tmp_path)] == ["real"]
 
 
 def test_grouped_task_folders_are_found(tmp_path):
+    # [FUNCTION DOC]
+    # Nested group folders are searched for task.toml; results are sorted by task name.
     """terminal-bench-science nests tasks as `tasks/<field>/<subfield>/<task>/`."""
     grouped = tmp_path / "tasks"
     for rel in ("earth/ocean/b-task", "earth/geo/a-task", "life/c-task"):
@@ -117,6 +145,8 @@ def test_grouped_task_folders_are_found(tmp_path):
 
 
 def test_a_flat_folder_without_task_toml_does_not_trigger_the_nested_search(tmp_path):
+    # [FUNCTION DOC]
+    # A flat layout with one task lacking task.toml still lists all folders.
     """One broken task must not reshuffle the indexes of the others."""
     for name in ("t2", "t1", "broken"):
         (tmp_path / "tasks" / name).mkdir(parents=True)
@@ -130,6 +160,8 @@ def test_a_flat_folder_without_task_toml_does_not_trigger_the_nested_search(tmp_
 
 
 def test_a_grouped_layout_does_not_follow_symlinks(tmp_path):
+    # [FUNCTION DOC]
+    # Symlinked directories (outward or looping) are not walked during nested search.
     """A symlinked folder can point outside the dataset, or back into it (a loop); neither is walked."""
     (tmp_path / "tasks" / "group" / "a").mkdir(parents=True)
     (tmp_path / "tasks" / "group" / "a" / "task.toml").write_text("")
@@ -142,6 +174,8 @@ def test_a_grouped_layout_does_not_follow_symlinks(tmp_path):
 
 
 def test_discovery_does_not_validate_by_default(tmp_path):
+    # [FUNCTION DOC]
+    # Without validation, malformed tasks are still listed.
     """Validation costs a file read per task, and discovery is on every /splits call.
 
     A malformed task surfaces as a failed rollout with Harbor's own error rather than vanishing from
@@ -154,6 +188,8 @@ def test_discovery_does_not_validate_by_default(tmp_path):
 
 
 def test_validation_can_be_requested_explicitly(tmp_path):
+    # [FUNCTION DOC]
+    # validate=True drops tasks Harbor cannot load. Skipped without harbor's task model.
     pytest.importorskip("harbor.models.task.task")
     make_task(tmp_path, "good")
     (tmp_path / "tasks" / "malformed").mkdir(parents=True)
@@ -162,12 +198,16 @@ def test_validation_can_be_requested_explicitly(tmp_path):
 
 
 def test_an_empty_dataset_raises_rather_than_serving_zero_tasks(tmp_path):
+    # [FUNCTION DOC]
+    # resolve_task_dirs raises ValueError ("no Harbor tasks") on an empty dataset.
     (tmp_path / "tasks").mkdir()
     with pytest.raises(ValueError, match="no Harbor tasks"):
         tasks.resolve_task_dirs(str(tmp_path), refresh=True)
 
 
 def test_resolve_caches_and_refresh_bypasses_it(tmp_path):
+    # [FUNCTION DOC]
+    # resolve_task_dirs caches results per path; refresh=True rescans.
     make_task(tmp_path, "one")
     first = tasks.resolve_task_dirs(str(tmp_path), refresh=True)
     make_task(tmp_path, "two")
@@ -177,6 +217,8 @@ def test_resolve_caches_and_refresh_bypasses_it(tmp_path):
 
 # --- the symlink regression -------------------------------------------------
 def test_has_symlinks_detects_an_outward_pointing_link(tmp_path):
+    # [FUNCTION DOC]
+    # has_symlinks lists a symlinked test script inside a task.
     """Modal graded 0/5 while E2B graded 4/5 because of exactly this.
 
     The HF cache is a symlink farm, Harbor uploads a task's `tests/` by tarring it, and tar preserves
@@ -195,6 +237,8 @@ def test_has_symlinks_detects_an_outward_pointing_link(tmp_path):
 
 
 def test_has_symlinks_is_empty_for_real_files(tmp_path):
+    # [FUNCTION DOC]
+    # has_symlinks returns an empty list for real files.
     task = tmp_path / "task"
     (task / "tests").mkdir(parents=True)
     (task / "tests" / "test.sh").write_text("#!/bin/sh\n")
@@ -216,11 +260,16 @@ def test_has_symlinks_is_empty_for_real_files(tmp_path):
     ],
 )
 def test_hf_repo_specs_are_distinguished_from_paths_and_registry_names(spec, is_repo):
+    # [FUNCTION DOC]
+    # Parametrized: _is_hf_repo is True only for "org/name" shaped specs.
     assert tasks._is_hf_repo(spec) is is_repo
 
 
 # --- trace fallback for harnesses that emit no ATIF --------------------------
 def test_pi_session_log_is_used_when_there_is_no_trajectory(tmp_path):
+    # [FUNCTION DOC]
+    # load_trace falls back to pi session jsonl logs ("pi_session") and turn lengths come from
+    # assistant usage.output.
     """Three of sixteen harnesses write no `trajectory.json`, leaving no independent check.
 
     pi records the same thing under another name: every assistant record in its session log carries
@@ -255,6 +304,8 @@ def test_pi_session_log_is_used_when_there_is_no_trajectory(tmp_path):
 
 
 def test_a_real_trajectory_wins_over_any_fallback(tmp_path):
+    # [FUNCTION DOC]
+    # trajectory.json is preferred ("atif") over pi session logs.
     import json as _json
 
     atif = pytest.importorskip("openenv.harbor.atif")
@@ -279,6 +330,8 @@ def test_a_real_trajectory_wins_over_any_fallback(tmp_path):
 
 
 def test_no_trace_at_all_is_reported_honestly(tmp_path):
+    # [FUNCTION DOC]
+    # With only an empty unrelated session file, load_trace returns (None, "").
     """hermes writes a zero-byte session file and openclaw only echoes its config back."""
     atif = pytest.importorskip("openenv.harbor.atif")
     (tmp_path / "agent").mkdir()

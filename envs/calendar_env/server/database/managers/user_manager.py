@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# SQLAlchemy-based CRUD and lookup operations on the users table of a per-database_id
+# calendar DB. Every method opens its own session and closes it; user dicts returned
+# come from _format_user_response (no tokens).
 """
 User Manager - Database operations for user management using SQLAlchemy
 """
@@ -16,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 def _token_fingerprint(token: Optional[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first 8 hex chars of the SHA-256 of the token, or "<empty>" for falsy input. Used for safe logging.
     """Return a short, non-reversible fingerprint of an access token"""
     if not token:
         return "<empty>"
@@ -23,14 +29,24 @@ def _token_fingerprint(token: Optional[str]) -> str:
 
 
 class UserManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id for user operations.
     """Manager for user database operations using SQLAlchemy"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id and calls init_database (engine creation only, no tables).
         self.database_id = database_id
         # Initialize database on first use
         init_database(database_id)
 
     def create_user(self, user_data: Dict) -> Dict:
+        # [FUNCTION DOC]
+        # Creates a User from a dict (requires "email" and "name"; optional user_id, generated
+        # UUID if absent, and profile/provider/token-hash fields with defaults locale "en",
+        # timezone "UTC", is_active True, is_verified False). Returns the formatted user dict.
+        # Raises: ValueError if the email already exists; DB errors (rolled back) are re-raised.
+        # KNOWN ISSUE: static_token is required (NOT NULL, unique) on the model but never set here, so the insert fails with an integrity error.
         """Create a new user"""
         session = get_session(self.database_id)
         try:
@@ -77,6 +93,8 @@ class UserManager:
             session.close()
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Returns the formatted user dict for user_id, or None. Re-raises DB errors after logging.
         """Get a user by ID"""
         session = get_session(self.database_id)
         try:
@@ -94,6 +112,8 @@ class UserManager:
             session.close()
 
     def get_first_user_from_db(self) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Returns the formatted dict of the first user row (unspecified order), or None. Re-raises DB errors.
         """Get the first user from db"""
         session = get_session(self.database_id)
         try:
@@ -109,6 +129,9 @@ class UserManager:
             session.close()
 
     def get_user_by_access_token(self, static_token: str) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Returns the formatted user whose static_token equals the given token, or None.
+        # Re-raises DB errors, logging only a token fingerprint.
         """Get a user by access token"""
         session = get_session(self.database_id)
         try:
@@ -131,6 +154,8 @@ class UserManager:
             session.close()
 
     def get_user_by_email(self, email: str) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Returns the formatted user with the given email, or None. Re-raises DB errors.
         """Get a user by email"""
         session = get_session(self.database_id)
         try:
@@ -148,6 +173,11 @@ class UserManager:
             session.close()
 
     def update_user(self, user_id: str, user_data: Dict) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Updates whitelisted fields (name, given/family name, picture, locale, timezone,
+        # is_active, is_verified, provider, provider_id, token hashes) present in user_data; if
+        # "update_last_login" is truthy sets last_login_at to now (UTC). Commits and returns the
+        # formatted user, or None if not found. Rolls back and re-raises on error.
         """Update a user"""
         session = get_session(self.database_id)
         try:
@@ -193,6 +223,9 @@ class UserManager:
             session.close()
 
     def delete_user(self, user_id: str) -> bool:
+        # [FUNCTION DOC]
+        # Deletes the user (ORM cascades remove calendars, attendees, acls); returns True, or
+        # False if not found. Rolls back and re-raises on error.
         """Delete a user and all related data"""
         session = get_session(self.database_id)
         try:
@@ -214,6 +247,8 @@ class UserManager:
             session.close()
 
     def deactivate_user(self, user_id: str) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Sets is_active False and returns the formatted user, or None if not found. Rolls back and re-raises on error.
         """Deactivate a user (soft delete)"""
         session = get_session(self.database_id)
         try:
@@ -237,6 +272,9 @@ class UserManager:
     def list_users(
         self, limit: int = 100, offset: int = 0, active_only: bool = True
     ) -> List[Dict]:
+        # [FUNCTION DOC]
+        # Returns formatted users ordered by created_at descending with offset/limit, only
+        # active ones when active_only (default True). Re-raises DB errors.
         """List users"""
         session = get_session(self.database_id)
         try:
@@ -260,6 +298,10 @@ class UserManager:
     def authenticate_user(
         self, email: str, provider: str = None, provider_id: str = None
     ) -> Optional[Dict]:
+        # [FUNCTION DOC]
+        # Finds an active user by email and optionally provider/provider_id; if found sets
+        # last_login_at to now (UTC), commits and returns the formatted user; otherwise None.
+        # Re-raises DB errors (no rollback).
         """Authenticate user by email and optionally by provider"""
         session = get_session(self.database_id)
         try:
@@ -291,6 +333,10 @@ class UserManager:
             session.close()
 
     def _format_user_response(self, user: User) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: returns the API dict for a User: id, email, name, given/family name,
+        # picture, locale, timezone, is_active, is_verified, provider and ISO timestamps
+        # (created/updated/last_login, None if unset). Excludes tokens.
         """Format user model for API response (without sensitive data)"""
         return {
             "id": user.user_id,

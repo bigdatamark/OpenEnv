@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for BrowserGym actions, observations and state.
 """Data models for the BrowserGym environment.
 
 BrowserGym is a unified framework for web-based agent tasks, combining multiple
@@ -12,6 +14,8 @@ from pydantic import Field
 
 
 class BrowserGymAction(Action):
+    # [CLASS DOC]
+    # Action holding a required BrowserGym action string (e.g. a click/fill/goto call expression) executed by the server.
     """Action to be executed in the BrowserGym environment.
 
     BrowserGym supports high-level natural language actions that can be parsed
@@ -31,6 +35,9 @@ class BrowserGymAction(Action):
 
 
 class BrowserGymObservation(Observation):
+    # [CLASS DOC]
+    # Observation with page text (accessibility tree or DOM), URL, optional screenshot as nested int lists [H][W][C],
+    # goal, full accessibility tree text, pruned HTML, error message and a last-action-error flag.
     """Observation returned from the BrowserGym environment.
 
     Contains multiple observation modalities including text (accessibility tree
@@ -69,6 +76,8 @@ class BrowserGymObservation(Observation):
 
 
 class BrowserGymState(State):
+    # [CLASS DOC]
+    # State with benchmark, task_name, optional task_id, goal, current_url, optional max_steps and cumulative reward.
     """State of the BrowserGym environment.
 
     Tracks the current benchmark, task, and progress through an episode.

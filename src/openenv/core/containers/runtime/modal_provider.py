@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# ContainerProvider that runs an OpenEnv server inside a Modal sandbox (modal SDK,
+# imported lazily in the adapter). The sandbox runs a keep-alive "sleep
+# infinity" entrypoint; the server command is then launched in the background via
+# exec and exposed through an encrypted tunnel on port 8000, returning an HTTPS
+# URL. Supports the stable Sandbox API and the experimental Sandbox v2 API
+# (opt-in). Configured cpu/memory are passed as limits with small default
+# requests (0.125 cores, 128 MiB). Startup crash errors withhold server logs
+# unless explicitly allowed, and then redact injected env var values.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -38,6 +47,9 @@ _DEFAULT_MEMORY_REQUEST = 128
 
 
 def _require_secure_url(url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns url if it is a string starting with "https://"
+    # (case-insensitive); otherwise raises RuntimeError without echoing the URL.
     """Enforce https/wss transport (RFC 002 security invariant S1).
 
     ``EnvClient`` derives its WebSocket URL from this base URL, so a plaintext
@@ -55,6 +67,10 @@ def _require_secure_url(url: str) -> str:
 
 
 class _DefaultModalAdapter:
+    # [CLASS DOC]
+    # HELPER: Thin wrapper over the modal SDK used by ModalProvider (tests inject a
+    # fake with the same methods): image creation, sandbox creation, exec, tunnel
+    # lookup and termination.
     """Thin adapter over the ``modal`` SDK.
 
     The provider talks to this private adapter instead of spreading SDK details
@@ -64,6 +80,10 @@ class _DefaultModalAdapter:
     """
 
     def __init__(self, *, app_name: str, use_sandbox_v2: bool):
+        # [FUNCTION DOC]
+        # Imports modal and stores the app name and v2 flag.
+        # Raises: ImportError if modal is missing; RuntimeError if use_sandbox_v2 is
+        # set but the SDK lacks Sandbox._experimental_create.
         import modal
 
         self._modal = modal
@@ -82,9 +102,13 @@ class _DefaultModalAdapter:
             )
 
     def image_from_registry(self, tag: str) -> Any:
+        # [FUNCTION DOC]
+        # Returns a modal Image from a registry tag.
         return self._modal.Image.from_registry(tag)
 
     def image_from_dockerfile(self, dockerfile_path: str, context_dir: str) -> Any:
+        # [FUNCTION DOC]
+        # Returns a modal Image built from a Dockerfile with the given context dir.
         return self._modal.Image.from_dockerfile(
             dockerfile_path, context_dir=context_dir
         )
@@ -98,6 +122,11 @@ class _DefaultModalAdapter:
         env: Optional[dict[str, str]],
         extra: dict[str, Any],
     ) -> Any:
+        # [FUNCTION DOC]
+        # Looks up (creating if missing) the Modal app, then creates a sandbox running
+        # "sleep infinity" with the image, encrypted ports, timeout, extra kwargs and
+        # env (only if non-empty), using the v2 experimental API when enabled.
+        # Returns the sandbox handle. Network I/O.
         app = self._modal.App.lookup(self._app_name, create_if_missing=True)
         kwargs: Dict[str, Any] = {
             "app": app,
@@ -118,6 +147,10 @@ class _DefaultModalAdapter:
         return self._modal.Sandbox.create("sleep", "infinity", **kwargs)
 
     def exec(self, sandbox: Any, command: str, *, timeout: int = 10) -> str:
+        # [FUNCTION DOC]
+        # Runs "bash -c <command>" in the sandbox with a timeout (default 10 s), reads
+        # stdout (empty string if reading fails), waits for the process, and returns
+        # the output or "".
         """Run *command* through a shell inside *sandbox* and return its stdout."""
         proc = sandbox.exec("bash", "-c", command, timeout=timeout)
         try:
@@ -128,13 +161,25 @@ class _DefaultModalAdapter:
         return out or ""
 
     def tunnel_url(self, sandbox: Any, port: int) -> str:
+        # [FUNCTION DOC]
+        # Returns the tunnel URL for port from the sandbox's tunnels mapping (KeyError
+        # if absent).
         return sandbox.tunnels()[port].url
 
     def terminate(self, sandbox: Any) -> None:
+        # [FUNCTION DOC]
+        # Terminates the sandbox.
         sandbox.terminate()
 
 
 class ModalProvider(ContainerProvider):
+    # [CLASS DOC]
+    # ContainerProvider managing at most one Modal sandbox. Stores default image,
+    # env vars, app name, v2 flag, sandbox lifetime timeout (default 300 s), cmd,
+    # cpu/memory limits and log surfacing flag; tracks the active sandbox, base URL
+    # and injected env var values for redaction. A class-level registry maps
+    # absolute Dockerfile paths to their path, context dir and parsed CMD (shared
+    # across instances).
     """
     Container provider that runs environments in Modal sandboxes.
 
@@ -187,6 +232,10 @@ class ModalProvider(ContainerProvider):
         surface_server_logs: bool = False,
         _adapter: Any = None,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration, creates the default adapter (eager SDK import and v2
+        # feature check; may raise ImportError/RuntimeError) unless one is injected, and
+        # logs an info message when Sandbox v2 is enabled.
         """
         Args:
             image (`str`, *optional*):
@@ -256,6 +305,10 @@ class ModalProvider(ContainerProvider):
             )
 
     def _discover_server_cmd(self, port: int = _DEFAULT_MODAL_PORT) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Finds openenv.yaml in the active sandbox, reads its "app" field and
+        # returns "cd <yaml dir> && python -m uvicorn <app> --host 0.0.0.0 --port
+        # <port>" (quoted). Raises ValueError if the file or field is missing.
         """Discover the server command from ``openenv.yaml`` inside the sandbox.
 
         Finds the file, reads the ``app`` field, and constructs a command
@@ -287,6 +340,10 @@ class ModalProvider(ContainerProvider):
         )
 
     def _find_openenv_yaml(self) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Returns "/app/env/openenv.yaml" if present in the sandbox, else the
+        # first openenv.yaml under /app (max depth 4) if the output is an absolute
+        # path, else None.
         """Locate ``openenv.yaml`` inside the sandbox.
 
         Tries the modern layout path ``/app/env/openenv.yaml`` first,
@@ -312,6 +369,8 @@ class ModalProvider(ContainerProvider):
 
     @staticmethod
     def _parse_app_field(yaml_content: str) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Delegates to parse_openenv_app_field.
         """Extract the ``app`` value from raw openenv.yaml content.
 
         Uses PyYAML to handle comments, quotes, and nested keys correctly.
@@ -320,6 +379,8 @@ class ModalProvider(ContainerProvider):
 
     @staticmethod
     def _parse_dockerfile_cmd(dockerfile_content: str) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Delegates to parse_dockerfile_cmd.
         """Extract the server command from the last ``CMD`` in a Dockerfile.
 
         Handles exec form (``CMD ["prog", "arg"]``) and shell form
@@ -339,6 +400,16 @@ class ModalProvider(ContainerProvider):
         dockerfile_path: str,
         context_dir: str | None = None,
     ) -> str:
+        # [FUNCTION DOC]
+        # Class method. Resolves and reads the Dockerfile, validates that relative COPY
+        # sources (excluding "--from=") exist or glob-match in the context dir (default
+        # the Dockerfile's grandparent), parses its CMD, and records path, context and
+        # CMD in the class registry.
+        # Returns: "dockerfile:<absolute path>".
+        # Raises: FileNotFoundError if missing; ValueError for a missing context dir or
+        # COPY source.
+        # KNOWN ISSUE: COPY lines with flags such as --chown are parsed with the flag as
+        # the source and fail validation.
         """Validate a Dockerfile and return a ``dockerfile:`` URI for
         :meth:`start_container`.
 
@@ -417,6 +488,10 @@ class ModalProvider(ContainerProvider):
         return f"dockerfile:{src}"
 
     def _build_image(self, image: str) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: For "dockerfile:<path>" returns an adapter-built image from the
+        # registered metadata (ValueError if unregistered); otherwise an image from the
+        # registry tag.
         """Build the ``modal.Image`` for *image* (registry tag or dockerfile:)."""
         if image.startswith("dockerfile:"):
             dockerfile_path = image[len("dockerfile:") :]
@@ -440,6 +515,20 @@ class ModalProvider(ContainerProvider):
         env_vars: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> str:
+        # [FUNCTION DOC]
+        # Creates a sandbox and launches the server; returns the HTTPS tunnel URL.
+        # Raises RuntimeError if a sandbox is already active; ValueError for a port
+        # other than None/8000, a missing image, or an unregistered dockerfile image.
+        # Server command: kwargs "cmd" or constructor cmd, else discovered from
+        # openenv.yaml, falling back to the registered Dockerfile CMD. Remaining kwargs
+        # plus (request, limit) cpu/memory tuples go to sandbox creation. Records
+        # non-empty env var values for redaction (cleared again if creation fails).
+        # After creation, launches the server with nohup bash (log
+        # /tmp/openenv-server.log, PID /tmp/openenv-server.pid) and fetches the tunnel
+        # URL (must be HTTPS). Any failure after creation terminates the sandbox
+        # (cleanup errors suppressed) and re-raises.
+        # KNOWN ISSUE: the docstring lists the constructor cmd before the kwargs cmd,
+        # but the code prefers the kwargs cmd.
         """
         Create a Modal sandbox from a Docker image or Dockerfile.
 
@@ -571,6 +660,9 @@ class ModalProvider(ContainerProvider):
         return self._base_url
 
     def stop_container(self) -> None:
+        # [FUNCTION DOC]
+        # Terminates the active sandbox (errors propagate) and always clears sandbox,
+        # base URL and redaction values; with no sandbox only clears redaction values.
         """Terminate the Modal sandbox."""
         if self._sandbox is None:
             # Still drop any injected secret values recorded by a failed start.
@@ -585,6 +677,8 @@ class ModalProvider(ContainerProvider):
             self._redact_values = set()
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Same as stop_container.
         """Stop the active sandbox.
 
         Overrides the base no-op so a caller holding a bare ``ContainerProvider``
@@ -596,6 +690,8 @@ class ModalProvider(ContainerProvider):
 
     @property
     def base_url(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the active base URL. Raises RuntimeError if none.
         """URL returned by the last ``start_container``."""
         if self._base_url is None:
             raise RuntimeError(
@@ -605,6 +701,9 @@ class ModalProvider(ContainerProvider):
         return self._base_url
 
     def _redact(self, text: str, *, max_chars: int = 2000) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Replaces recorded env var values in text with "***" and keeps only
+        # the last max_chars (default 2000) characters with a truncation marker.
         """Scrub injected secret values and bound length before surfacing output.
 
         Replaces any injected env-var value with `***` and keeps only the tail.
@@ -619,6 +718,10 @@ class ModalProvider(ContainerProvider):
         return redacted
 
     def _server_died_message(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns a fixed crash message, or, when surface_server_logs is set
+        # and a sandbox exists, a message including the redacted server log read from
+        # the sandbox.
         """Build the startup-crash error, secure by default.
 
         Untrusted code can print secrets then force a crash to exfiltrate them
@@ -647,6 +750,11 @@ class ModalProvider(ContainerProvider):
         )
 
     def wait_for_ready(self, base_url: str, timeout_s: float = 120.0) -> None:
+        # [FUNCTION DOC]
+        # Polls GET <base_url>/health (5 s timeout) about every second until 200. With
+        # an active sandbox, each iteration checks the server PID and raises
+        # RuntimeError with _server_died_message if the process is dead.
+        # Raises: TimeoutError after timeout_s (URL omitted from message).
         """
         Poll the /health endpoint until the sandbox is ready.
 

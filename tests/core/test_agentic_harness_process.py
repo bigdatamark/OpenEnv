@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Lifecycle tests for HarnessProcess using real subprocesses running scripted_harness.py in various
+# modes: start/stop, startup failures and timeouts, crash detection and restart, EOF handling,
+# SIGTERM escalation to kill (including descendants), and UTF-8 decoding of output.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Subprocess lifecycle tests for HarnessProcess (real processes)."""
@@ -24,6 +29,9 @@ SCRIPTED_HARNESS = Path(__file__).parent / "scripted_harness.py"
 
 
 def make_process(mode: str, **kwargs) -> HarnessProcess:
+    # [FUNCTION DOC]
+    # HELPER: Builds a HarnessProcess running scripted_harness.py in the given mode with cwd "." and
+    # default startup timeout 10s and terminate grace 1s (overridable via keywords).
     defaults = {"startup_timeout_s": 10.0, "terminate_grace_s": 1.0}
     defaults.update(kwargs)
     return HarnessProcess(
@@ -32,11 +40,17 @@ def make_process(mode: str, **kwargs) -> HarnessProcess:
 
 
 def ready(line: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Readiness predicate: True when the line equals "ready".
     return line == "ready"
 
 
 class TestLifecycle:
+    # [CLASS DOC]
+    # Basic lifecycle tests.
     async def test_start_echo_read_stop(self):
+        # [FUNCTION DOC]
+        # Starts the echo process, writes a line, reads the echoed line, and stops it.
         process = make_process("echo")
         assert process.is_running() is False
         await process.start(ready_check=ready)
@@ -49,6 +63,8 @@ class TestLifecycle:
         assert process.is_running() is False
 
     async def test_stop_is_idempotent(self):
+        # [FUNCTION DOC]
+        # Stopping twice is safe and clears the process handle and reader threads.
         process = make_process("echo")
         await process.start(ready_check=ready)
         await process.stop()
@@ -58,11 +74,15 @@ class TestLifecycle:
         assert process._reader_threads == []
 
     async def test_stop_before_start_is_noop(self):
+        # [FUNCTION DOC]
+        # Stopping before start is a no-op.
         process = make_process("echo")
         await process.stop()
         assert process.is_running() is False
 
     async def test_double_start_rejected(self):
+        # [FUNCTION DOC]
+        # Starting a running process raises HarnessStartupError ("already running").
         process = make_process("echo")
         await process.start(ready_check=ready)
         try:
@@ -73,13 +93,21 @@ class TestLifecycle:
 
 
 class TestStartupFailures:
+    # [CLASS DOC]
+    # Tests startup failure handling.
     @pytest.mark.parametrize("cancel", [False, True])
     async def test_interrupted_readiness_cleans_up_process(self, cancel):
+        # [FUNCTION DOC]
+        # Parametrized: a readiness check that raises, or a start task that is cancelled during readiness,
+        # leaves the process exited, its pipes closed, reader threads finished and the handle cleared.
         process = make_process("echo")
         checking = asyncio.Event()
         resources = []
 
         def check(line):
+            # [FUNCTION DOC]
+            # HELPER: Captures the current process handle and reader threads, signals checking, then raises
+            # ValueError (non-cancel case) or returns False.
             resources.append((process._proc, list(process._reader_threads)))
             checking.set()
             if not cancel:
@@ -109,12 +137,17 @@ class TestStartupFailures:
             await process.stop()
 
     async def test_startup_timeout_kills_process(self):
+        # [FUNCTION DOC]
+        # A process that is not ready within the timeout raises "did not become ready" and is not running.
         process = make_process("slow-start", startup_timeout_s=0.5)
         with pytest.raises(HarnessStartupError, match="did not become ready"):
             await process.start(ready_check=ready)
         assert process.is_running() is False
 
     async def test_immediate_exit_reports_code_and_retains_diagnostics(self):
+        # [FUNCTION DOC]
+        # An immediately exiting process raises with its exit code; stderr is available via drain_stderr but
+        # not in the error message.
         process = make_process("exit-now")
         with pytest.raises(HarnessStartupError) as exc_info:
             await process.start(ready_check=ready)
@@ -123,6 +156,8 @@ class TestStartupFailures:
         assert "dying" not in str(exc_info.value)
 
     async def test_startup_error_does_not_expose_stderr(self):
+        # [FUNCTION DOC]
+        # Secret stderr content is excluded from the startup error but retained in drain_stderr.
         process = make_process("exit-with-secret")
         with pytest.raises(HarnessStartupError) as exc_info:
             await process.start(ready_check=ready)
@@ -132,6 +167,8 @@ class TestStartupFailures:
         assert "FAKE_HARNESS_SECRET_FOR_TEST" in process.drain_stderr()
 
     async def test_unspawnable_command(self):
+        # [FUNCTION DOC]
+        # A nonexistent binary raises "failed to spawn" without leaking the command path or arguments.
         process = HarnessProcess(
             ["/nonexistent/definitely-not-a-binary", "FAKE_HARNESS_SECRET_FOR_TEST"],
             cwd=".",
@@ -143,8 +180,13 @@ class TestStartupFailures:
 
 
 class TestCrashDetection:
+    # [CLASS DOC]
+    # Tests crash detection and restart cleanup.
     @pytest.mark.parametrize("restart_fails", [False, True])
     async def test_restart_cleans_up_exited_process(self, restart_fails):
+        # [FUNCTION DOC]
+        # Parametrized on whether restart fails: restarting after the process exited closes the old pipes
+        # and joins old readers; a successful restart echoes new input.
         process = make_process("crash-after-echo")
         await process.start(ready_check=ready)
         old_proc = process._proc
@@ -178,6 +220,9 @@ class TestCrashDetection:
                 thread.join(timeout=2.0)
 
     async def test_crash_mid_session(self):
+        # [FUNCTION DOC]
+        # After the process exits on its own, is_running becomes False and write_line raises
+        # HarnessNotRunningError.
         process = make_process("crash-after-echo")
         await process.start(ready_check=ready)
         await process.write_line("one")
@@ -194,6 +239,8 @@ class TestCrashDetection:
         await process.stop()
 
     async def test_read_line_returns_none_on_timeout(self):
+        # [FUNCTION DOC]
+        # read_line returns None when no output arrives within the timeout.
         process = make_process("echo")
         await process.start(ready_check=ready)
         try:
@@ -203,8 +250,13 @@ class TestCrashDetection:
 
 
 class TestEOF:
+    # [CLASS DOC]
+    # Tests end-of-output behavior.
     @pytest.mark.parametrize("timeout_s", [None, 10.0])
     async def test_exit_preserves_buffered_lines_before_repeated_eof(self, timeout_s):
+        # [FUNCTION DOC]
+        # Parametrized timeout: after exit, buffered lines (including an unterminated last line) are still
+        # read in order, then read_line repeatedly returns None.
         process = make_process("exit-with-output")
         await process.start()
         try:
@@ -228,6 +280,8 @@ class TestEOF:
 
     @pytest.mark.parametrize("timeout_s", [None, 10.0])
     async def test_read_line_returns_none_when_stdout_closes(self, timeout_s):
+        # [FUNCTION DOC]
+        # When the child closes stdout but keeps running, read_line repeatedly returns None.
         process = make_process("close-stdout")
         await process.start(ready_check=ready)
         try:
@@ -242,6 +296,8 @@ class TestEOF:
             await process.stop()
 
     async def test_stop_wakes_pending_read_and_restart_can_read_output(self):
+        # [FUNCTION DOC]
+        # stop wakes a pending read with None; after restart new output can be read.
         process = make_process("echo")
         await process.start(ready_check=ready)
         try:
@@ -261,8 +317,13 @@ class TestEOF:
 
 
 class TestTerminateEscalation:
+    # [CLASS DOC]
+    # Tests termination escalation.
     @pytest.mark.parametrize("leader_exits_first", [False, True])
     async def test_stop_kills_descendants_after_leader_exits(self, leader_exits_first):
+        # [FUNCTION DOC]
+        # Parametrized on whether the leader exits first: stop finishes promptly despite a SIGTERM-ignoring
+        # descendant holding the pipes, closes everything and yields EOF; cleanup kills the process group.
         process = make_process("spawn-descendant", terminate_grace_s=0.1)
         await process.start(ready_check=ready)
         proc = process._proc
@@ -299,6 +360,8 @@ class TestTerminateEscalation:
             await process.stop()
 
     async def test_sigterm_ignorer_is_killed_within_grace(self):
+        # [FUNCTION DOC]
+        # A SIGTERM-ignoring process is killed shortly after the grace period.
         process = make_process("ignore-sigterm", terminate_grace_s=0.5)
         await process.start(ready_check=ready)
 
@@ -311,7 +374,11 @@ class TestTerminateEscalation:
 
 
 class TestEncoding:
+    # [CLASS DOC]
+    # Tests output decoding.
     async def test_non_ascii_output_survives_the_reader(self):
+        # [FUNCTION DOC]
+        # Non-ASCII output is decoded as UTF-8 and the reader keeps working for later lines.
         # text=True alone decodes with the locale encoding (often ASCII in a
         # container), and UnicodeDecodeError is a ValueError, which the reader
         # thread used to swallow -- killing stdout pumping for the whole turn.

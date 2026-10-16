@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# OpenAI Responses dialect (used by codex, trae-agent): converts Responses requests
+# (instructions, input items incl. messages, function calls/outputs, local shell
+# calls/outputs, reasoning items) into OpenAI chat requests, converts chat responses
+# back into Response objects, and converts streamed chat chunks into Responses SSE
+# events (response.created, output_item.added/done, output_text deltas, reasoning
+# summary deltas, function_call_arguments deltas, response.completed) via a stateful
+# per-request stream state. local_shell tools are mapped to a "shell" function tool.
 """OpenAI Responses API transformer.
 
 Transforms between OpenAI Responses API (Codex CLI) and OpenAI Chat Completions.
@@ -20,6 +28,9 @@ from .reasoning import encrypt_reasoning, extract_reasoning_from_responses_item
 
 @dataclass
 class _ResponsesToolCallState:
+    # [CLASS DOC]
+    # HELPER: Mutable per-tool-call streaming state: name, call id, accumulated arguments,
+    # whether its output item was announced, and the generated "fc_" item id.
     name: str = ""
     call_id: str = ""
     arguments: str = ""
@@ -28,9 +39,17 @@ class _ResponsesToolCallState:
 
 
 class ResponsesStreamState:
+    # [CLASS DOC]
+    # Per-request streaming state for the Responses dialect: response id, model, text
+    # message state, reasoning item state (always output index 0 when present), tool call
+    # states keyed by chunk index, usage counters, and output index bookkeeping (message
+    # index and offset for tool items).
     """Per-request Responses API streaming state."""
 
     def __init__(self, model: str):
+        # [FUNCTION DOC]
+        # Initializes a new state with a random "resp_" id, the model, zeroed usage and empty
+        # text/reasoning/tool state.
         self.response_id = f"resp_{uuid.uuid4().hex[:24]}"
         self.model = model
         self.text_started = False
@@ -48,6 +67,17 @@ class ResponsesStreamState:
     def process_chunk(
         self, chunk: dict[str, Any], is_first: bool = False
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Converts one chat stream chunk into Responses SSE event dicts.
+        # Behavior: is_first emits response.created. Usage fields update input/output/total
+        # token counters. reasoning_content opens (once) a reasoning item at index 0 with a
+        # summary part and emits reasoning_summary_text.delta. Content closes reasoning,
+        # opens (once) an assistant message item (index 1 if reasoning exists, else 0) with an
+        # output_text part, and emits output_text.delta. Tool-call deltas close reasoning,
+        # accumulate id/name/arguments per index, and once named emit output_item.added for a
+        # function_call at output index offset+tool index plus any buffered arguments; later
+        # fragments emit function_call_arguments.delta.
+        # Returns: list of events. Side effects: mutates state.
         events: list[dict[str, Any]] = []
 
         if is_first:
@@ -247,6 +277,12 @@ class ResponsesStreamState:
         return events
 
     def finalize(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Closes the stream once (returns [] if already completed): closes reasoning; emits
+        # content_part.done and output_item.done for the text message; emits
+        # function_call_arguments.done and output_item.done for each started tool call; then a
+        # response.completed event with created_at (current time), the full output list
+        # (reasoning with encrypted_content, message, function calls) and usage. Marks completed.
         if self.completed:
             return []
 
@@ -362,6 +398,10 @@ class ResponsesStreamState:
         return events
 
     def _close_reasoning(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: If reasoning is open, marks it closed and returns the summary_text.done,
+        # summary_part.done and output_item.done (reasoning item with summary, content and
+        # encrypted_content) events; else [].
         if not self.reasoning_started or self.reasoning_closed:
             return []
         self.reasoning_closed = True
@@ -400,9 +440,22 @@ class ResponsesStreamState:
 
 
 class OpenAIResponsesTransformer(BaseTransformer):
+    # [CLASS DOC]
+    # Transformer for the OpenAI Responses dialect.
     """Transform OpenAI Responses API to/from SGLang chat completions."""
 
     def transform_request(self, body: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts a Responses request into an OpenAI chat request.
+        # Behavior: instructions become a system message; string input becomes a user message;
+        # a list of input items is converted via _convert_input_items_to_messages. Copies
+        # model, max_tokens (overridden by max_output_tokens), temperature, top_p,
+        # top_logprobs, parallel_tool_calls, stream; text.format converted to response_format;
+        # a reasoning config that does not set effort "none" enables thinking via
+        # chat_template_kwargs; tools converted and, only if non-empty, tool_choice converted.
+        # Then normalized with _served_model.
+        # Raises: UpstreamRequestError if input is neither string nor list of objects, or
+        # tools is not a list of objects.
         messages: list[dict[str, Any]] = []
 
         instructions = body.get("instructions")
@@ -479,6 +532,10 @@ class OpenAIResponsesTransformer(BaseTransformer):
         self,
         text_cfg: dict[str, Any],
     ) -> dict[str, Any] | None:
+        # [FUNCTION DOC]
+        # HELPER: Converts text.format to a chat response_format: text or unknown -> None;
+        # json_object -> json_object; json_schema -> nested json_schema if given, else built
+        # from name/description/schema/strict (None if none present).
         format_cfg = text_cfg.get("format")
         if not isinstance(format_cfg, dict):
             return None
@@ -509,6 +566,17 @@ class OpenAIResponsesTransformer(BaseTransformer):
         response: dict[str, Any],
         original_request: dict[str, Any],
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts a chat response into a Response object: reasoning item (if
+        # reasoning_content), assistant message with one output_text (if content), and for each
+        # tool call either a local_shell_call (only when the request declared a local_shell
+        # tool and the name is shell/execute/run_command) or a function_call item. Usage
+        # mapped to input/output/total tokens plus cached tokens details. id, created_at and
+        # model come from the response/original request with fallbacks. Returns an error
+        # object (response.failed) if there are no choices.
+        # KNOWN ISSUE: if message content is a list (multimodal), it is placed verbatim in the
+        # output_text "text" field instead of being flattened to a string.
+        # KNOWN ISSUE: call_id uses a get() default, so a null upstream id yields a null call_id.
         choices = response.get("choices", [])
         if not choices:
             return self._make_error_response("No choices in response")
@@ -588,6 +656,8 @@ class OpenAIResponsesTransformer(BaseTransformer):
     def create_stream_state(
         self, original_request: dict[str, Any]
     ) -> ResponsesStreamState:
+        # [FUNCTION DOC]
+        # Creates a ResponsesStreamState for the request model (default "unknown").
         return ResponsesStreamState(
             model=original_request.get("model", "unknown"),
         )
@@ -598,6 +668,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
         original_request: dict[str, Any],
         is_first: bool = False,
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Single-chunk fallback: fresh stream state, process the chunk, finalize if it carries
+        # a finish_reason. Returns events. State is not kept between calls.
         """Best-effort single-chunk Responses transform."""
         state = self.create_stream_state(original_request)
         events = state.process_chunk(chunk, is_first=is_first)
@@ -610,6 +683,19 @@ class OpenAIResponsesTransformer(BaseTransformer):
         self,
         items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts an ordered list of Responses input items into chat messages,
+        # grouping tool calls with their outputs and attaching reasoning.
+        # Behavior: reasoning items accumulate pending reasoning text (first flushing a tool
+        # block that already has outputs); input_text/input_image items accumulate pending user
+        # content (flushing tool blocks); message items flush pending content and tool blocks
+        # and append a message (assistant messages absorb pending reasoning); function_call and
+        # local_shell_call/shell_call items append pending tool calls (flushing a completed
+        # block first); *_call_output items append tool output messages; other items flush and
+        # are converted via _convert_response_item_to_message. At the end, flushes pending
+        # content and tool blocks, and leftover reasoning becomes an assistant message with
+        # null content.
+        # Returns: list of chat messages.
         messages: list[dict[str, Any]] = []
         pending_tool_calls: list[dict[str, Any]] = []
         pending_tool_outputs: list[dict[str, Any]] = []
@@ -785,6 +871,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
     def _function_call_output_messages(
         self, item: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a function_call_output item into a tool message (flattened text,
+        # tool_call_id from call_id) plus a following user message carrying any image parts.
         output = self._function_call_output_content(item.get("output", ""))
         converted_content = openai_responses_input_content_to_chat(output)
         messages = [
@@ -801,6 +890,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return messages
 
     def _local_shell_call_to_tool_call(self, item: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a local shell call item into a chat function tool call named
+        # "shell" with id from call_id/id/random and arguments from the action.
         return {
             "id": item.get("call_id")
             or item.get("id")
@@ -815,12 +907,20 @@ class OpenAIResponsesTransformer(BaseTransformer):
     def _local_shell_output_messages(
         self, item: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a local shell output item into tool output messages (call id from
+        # call_id or id).
         call_id = item.get("call_id") or item.get("id") or ""
         return self._function_call_output_messages(
             {"call_id": call_id, "output": item.get("output", "")}
         )
 
     def _local_shell_action_to_arguments(self, action: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Converts a local shell action to a JSON argument string: strings as-is;
+        # non-dicts "{}"; a "command" string that is already JSON object/array is kept, else
+        # {"cmd": command}; a "commands" list -> {"cmd": single} or {"commands": [...]} plus
+        # timeout_ms/max_output_length; otherwise all non-"type" keys (or "{}").
         if isinstance(action, str):
             return action
         if not isinstance(action, dict):
@@ -855,6 +955,8 @@ class OpenAIResponsesTransformer(BaseTransformer):
 
     @staticmethod
     def _declares_local_shell(original_request: dict[str, Any]) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True if any request tool has type local_shell or shell.
         """Whether the request offered a local_shell tool, in either spelling.
 
         codex declares `{"type": "local_shell"}` among its Responses tools. Absent that, a shell-named
@@ -870,6 +972,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
     def _local_shell_call_from_tool_call(
         self, tool_call: dict[str, Any]
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a chat tool call into a local_shell_call output item with a random
+        # "lsh_" id, call_id and an action derived from its arguments.
         function = tool_call.get("function", {})
         arguments = (
             function.get("arguments", "{}") if isinstance(function, dict) else "{}"
@@ -884,6 +989,11 @@ class OpenAIResponsesTransformer(BaseTransformer):
         }
 
     def _local_shell_action_from_arguments(self, arguments: Any) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Converts tool arguments (JSON string or dict) to a local shell action:
+        # {"commands": [...]} from "commands" or from "cmd"/"command", plus
+        # timeout_ms/max_output_length; if no commands, a non-empty raw string becomes the
+        # single command; else {"commands": []}.
         parsed: Any = None
         if isinstance(arguments, str):
             try:
@@ -911,6 +1021,10 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return {"commands": []}
 
     def _function_call_output_content(self, output: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Unwraps a function call output: a content-block dict becomes a one-item list;
+        # otherwise recursively descends into "output", "body" or "content" keys; other values
+        # returned unchanged.
         if isinstance(output, dict):
             if self._is_responses_content_block(output):
                 return [output]
@@ -920,6 +1034,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return output
 
     def _flatten_function_call_output(self, output: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Flattens function call output to text: strings as-is; lists join text-like
+        # blocks with newlines; dicts JSON-encoded; None -> ""; others stringified.
         if isinstance(output, str):
             return output
         if isinstance(output, list):
@@ -938,6 +1055,8 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return str(output) if output is not None else ""
 
     def _image_parts(self, content: Any) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Returns image_url parts from a content list ([] for non-lists).
         if not isinstance(content, list):
             return []
         return [
@@ -947,6 +1066,8 @@ class OpenAIResponsesTransformer(BaseTransformer):
         ]
 
     def _is_responses_content_block(self, block: dict[str, Any]) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True if the block type is a Responses/chat text or image content type.
         return block.get("type") in {
             "input_text",
             "output_text",
@@ -958,6 +1079,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
     def _flush_input_content(
         self, content_parts: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts accumulated input_text/input_image items into a single user message
+        # (empty list if the content is empty).
         content = openai_responses_input_content_to_chat(content_parts)
         return [{"role": "user", "content": content}] if content else []
 
@@ -967,6 +1091,10 @@ class OpenAIResponsesTransformer(BaseTransformer):
         tool_outputs: list[dict[str, Any]],
         reasoning: str = "",
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Emits an assistant message with null content and the tool calls (plus
+        # reasoning_content if given) when there are tool calls, followed by the tool output
+        # messages.
         messages: list[dict[str, Any]] = []
         if tool_calls:
             assistant_msg: dict[str, Any] = {
@@ -984,6 +1112,10 @@ class OpenAIResponsesTransformer(BaseTransformer):
         self,
         item: dict[str, Any],
     ) -> Optional[dict[str, Any] | list[dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts a miscellaneous input item: message items with non-empty content ->
+        # {role, content}; function_call_output -> tool messages; untyped dicts with role and
+        # content (string, or non-empty converted list) -> {role, content}; else None.
         item_type = item.get("type", "")
 
         if item_type == "message":
@@ -1009,6 +1141,12 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return None
 
     def _convert_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: Converts Responses tools to chat function tools: already-wrapped function
+        # tools pass through; shell/local_shell become a "shell" function with a fixed
+        # cmd/commands/timeout_ms/max_output_length schema; other typed (server) tools dropped;
+        # flat function tools use name (or id), description, parameters (or
+        # inputSchema/input_schema, preferring its jsonSchema) and strict.
         converted = []
         for tool in tools:
             if tool.get("type") == "function" and "function" in tool:
@@ -1076,6 +1214,10 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return converted
 
     def _tool_choice_to_openai_chat(self, tool_choice: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Converts Responses tool_choice: string "shell" -> shell function choice, other
+        # strings unchanged; function dicts with a nested function unchanged or with a name
+        # converted to chat form; shell/local_shell types -> shell function choice; else unchanged.
         if isinstance(tool_choice, str):
             if tool_choice == "shell":
                 return {"type": "function", "function": {"name": "shell"}}
@@ -1097,6 +1239,8 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return tool_choice
 
     def _reasoning_config_enables_thinking(self, reasoning_cfg: dict[str, Any]) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: False for an empty config or effort "none" (case-insensitive); otherwise True.
         if not reasoning_cfg:
             return False
         effort = reasoning_cfg.get("effort")
@@ -1105,6 +1249,9 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return True
 
     def _cached_prompt_tokens(self, usage: dict[str, Any]) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns cached prompt tokens from usage.prompt_tokens_details.cached_tokens
+        # or usage.cached_tokens if an int, else 0.
         details = usage.get("prompt_tokens_details")
         if isinstance(details, dict):
             cached = details.get("cached_tokens")
@@ -1114,6 +1261,8 @@ class OpenAIResponsesTransformer(BaseTransformer):
         return cached if isinstance(cached, int) else 0
 
     def _make_error_response(self, message: str) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a response.failed event-shaped dict with internal_error and message.
         return {
             "type": "response.failed",
             "response": {

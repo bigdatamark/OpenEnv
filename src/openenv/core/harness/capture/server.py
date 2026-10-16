@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# The capture (intercept) proxy as a FastAPI app plus a CLI entry point. Agents call it
+# in any of four wire dialects with a minted session id as their API key; each request
+# is converted to a non-streaming chat-completions call to the session's upstream
+# engine with capture params, the response (with engine prompt token ids, sampled ids
+# and logprobs) is validated and recorded as a node in the session's rollout graph, and
+# the reply is returned in the agent's dialect (SSE when requested). Also serves
+# session management routes (gated by an optional admin key), rollout export, trace
+# entries, aux token-count routes, model listing and health. Enforces per-session
+# model-call budgets and output-token caps. Logs via the "intercept" logger.
 """The intercept server.
 
     input   an OpenAI-spec endpoint you already host (vLLM or SGLang) + the served model name
@@ -78,6 +88,9 @@ logger = logging.getLogger("intercept")
 
 
 def _system_digest(messages: list[dict[str, Any]]) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns the first 16 hex chars of the SHA-256 of the first non-empty system
+    # message's text (block lists joined by spaces), or None if there is none.
     """Cheap identity for 'which conversation is this'. Recorded, never used for routing."""
     import hashlib
 
@@ -112,6 +125,9 @@ AUX_ROUTES: dict[str, str] = {
 
 
 def aux_dialect(path: str) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the dialect ("anthropic" or "google") whose token-count reply an aux route
+    # expects, by case-insensitive suffix match on the normalized path; None if not an aux route.
     """Which dialect's token-count reply this path expects, or `None` if it is not an aux route.
 
     Google puts the method after a colon on the model path
@@ -126,10 +142,15 @@ def aux_dialect(path: str) -> str | None:
 
 
 def is_aux_route(path: str) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if path is an aux (token-count) route.
     return aux_dialect(path) is not None
 
 
 def aux_token_count_response(dialect: str, count: int) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds a token-count reply: Google shape (totalTokens, totalBillableCharacters =
+    # 4*count, promptTokensDetails) for "google", else {"input_tokens": count}.
     """The token-count reply in the shape the calling dialect expects."""
     if dialect == "google":
         # gemini-cli reads `totalTokens`; the other two fields are part of the documented response and
@@ -143,6 +164,10 @@ def aux_token_count_response(dialect: str, count: int) -> dict[str, Any]:
 
 
 def approximate_token_count(body: dict[str, Any]) -> int:
+    # [FUNCTION DOC]
+    # Estimates tokens as total characters / 4 (minimum 1) over chat/Anthropic messages
+    # (string content or text/content of parts), Anthropic system (string or blocks),
+    # Google contents parts and systemInstruction, plus the string form of tools.
     """Answer a count_tokens request without a tokenizer.
 
     We deliberately do not load one: the whole design keeps tokenization on the engine, and pulling a
@@ -195,6 +220,9 @@ def approximate_token_count(body: dict[str, Any]) -> int:
 
 
 def wants_stream(path: str, body: dict[str, Any]) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if body["stream"] is exactly True, or the path (with query) contains
+    # "streamgeneratecontent" or "alt=sse" (case-insensitive).
     """Did the client ask for SSE? Each dialect says so differently.
 
     OpenAI chat, Responses and Anthropic all set `stream: true` in the body. **Google does not.** It
@@ -235,6 +263,11 @@ SAMPLING_KEYS = (
 
 
 def clamp_output_tokens(chat_request: dict[str, Any], cap: int | None) -> int | None:
+    # [FUNCTION DOC]
+    # Caps output-length keys (max_tokens, max_completion_tokens, max_output_tokens) at cap
+    # in place; if none of them is set, sets max_tokens to cap. No-op when cap is falsy.
+    # Returns: the largest replaced value, or None if nothing exceeded the cap.
+    # Side effects: mutates chat_request.
     """Cap the requested output length so prompt + completion fits the served context window.
 
     Harnesses ask for absurd output budgets. qwen-coder requests **64000** output tokens, which on a
@@ -267,6 +300,9 @@ def clamp_output_tokens(chat_request: dict[str, Any], cap: int | None) -> int | 
 
 
 def normalise_for_capture(chat_request: dict[str, Any]) -> None:
+    # [FUNCTION DOC]
+    # Mutates a chat request for capture: stream False, removes stream_options, drops empty
+    # tools/functions lists, and drops tool_choice and parallel_tool_calls when no tools remain.
     """Force the upstream call into the one shape that yields complete, capturable responses.
 
     `stream_options` is not cosmetic: vLLM validates it against `stream` and rejects the pair with
@@ -309,6 +345,9 @@ def normalise_for_capture(chat_request: dict[str, Any]) -> None:
 
 
 def normalise_response(response: dict[str, Any]) -> None:
+    # [FUNCTION DOC]
+    # Mutates a chat response: replaces null usage.prompt_tokens_details and
+    # completion_tokens_details with zeroed objects. No-op if usage is not a dict.
     """Fill in usage sub-objects that vLLM leaves null but the OpenAI schema always returns.
 
     vLLM returns `"prompt_tokens_details": null` when prefix caching is off. OpenAI always returns
@@ -339,6 +378,9 @@ def normalise_response(response: dict[str, Any]) -> None:
 
 
 def normalise_client_payload(payload: dict[str, Any], api_type: APIType) -> None:
+    # [FUNCTION DOC]
+    # Mutates an outbound client payload: for the Responses dialect, fills null
+    # usage.input_tokens_details / output_tokens_details with zeroed objects.
     """Fill in usage sub-objects the OUTBOUND dialect promises but the transformer omits.
 
     Sibling of `normalise_response`, one layer further out. That one repairs the chat-completions
@@ -372,6 +414,11 @@ def normalise_client_payload(payload: dict[str, Any], api_type: APIType) -> None
 
 
 class UpstreamPool:
+    # [CLASS DOC]
+    # Cache of one InferenceClient and one measured capture level per distinct upstream
+    # engine (keyed by Upstream.cache_key), with a shared 4-worker thread pool (class-level)
+    # running blocking probes; concurrent resolvers for the same engine share one pending
+    # probe. Holds the server's default (client, level).
     """One inference client and one capability probe per distinct engine.
 
     The engine a rollout talks to is a per-SESSION property, not a per-server one: a dataset server is
@@ -394,6 +441,9 @@ class UpstreamPool:
     _probes = ThreadPoolExecutor(max_workers=4, thread_name_prefix="capture-probe")
 
     def __init__(self, *, default_client: InferenceClient, default_level: str) -> None:
+        # [FUNCTION DOC]
+        # Stores the default (client, level) and initializes the engine cache, pending-probe map
+        # and lock. default_client may be None for an engineless server.
         self._default = (default_client, default_level)
         self._by_engine: dict[
             tuple[str, str, str, str, str], tuple[InferenceClient, str]
@@ -403,10 +453,15 @@ class UpstreamPool:
 
     @property
     def default(self) -> tuple[InferenceClient, str]:
+        # [FUNCTION DOC]
+        # Returns the default (client, level) tuple.
         """The engine this server was booted with, for sessions that name none."""
         return self._default
 
     def known(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns a list of {llm_url, model (client's served model), capture_level} for probed
+        # engines; never includes credentials. Thread-safe.
         """What has been probed so far, for `/health`. Never includes credentials."""
         with self._lock:
             return [
@@ -425,6 +480,8 @@ class UpstreamPool:
             ]
 
     def forget(self, upstream: Upstream) -> None:
+        # [FUNCTION DOC]
+        # Removes the cached client for upstream's cache key (if any); the next resolve re-probes.
         """Drop the cached client for `upstream`, and with it the credential it holds.
 
         Every proxied call resolves its session's engine here, so the next call naming this engine
@@ -435,6 +492,9 @@ class UpstreamPool:
             self._by_engine.pop(upstream.cache_key, None)
 
     async def resolve(self, upstream: Upstream) -> tuple[InferenceClient, str]:
+        # [FUNCTION DOC]
+        # Async. Returns the cached (client, level) for upstream, or submits/joins a probe on the
+        # thread pool and awaits it (shielded so cancelling one waiter does not cancel the probe).
         """Client and measured capture level for `upstream`, probing once per engine."""
         key = upstream.cache_key
         with self._lock:
@@ -449,6 +509,10 @@ class UpstreamPool:
         return await asyncio.shield(asyncio.wrap_future(pending))
 
     def _resolve_once(self, upstream: Upstream) -> tuple[InferenceClient, str]:
+        # [FUNCTION DOC]
+        # HELPER: Runs on a worker thread: probes the engine, builds an InferenceClient (base URL
+        # stripped of trailing slash, resolved model, credentials, level, provider), caches it,
+        # and returns (client, level). Always removes the pending entry.
         key = upstream.cache_key
         try:
             model, level = self._probe(upstream)
@@ -468,6 +532,11 @@ class UpstreamPool:
                 self._pending.pop(key, None)
 
     def _probe(self, upstream: Upstream) -> tuple[str, str]:
+        # [FUNCTION DOC]
+        # HELPER: Blocking probe returning (served_model, capture_level). If no model was named,
+        # lists models and uses the only one (else returns ("", "text")). Runs validate_llm and
+        # uses its capture_level (default "text"). Any exception yields (model, "text"). Logs
+        # warnings with results. Side effects: network calls.
         """`(served_model, capture_level)`. Blocking; always called on a worker thread."""
         from .validate_llm import list_models, validate_llm
 
@@ -515,6 +584,9 @@ class UpstreamPool:
 
 
 def _budget_stop_response(model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Builds a synthetic terminal chat completion for the model: random "budget-" id,
+    # assistant content BUDGET_STOP_MESSAGE, no tool calls, finish_reason "stop", zero usage.
     """A terminal chat-completion, in the shape every dialect transformer expects on the way out.
 
     The content is NON-EMPTY on purpose. An empty assistant message reads as a failed generation and
@@ -556,6 +628,19 @@ def create_app(
     admin_key: str | None = None,
     max_model_calls: int = 0,
 ) -> FastAPI:
+    # [FUNCTION DOC]
+    # Builds and returns the capture proxy FastAPI app.
+    # Inputs: default upstream llm_url (empty for none), model override, engine label (for
+    # /health), require_registered, max_output_tokens cap (0/None disables), upstream
+    # api_key and auth_header, provider ("anthropic" forces capture_level "text"),
+    # capture_level, admin_key for session routes, default per-session max_model_calls
+    # (0 = unlimited).
+    # State on app.state: instance_id (random hex), inference (default client or None),
+    # transforms, registry (SessionRegistry), model, max_model_calls, llm_url,
+    # max_output_tokens, capture_level, upstreams (UpstreamPool), admin_key.
+    # Routes: GET /health; POST/GET /sessions; GET/DELETE /sessions/{id};
+    # GET /sessions/{id}/rollout; GET /sessions/{id}/trace_entries; GET /v1/models;
+    # POST catch-all proxy.
     """The capture proxy as an ASGI app.
 
     Args:
@@ -631,12 +716,16 @@ def create_app(
     app.state.admin_key = admin_key or None
 
     async def _upstream_for(session) -> tuple[InferenceClient, str]:
+        # [FUNCTION DOC]
+        # HELPER: Async. Resolves the session's upstream via the pool, or returns the default.
         """The engine this session's calls go to, and the level it was measured at."""
         if session.upstream is not None:
             return await app.state.upstreams.resolve(session.upstream)
         return app.state.upstreams.default
 
     def _model_of(session) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the session upstream's model when set, else the server model, else "".
         """The model name to send upstream for this session.
 
         The proxy rewrites `model` because harnesses mangle it: opencode is configured with
@@ -657,6 +746,8 @@ def create_app(
         return app.state.model or ""
 
     def _level_of(session) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the session's recorded capture level or the server default.
         """A session's capture level without touching the network.
 
         Reads what the probe recorded on the session, falling back to the server default. Used where
@@ -666,6 +757,11 @@ def create_app(
 
     @app.get("/health")
     async def health(request: Request) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # GET /health. Returns status, instance id, upstream URL, engine label (default
+        # "unknown"), model, session count, require_registered, capture_level, rollout_type
+        # ("train" iff tokens), probed upstreams (only when admin check passes, else []),
+        # whether an upstream credential is configured, and the default client's param fixes.
         return {
             "status": "ok",
             "instance": app.state.instance_id,
@@ -692,6 +788,9 @@ def create_app(
         }
 
     def _admin_ok(request: Request) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True if no admin key is configured, or the request's API key (extracted from
+        # headers) equals it (constant-time comparison).
         """Whether a caller may use the session-management routes.
 
         The registered-session check guards the catch-all proxy route and nothing else, which is fine
@@ -715,6 +814,8 @@ def create_app(
         return secrets.compare_digest(offered, expected)
 
     def _forbidden() -> JSONResponse:
+        # [FUNCTION DOC]
+        # HELPER: Returns a 401 JSON error stating the admin key is required.
         return JSONResponse(
             {
                 "error": {
@@ -726,6 +827,8 @@ def create_app(
         )
 
     def _invalid_request(message: str) -> JSONResponse:
+        # [FUNCTION DOC]
+        # HELPER: Returns a 400 JSON invalid_request_error with message.
         return JSONResponse(
             {"error": {"message": message, "type": "invalid_request_error"}},
             status_code=400,
@@ -735,6 +838,17 @@ def create_app(
     async def create_session(
         request: Request, payload: dict[str, Any] | None = None
     ) -> Any:
+        # [FUNCTION DOC]
+        # POST /sessions. Mints a session (admin key required).
+        # Validates payload: metadata must be an object without reserved keys; max_model_calls
+        # (default server value) must be a non-negative int; sampling must pass
+        # training_sampling. If llm_url is given, builds an Upstream (model, api_key,
+        # auth_header default Authorization, provider default openai), probes it via the pool,
+        # and records the resolved model. Validates purpose/rollout type and eval_sampling
+        # (eval_sampling only with purpose "eval"; eval purpose cannot have a training sampling
+        # override). Creates the session in the registry with metadata as extra fields.
+        # Returns: {session_id, capture_level, rollout_type, max_model_calls, llm_url, model};
+        # 401 or 400 JSON on errors. Side effects: may probe the network.
         """Mint a rollout id. Hand it to the agent as its API key; that is the whole integration.
 
         The caller may also name the engine this rollout should use — `llm_url`, and optionally
@@ -826,12 +940,19 @@ def create_app(
 
     @app.get("/sessions")
     async def list_sessions(request: Request) -> Any:
+        # [FUNCTION DOC]
+        # GET /sessions. Returns the registry summary (admin key required, else 401).
         if not _admin_ok(request):
             return _forbidden()
         return {"sessions": app.state.registry.summary()}
 
     @app.get("/sessions/{session_id}")
     async def session_status(session_id: str, request: Request) -> Any:
+        # [FUNCTION DOC]
+        # GET /sessions/{id}. Returns session_id, idle_s, upstream_errors and graph stats; 404
+        # for unknown sessions; 401 without admin key.
+        # KNOWN ISSUE: the intended docstring appears after the admin check, so it is just an
+        # unused string expression, not a docstring.
         if not _admin_ok(request):
             return _forbidden()
         """Live progress. `idle_s` is the cheapest wedge detector: turns arriving means progress."""
@@ -852,6 +973,9 @@ def create_app(
         include_discarded: bool = False,
         include_messages: bool = False,
     ) -> Any:
+        # [FUNCTION DOC]
+        # GET /sessions/{id}/rollout. Returns export_session for the session with optional
+        # discarded rows and messages, at the session's capture level; 404/401 on errors.
         """THE training endpoint: stitched, masked, logprob-aligned, validated."""
         if not _admin_ok(request):
             return _forbidden()
@@ -867,6 +991,10 @@ def create_app(
 
     @app.get("/sessions/{session_id}/trace_entries")
     async def trace_entries(session_id: str, request: Request) -> Any:
+        # [FUNCTION DOC]
+        # GET /sessions/{id}/trace_entries. Exports the session with messages and returns
+        # {session_id, entries} from to_trace_entries; any conversion exception returns 409 with
+        # the error; 404/401 on errors.
         """The LOOP-OWNING training endpoint: `list[TraceEntry]`, one per captured model call.
 
         `/rollout` returns the stitched document (input_ids + loss_mask + logprobs) for a consumer
@@ -902,12 +1030,17 @@ def create_app(
 
     @app.delete("/sessions/{session_id}")
     async def delete_session(session_id: str, request: Request) -> Any:
+        # [FUNCTION DOC]
+        # DELETE /sessions/{id}. Returns {"deleted": registry.delete(id)}; 401 without admin key.
         if not _admin_ok(request):
             return _forbidden()
         return {"deleted": app.state.registry.delete(session_id)}
 
     @app.get("/v1/models")
     async def models() -> Any:
+        # [FUNCTION DOC]
+        # GET /v1/models. Returns the default engine's model list, or an empty list object if
+        # there is no default engine. Unauthenticated.
         """The default engine's model list.
 
         Deliberately not session-scoped: this route is unauthenticated and answers before any session
@@ -921,6 +1054,26 @@ def create_app(
 
     @app.post("/{path:path}")
     async def proxy(path: str, request: Request) -> Any:
+        # [FUNCTION DOC]
+        # POST catch-all proxy for model calls.
+        # Flow: parse JSON body (400 if not a JSON object); aux token-count routes are answered
+        # immediately and never recorded; resolve session from headers/body (401 if unknown);
+        # detect dialect; deep-copy original request; determine whether the client wants SSE
+        # (path incl. query). If the session is over budget, increment budget_stop_count and
+        # reply with a synthetic stop completion in the client's dialect (SSE or JSON) without
+        # recording. Otherwise: set _served_model, transform to chat (400 on
+        # UpstreamRequestError); reject n != 1; set model; normalise_for_capture; record
+        # requested sampling params; apply session eval_sampling; if a training sampling
+        # policy is set, reject constrained decoding params (logit_bias, guided_*, non-text
+        # response_format, forced tool_choice, etc.) then apply the policy; validate session
+        # max_output_tokens and clamp to min(session cap, server cap). Resolve the upstream
+        # (400 if sampling policy but level not tokens; 503 if no engine); re-check budget; for
+        # an Anthropic provider with Anthropic dialect attach the native request and
+        # anthropic-beta/version headers; increment model_calls. Then complete_response runs
+        # (wrapped in SSE keepalive when streaming).
+        # Returns: JSONResponse or StreamingResponse.
+        # KNOWN ISSUE: for the native Anthropic path, a session whose eval_sampling attribute
+        # exists but is None would make the dict unpacking raise TypeError.
         """Catch-all: /v1/chat/completions, /v1/messages, /v1/responses, :generateContent."""
         headers = dict(request.headers)
         try:
@@ -1119,6 +1272,16 @@ def create_app(
         session.model_calls += 1
 
         async def complete_response():
+            # [FUNCTION DOC]
+            # HELPER: Async. Calls the upstream completion. On UpstreamError: an HTTP 400 that
+            # indicates context-length exhaustion adds a WARN finding, counts a budget stop and
+            # replies with a synthetic stop; otherwise counts an upstream error and returns a JSON
+            # error with status 400 (conversion errors), the upstream 400/413/422, or 502. On
+            # success: pops native response and effective sampling from the response; if a training
+            # policy is set and the upstream did not preserve it, adds a FATAL finding and returns
+            # 502; otherwise replaces sampling keys in chat_request with the effective sampling,
+            # normalizes usage, ingests the turn, and replies (native Anthropic JSON/SSE replay,
+            # SSE replay of the chat response, or a transformed JSON payload with usage normalized).
             try:
                 response = await upstream_client.completion(chat_request)
             except UpstreamError as exc:
@@ -1241,6 +1404,20 @@ def create_app(
         capture_level: str,
         requested_sampling: dict[str, Any] | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Records one upstream response as a graph node; never raises.
+        # Behavior: no choices -> warn, count upstream error, return. Extracts per-token
+        # logprobs (any null -> None), sampled token_ids and prompt_token_ids. For non-token
+        # capture levels runs check_turn_eval; otherwise check_turn, and on failure drops the
+        # logprobs (tokens still recorded). At token level, records once per session any
+        # truncating sampling params that were neutralised (metadata and a WARN finding). Adds
+        # a TurnNode (random 12-hex id, model, finish reason, harness session id, system
+        # digest, tool count, messages, tools, submitted and requested sampling params,
+        # response message), updates last_turn_at and metadata api_type. Any exception appends
+        # a FATAL capture_ingest_failed finding and logs.
+        # Side effects: mutates session graph, findings and metadata.
+        # KNOWN ISSUE: harness session id is extracted with empty headers, so header-supplied
+        # harness session ids are never recorded.
         """Turn one upstream response into a graph node, validating before it lands.
 
         Never raises. A capture problem must degrade one turn, not kill a rollout that is otherwise
@@ -1360,6 +1537,8 @@ def create_app(
 
 
 def _is_loopback_host(host: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if host is "127.0.0.1", "::1" or "localhost".
     """Whether `host` is a loopback-only bind (private local port).
 
     `0.0.0.0` / `::` are intentionally not loopback: they publish on every interface.
@@ -1368,6 +1547,15 @@ def _is_loopback_host(host: str) -> bool:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point. Parses --llm-url (required), --model, --engine, --host (default
+    # 127.0.0.1), --port (8100), --max-output-tokens (8192, 0 disables),
+    # --allow-unregistered, --api-key (default $OPENENV_LLM_API_KEY), --auth-header,
+    # --capture-level, --admin-key (default $OPENENV_CAPTURE_ADMIN_KEY). Configures logging;
+    # if no capture level is given, probes the endpoint with validate_llm (exits with the
+    # summary if unreachable) and prints the level and compat fixes. Exits if a non-loopback
+    # host has no admin key. Runs uvicorn with create_app.
+    # Side effects: network probes, stdout, blocks serving.
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

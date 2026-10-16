@@ -1,3 +1,8 @@
+# [PACKAGE DOC]
+# FinRL environment package: wraps FinRL's stock trading simulator behind the
+# OpenEnv client/server API. Exposes FinRLEnv, FinRLAction and FinRLObservation
+# lazily via a module-level attribute hook so importing the package does not
+# import the client or models eagerly.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +36,10 @@ __all__ = ["FinRLEnv", "FinRLAction", "FinRLObservation"]
 
 
 def __getattr__(name: str):
+    # [FUNCTION DOC]
+    # HELPER: Module-level lazy attribute resolver. Imports and returns FinRLEnv from
+    # .client or FinRLAction/FinRLObservation from .models on first access.
+    # Raises AttributeError for any other name.
     if name == "FinRLEnv":
         from .client import FinRLEnv
 

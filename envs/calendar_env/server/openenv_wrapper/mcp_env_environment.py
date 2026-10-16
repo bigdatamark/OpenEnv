@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# OpenEnv Environment that exposes MCP tools as actions. At import time loads
+# MCP_TOOLS_LIST and TOOL_HANDLERS via config.get_tool_handlers. Listing tools and calling
+# tools produce MCPObservation objects with shaped rewards.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -40,6 +44,9 @@ TOOL_HANDLERS = _tool_handlers["TOOL_HANDLERS"]
 
 
 class MCPEnvironment(Environment):
+    # [CLASS DOC]
+    # Environment holding State (episode id, step count), default and current request
+    # context (database_id, access token) and counters of successful/failed tool calls.
     """
     Generic MCP Environment with Tool Integration.
 
@@ -69,6 +76,9 @@ class MCPEnvironment(Environment):
     """
 
     def __init__(self, database_id: str = "default", auth_token: str = None):
+        # [FUNCTION DOC]
+        # Creates a fresh State with a random episode id, stores defaults for database_id and
+        # auth_token as both default and current context, zeroes counters. Logs.
         """
         Initialize the MCP environment.
 
@@ -92,6 +102,8 @@ class MCPEnvironment(Environment):
         )
 
     def set_request_context(self, database_id: str = None, access_token: str = None):
+        # [FUNCTION DOC]
+        # Sets the current database_id / access token, falling back to the defaults when falsy.
         """
         Set the current request context from HTTP headers.
 
@@ -108,6 +120,10 @@ class MCPEnvironment(Environment):
         logger.debug(f"Request context set: database_id={self._current_database_id}")
 
     def reset(self) -> MCPObservation:
+        # [FUNCTION DOC]
+        # Starts a new episode: new State, increments reset count, zeroes call counters, and
+        # returns a success observation with reward 0.0 and metadata (episode_id,
+        # available_tools count, database_id, message). Does not touch the database.
         """
         Reset the environment to initial state.
 
@@ -134,6 +150,11 @@ class MCPEnvironment(Environment):
         )
 
     def step(self, action: MCPAction) -> MCPObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Increments step_count and dispatches on action.action_type: "ListToolsAction" ->
+        # _handle_list_tools; "ToolCallAction" -> _handle_tool_call (error observation with reward
+        # -1.0 if tool_name missing); otherwise error observation reward -1.0. Any exception is
+        # converted to an error observation (reward -1.0, error_type in metadata). Never raises.
         """
         Execute an action in the environment.
 
@@ -191,6 +212,8 @@ class MCPEnvironment(Environment):
             )
 
     def _handle_list_tools(self, action: ListToolsAction) -> MCPObservation:
+        # [FUNCTION DOC]
+        # HELPER: returns a success observation with tools_list = MCP_TOOLS_LIST, reward 0.1 and metadata (step, action_type, tools_count).
         """
         Handle ListToolsAction by returning available MCP tools.
 
@@ -218,6 +241,18 @@ class MCPEnvironment(Environment):
         )
 
     def _handle_tool_call(self, action: ToolCallAction) -> MCPObservation:
+        # [FUNCTION DOC]
+        # Executes a tool: unknown tool -> failure observation reward -0.5 (failed counter++).
+        # Otherwise resolves the user: uses the current access token, or falls back to the first
+        # user's token from the DB (failure reward -1.0 if none); strips zero-width characters
+        # and whitespace from the token; looks up the user via get_user_by_static_token
+        # (failure observations with reward -1.0 on errors, missing user or a user without "id").
+        # Calls the handler with tool_name, arguments, database_id, user_id (and access_token if
+        # the handler accepts it) using asyncio.run, increments the success counter and returns
+        # a success observation with tool_result and reward from _compute_reward. Handler
+        # exceptions give a failure observation reward -1.0 and increment the failed counter.
+        # Side effects: DB reads, HTTP calls via the handler, counter mutation.
+        # KNOWN ISSUE: success is reported (and successful counter incremented) even when the tool result has isError True; asyncio.run fails if called from a thread that already runs an event loop.
         """
         Handle ToolCallAction by executing the specified MCP tool.
 
@@ -390,6 +425,10 @@ class MCPEnvironment(Environment):
             )
 
     def _compute_reward(self, tool_name: str, result: dict) -> float:
+        # [FUNCTION DOC]
+        # HELPER: returns -0.5 if the result dict has an "error" key or status_code/statusCode
+        # >= 400, 1.0 for a 2xx status, else 0.5.
+        # KNOWN ISSUE: docstring promises +0.5 for reads and +1.0 for writes, but the code bases reward only on status code; tool results from execute_tool_generic carry "isError" not "error", so errors without status_code still get 0.5.
         """
         Compute reward based on tool execution result.
 
@@ -423,6 +462,8 @@ class MCPEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State object.
         """
         Get the current environment state.
 
@@ -433,6 +474,9 @@ class MCPEnvironment(Environment):
 
     @property
     def stats(self) -> dict:
+        # [FUNCTION DOC]
+        # Property returning a dict of episode_id, step_count, reset_count, successful/failed
+        # tool call counts, success_rate (0.0 when no calls) and current database_id.
         """
         Get environment statistics.
 

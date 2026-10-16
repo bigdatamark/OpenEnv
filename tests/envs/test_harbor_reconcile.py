@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for openenv.harbor.atif.reconcile, which compares a capture document (from the capture
+# graph/export modules) against the harness's own ATIF trajectory to decide trainability:
+# turn-count mismatches, coverage floor, auxiliary-call inference, subagent refusal, budget-stop
+# and synthetic API error allowances, eval count-only comparison and partial-usage identity checks.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -27,6 +32,11 @@ export_mod = pytest.importorskip("openenv.core.harness.capture.export")
 
 
 def document(lengths, *, role="agent", rollout_type="train"):
+    # [FUNCTION DOC]
+    # HELPER: Builds a real capture document by adding one TurnNode per entry in lengths (each with that
+    # many sampled tokens, a growing prompt, logprobs -0.1, one tool, finish "stop") to a RolloutGraph
+    # and exporting it via export_session with capture level "tokens" for train or "text" otherwise.
+    # If role is not "agent", rewrites every sequence row's role. Returns the document dict.
     """A real capture document with one sampled span per entry in `lengths`.
 
     Built by `export_session` over a real graph rather than hand-rolled, so the fixture cannot drift
@@ -50,6 +60,8 @@ def document(lengths, *, role="agent", rollout_type="train"):
         prompt = prompt + sampled + [9000 + i]
 
     class Session:
+        # [CLASS DOC]
+        # HELPER: Minimal session stand-in with id, metadata and findings attributes.
         session_id = "s"
         metadata: dict = {}
         findings: list = []
@@ -67,6 +79,9 @@ def document(lengths, *, role="agent", rollout_type="train"):
 
 
 def trace(lengths, **extra):
+    # [FUNCTION DOC]
+    # HELPER: Returns a minimal ATIF trace dict (schema 1.0, agent "opencode") with one agent step per
+    # length carrying completion_tokens, merged with any extra keys.
     return {
         "schema_version": "1.0",
         "agent": {"name": "opencode"},
@@ -78,21 +93,30 @@ def trace(lengths, **extra):
 
 
 def codes(report):
+    # [FUNCTION DOC]
+    # HELPER: Returns the set of finding codes in a reconcile report.
     return {f.code for f in report.findings}
 
 
 def fatal_codes(report):
+    # [FUNCTION DOC]
+    # HELPER: Returns the set of fatal finding codes in a report.
     return {f.code for f in report.fatal}
 
 
 # --- the agreeing case ------------------------------------------------------
 def test_identical_turn_lengths_reconcile():
+    # [FUNCTION DOC]
+    # Matching lengths reconcile ok with no fatal findings.
     report = reconcile(document([10, 20, 30]), trace([10, 20, 30]))
     assert report.ok
     assert not fatal_codes(report)
 
 
 def test_explicit_synthetic_api_error_is_not_a_model_response():
+    # [FUNCTION DOC]
+    # A trailing "<synthetic>" API-error step with zero tokens is ignored (ok, "atif_synthetic_api_error"
+    # noted) and the native trace is not mutated.
     native = trace([10, 20, 0])
     native["steps"][-1].update(
         model_name="<synthetic>", message="API Error: 400 unsupported image"
@@ -115,6 +139,9 @@ def test_explicit_synthetic_api_error_is_not_a_model_response():
     ],
 )
 def test_unproven_or_sampled_zero_token_steps_still_fail(change):
+    # [FUNCTION DOC]
+    # Parametrized: any deviation from the strict synthetic-error shape (real model name, ordinary
+    # message, tool calls, nonzero tokens) leaves a fatal "turn_mismatch".
     native = trace([10, 20, 0])
     native["steps"][-1].update(
         model_name="<synthetic>",
@@ -126,6 +153,8 @@ def test_unproven_or_sampled_zero_token_steps_still_fail(change):
 
 
 def test_no_atif_is_not_a_failure():
+    # [FUNCTION DOC]
+    # A missing trace is ok with a "no_atif" finding.
     """Three of sixteen harnesses emit no trajectory; that is an absent cross-check, not a fault."""
     report = reconcile(document([10]), None)
     assert report.ok
@@ -134,6 +163,8 @@ def test_no_atif_is_not_a_failure():
 
 # --- disagreement -----------------------------------------------------------
 def test_atif_logging_more_calls_than_were_captured_is_fatal():
+    # [FUNCTION DOC]
+    # ATIF with more steps than captured turns fails.
     """Calls the harness made that never reached the proxy mean the capture is incomplete."""
     report = reconcile(document([10, 20]), trace([10, 20, 30]))
     assert not report.ok
@@ -143,6 +174,9 @@ def test_atif_logging_more_calls_than_were_captured_is_fatal():
 def test_proxy_stop_requires_recorded_provenance_and_leaves_trace_unchanged(
     recorded_stops,
 ):
+    # [FUNCTION DOC]
+    # Parametrized on budget_stop_count 0/1: a trailing budget-stop step is excused only if a stop was
+    # recorded; the trace is not mutated.
     doc = document([10, 20])
     doc["budget_stop_count"] = recorded_stops
     native = trace([10, 20, 0])
@@ -157,6 +191,8 @@ def test_proxy_stop_requires_recorded_provenance_and_leaves_trace_unchanged(
     [("unexpected missing generation", 0), (atif.BUDGET_STOP_MESSAGE, 7)],
 )
 def test_stop_allowance_cannot_hide_unknown_or_sampled_model_turns(message, count):
+    # [FUNCTION DOC]
+    # Budget-stop allowance does not excuse a step with an unknown message or a nonzero token count.
     doc = document([10])
     doc["budget_stop_count"] = 1
     native = trace([10, count])
@@ -165,6 +201,8 @@ def test_stop_allowance_cannot_hide_unknown_or_sampled_model_turns(message, coun
 
 
 def test_stop_allowance_is_bounded_by_responses_actually_emitted():
+    # [FUNCTION DOC]
+    # Two budget-stop steps with only one recorded stop fail.
     doc = document([10])
     doc["budget_stop_count"] = 1
     native = trace([10, 0, 0])
@@ -174,6 +212,8 @@ def test_stop_allowance_is_bounded_by_responses_actually_emitted():
 
 
 def test_extra_captured_calls_embed_as_auxiliary_when_coverage_is_high():
+    # [FUNCTION DOC]
+    # One extra captured call beyond ATIF is ok, noted as "atif_aux_calls" and listed in aux_node_ids.
     """Seeing MORE than the harness logged is benign and explainable: a next-speaker check, a title
     generator. The asymmetry is deliberate — missing calls mean we lost something, extra ones do not."""
     report = reconcile(document([58, 132, 266, 370, 33]), trace([58, 132, 266, 370]))
@@ -183,6 +223,8 @@ def test_extra_captured_calls_embed_as_auxiliary_when_coverage_is_high():
 
 
 def test_low_coverage_refuses_rather_than_discarding_most_of_a_rollout():
+    # [FUNCTION DOC]
+    # 49 captured vs 5 logged fails with fatal "atif_coverage_too_low".
     """The mimo case: 49 captured calls, ATIF logged 5, and a subsequence match would have demoted 44
     to auxiliary under a warning. Below the floor that inference is as likely coincidence as signal."""
     captured = list(range(1, 50))
@@ -193,6 +235,8 @@ def test_low_coverage_refuses_rather_than_discarding_most_of_a_rollout():
 
 # --- converters that give nothing to compare against ------------------------
 def test_all_zero_token_counts_downgrade_to_no_cross_check():
+    # [FUNCTION DOC]
+    # All-zero ATIF token counts are ok with "atif_no_token_counts".
     """vibe reports completion_tokens=0 on every step while capturing perfectly. Failing the rollout
     would punish it for its trace converter rather than for anything wrong."""
     report = reconcile(document([10, 20]), trace([0, 0]))
@@ -201,6 +245,8 @@ def test_all_zero_token_counts_downgrade_to_no_cross_check():
 
 
 def test_no_agent_steps_at_all_downgrades_the_same_way():
+    # [FUNCTION DOC]
+    # An ATIF with no steps is ok with "atif_no_token_counts".
     report = reconcile(document([10, 20]), trace([]))
     assert report.ok
     assert "atif_no_token_counts" in codes(report)
@@ -208,6 +254,8 @@ def test_no_agent_steps_at_all_downgrades_the_same_way():
 
 # --- structural edge cases --------------------------------------------------
 def test_nothing_captured_defers_to_the_rollouts_own_finding():
+    # [FUNCTION DOC]
+    # An empty capture yields "no_turns_upstream" and no fatal findings.
     """`check_rollout` already reports no_turns plainly; a second FATAL here buries the real cause."""
     empty: dict = {
         "rollout_type": "train",
@@ -221,12 +269,16 @@ def test_nothing_captured_defers_to_the_rollouts_own_finding():
 
 
 def test_calls_captured_but_none_labelled_agent_is_fatal():
+    # [FUNCTION DOC]
+    # All-auxiliary sequences fail with fatal "no_agent_sequence".
     report = reconcile(document([10, 20], role="auxiliary"), trace([10, 20]))
     assert not report.ok
     assert "no_agent_sequence" in fatal_codes(report)
 
 
 def test_subagent_trajectories_are_refused_not_merely_noted():
+    # [FUNCTION DOC]
+    # A trace with subagent_trajectories fails with fatal "atif_subagents".
     """The warning used to say subagent turns must not carry the parent's reward and then did nothing
     to stop it: no node ids collected, no role changed. ATIF does not say which captured calls belong
     to the subagent, so the rollout cannot be attributed and is refused."""
@@ -240,12 +292,16 @@ def test_subagent_trajectories_are_refused_not_merely_noted():
 
 # --- the eval path ----------------------------------------------------------
 def test_eval_rollouts_compare_call_counts_since_token_counts_do_not_exist():
+    # [FUNCTION DOC]
+    # Eval documents with zero tokens reconcile by count, noting "eval_reconcile_counts_only".
     report = reconcile(document([0, 0, 0], rollout_type="eval"), trace([10, 20, 30]))
     assert report.ok
     assert "eval_reconcile_counts_only" in codes(report)
 
 
 def test_eval_rollouts_still_notice_a_truncated_harness_trace():
+    # [FUNCTION DOC]
+    # Eval doc with 2 calls vs ATIF with 6 reports "atif_calls_missing".
     """The one real bug reconciliation has ever caught was a truncated trajectory. Counts alone are
     enough to see it, which is why the eval path bothers comparing at all."""
     report = reconcile(document([0] * 2, rollout_type="eval"), trace([1] * 6))
@@ -253,6 +309,9 @@ def test_eval_rollouts_still_notice_a_truncated_harness_trace():
 
 
 def _partial_usage_pair():
+    # [FUNCTION DOC]
+    # HELPER: Returns (doc, trace) where the first two ATIF steps lack token counts (None) but share
+    # tool-call ids with the first two captured turns' response messages; third step counts match.
     doc = document([64, 199, 10])
     native = trace([None, None, 10])
     for index in range(2):
@@ -263,6 +322,9 @@ def _partial_usage_pair():
 
 
 def test_partial_usage_requires_exact_ordered_call_identity():
+    # [FUNCTION DOC]
+    # The partial-usage pair reconciles ok with "atif_partial_usage", without "turns_match" and with no
+    # auxiliary nodes.
     doc, native = _partial_usage_pair()
     report = reconcile(doc, native)
     assert report.ok
@@ -283,6 +345,9 @@ def test_partial_usage_requires_exact_ordered_call_identity():
     ],
 )
 def test_partial_usage_cannot_hide_disagreement(failure):
+    # [FUNCTION DOC]
+    # Parametrized mutations (different/missing/duplicate ids, wrong known count, explicit zero, extra
+    # step) each make reconcile fail.
     doc, native = _partial_usage_pair()
     if failure == "different_id":
         native["steps"][0]["tool_calls"][0]["tool_call_id"] = "different"

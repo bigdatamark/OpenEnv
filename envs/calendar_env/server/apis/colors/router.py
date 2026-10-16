@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI router for GET /colors (Google Calendar v3 colors resource). Colors are read per database selected by the
+# x-database-id header.
 """
 Colors API endpoints following Google Calendar API v3 structure
 Provides color definitions for calendars and events
@@ -15,12 +18,17 @@ router = APIRouter(prefix="/colors", tags=["colors"])
 
 
 def get_color_manager(database_id: str) -> ColorManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new ColorManager bound to the given database id.
     """Get color manager for the specified database"""
     return ColorManager(database_id)
 
 
 @router.get("", response_model=Dict[str, Any])
 async def get_colors(x_database_id: str = Header(alias="x-database-id")):
+    # [FUNCTION DOC]
+    # GET /colors handler. Input: x-database-id header (required). Returns the manager's colors response dict (calendar and
+    # event palettes). Raises: HTTPException 500 with the error text on any failure.
     """
     Returns the color definitions for calendars and events
 

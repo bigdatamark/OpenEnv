@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: plays the QED Math environment (math proof benchmark exposed as
+# MCP tools get_problem, get_grading_guidelines and submit_proof) with an LLM via any
+# OpenAI-compatible API using tool calling. Configuration comes from env vars
+# (API_BASE_URL, API_KEY/HF_TOKEN, MODEL, QED_MATH_URL, MAX_EPISODES, MAX_TOKENS,
+# VERBOSE). Adds src/ and envs/ to sys.path at import time.
 """Play QED Math with an LLM via any OpenAI-compatible API.
 
 QED Math is a mathematical reasoning benchmark that evaluates LLMs on their
@@ -89,6 +95,11 @@ Be concise but complete.
 
 
 def _tools_to_openai_format(tools: list) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: converts MCP tool descriptors (objects with name, description and
+    # input_schema or inputSchema) to OpenAI function-calling dicts. Each property keeps
+    # only its type (default "string") and description; required list is copied.
+    # Returns: list of tool dicts.
     """Convert MCP tool descriptors to OpenAI function-calling format."""
     openai_tools = []
     for tool in tools:
@@ -135,6 +146,18 @@ async def run_episode(
     tools: list[dict[str, Any]],
     episode_num: int,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Runs one episode: resets the env, seeds the chat with the system prompt and a
+    # user request, then loops requesting a required tool call from the LLM. The first
+    # tool call is parsed (bad JSON arguments become a proof string; missing tool call or
+    # unknown shape falls back to submit_proof with the text). Unknown tool names are
+    # replaced by submit_proof. submit_proof receives the cumulative completion-token
+    # count as output_length_tokens. Tool results are JSON-serialized and appended as tool
+    # messages. The episode ends when submit_proof reports done (default True) or another
+    # tool reports done.
+    # Inputs: env (async MCP env client), client (OpenAI), tools (OpenAI tool dicts), episode_num.
+    # Returns: dict with episode, problem_id, problem_type, score, reward, steps, output_tokens.
+    # Side effects: network calls to LLM and env; prints when VERBOSE.
     """Run a single QED Math episode and return a result summary dict."""
     tool_names = {t["function"]["name"] for t in tools}
 
@@ -318,6 +341,12 @@ async def run_episode(
 
 
 async def async_main() -> None:
+    # [FUNCTION DOC]
+    # Async entry point: raises SystemExit if no API key; creates the OpenAI client,
+    # imports qed_math_env.client dynamically, connects to QED_MATH_URL, lists tools,
+    # runs MAX_EPISODES episodes and prints a summary (fully-correct count where score==7,
+    # averages of reward, steps and tokens, per-episode lines).
+    # KNOWN ISSUE: divides by len(results), so MAX_EPISODES=0 raises ZeroDivisionError.
     if not API_KEY:
         raise SystemExit(
             "API_KEY (or HF_TOKEN) must be set.\n"
@@ -378,6 +407,8 @@ async def async_main() -> None:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Synchronous entry point; runs async_main with asyncio.
     asyncio.run(async_main())
 
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Quickstart example: plays Wordle on a hosted TextArena environment Space by sending
+# six fixed guesses and printing the feedback and final state.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Quickstart example for the generic TextArena environment."""
@@ -8,6 +11,11 @@ from textarena_env import TextArenaEnv, TextArenaAction
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: connects to the hosted Wordle Space, resets, sends each fixed guess
+    # until done, prints feedback text found after "Feedback:" in messages, the reward
+    # and a state snapshot. Exceptions are caught and printed with setup hints; the env
+    # is always closed. Side effects: network, stdout.
     print("=" * 60)
     print("💬 TextArena Hello World - Wordle-v0")
     print("=" * 60)

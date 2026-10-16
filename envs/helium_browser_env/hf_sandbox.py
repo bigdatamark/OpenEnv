@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Example launcher: runs the packaged browser environment image inside an HF
+# Sandbox via HFSandboxProvider and performs a reset plus one scroll step.
 """Run the packaged Helium browser environment with HFSandboxProvider."""
 
 import os
@@ -9,6 +12,14 @@ from .models import BrowserAction
 
 
 def main():
+    # [FUNCTION DOC]
+    # Reads HELIUM_BROWSER_IMAGE (RuntimeError if unset), builds container env vars
+    # (BROWSER_SANDBOX="hf" and step/wait settings copied from the local environment
+    # with defaults 20, 1.5, 3), starts a cpu-basic sandbox, waits up to 300 s for
+    # readiness, connects a sync client, resets to BROWSER_START_URL (default
+    # example.com), scrolls down 500 px and prints the resulting URL. The sandbox is
+    # torn down on exit of the provider context.
+    # Side effects: remote sandbox creation, network I/O, stdout.
     image = os.environ.get("HELIUM_BROWSER_IMAGE")
     if not image:
         raise RuntimeError("set HELIUM_BROWSER_IMAGE to the packaged environment image")

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Server-side Atari environment wrapping ale_py's ALEInterface. Raises ImportError at import if ale-py/numpy are
+# missing. Also provides optional web-playground hooks (action buttons and frame rendering as an inline PNG).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,6 +44,10 @@ except ImportError as e:
 
 
 class AtariEnvironment(Environment):
+    # [CLASS DOC]
+    # One ALE emulator instance per environment (concurrent sessions supported by giving each session its own
+    # instance). Game, observation type, action space, mode, difficulty, sticky-action probability and frameskip are fixed
+    # at construction. Actions are indices into the chosen action set (minimal or full 18-action set).
     """
     Atari Environment wrapper for OpenEnv.
 
@@ -78,6 +85,12 @@ class AtariEnvironment(Environment):
         repeat_action_probability: float = 0.0,
         frameskip: int = 4,
     ):
+        # [FUNCTION DOC]
+        # Creates and configures the ALE interface (error-only logging, sticky probability), loads the ROM for game_name,
+        # applies mode/difficulty when given, selects the action set and computes screen_shape for the obs type, and creates
+        # the AtariState. Raises: ValueError if the ROM cannot be loaded or obs_type is invalid.
+        # KNOWN ISSUE: obs_type is validated only after the ROM is loaded; setMode/setDifficulty after loadROM may require a
+        # reset to take effect (handled implicitly by reset()).
         """Initialize Atari environment."""
         super().__init__()
 
@@ -143,6 +156,9 @@ class AtariEnvironment(Environment):
         )
 
     def reset(self) -> Observation:
+        # [FUNCTION DOC]
+        # Resets the ALE game, assigns a new UUID episode id, zeros step_count and returns the initial observation (reward 0.0).
+        # KNOWN ISSUE: accepts no seed/episode_id arguments unlike the base Environment.reset signature.
         """
         Reset the environment and return initial observation.
 
@@ -160,6 +176,10 @@ class AtariEnvironment(Environment):
         return self._make_observation()
 
     def step(self, action: Action) -> Observation:
+        # [FUNCTION DOC]
+        # Validates the action (must be an AtariAction with 0 <= action_id < size of action set, else ValueError), repeats the
+        # mapped ALE action for frameskip frames (stopping early on game over) summing rewards, increments step_count.
+        # Returns: the new observation with reward set to the summed reward and done reflecting game over.
         """
         Execute agent's action and return resulting observation.
 
@@ -202,12 +222,17 @@ class AtariEnvironment(Environment):
 
     @property
     def state(self) -> AtariState:
+        # [FUNCTION DOC]
+        # Property returning the live AtariState.
         """Get current environment state."""
         return self._state
 
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web-playground hook: returns (label, action-fields) pairs for each legal action id in the observation dict, labelled
+        # with the id and the ALE action name.
         """The legal actions as buttons, named with their ALE meaning (NOOP, FIRE, ...)."""
         return [
             (f"{a} · {self._action_set[a].name}", {"action_id": a})
@@ -215,6 +240,9 @@ class AtariEnvironment(Environment):
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web-playground hook: returns an HTML img tag with the observation's screen reshaped to screen_shape and encoded as a
+        # base64 PNG (displayed at 2x width, pixelated). Returns None if there is no screen or obs_type is "ram".
         """Draw the current game frame (RGB or grayscale) as a pixelated PNG."""
         if "screen" not in observation:
             return None
@@ -232,6 +260,11 @@ class AtariEnvironment(Environment):
         )
 
     def _make_observation(self) -> AtariObservation:
+        # [FUNCTION DOC]
+        # HELPER: Reads the current screen (RGB, grayscale or RAM), flattens it to a list of ints, and returns an
+        # AtariObservation with screen_shape, legal action indices (all indices of the action set), lives, frame counters,
+        # done = game over, reward 0.0 and metadata containing game_name and string names of the action set.
+        # Raises: ValueError for an invalid obs_type.
         """
         Create an AtariObservation from current ALE state.
 

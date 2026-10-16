@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: Static configuration for the CARLA LLM examples: model configs keyed by short name (provider, model id,
+# API-key env var, vision support), scenario configs for trolley, maze and free-roam scenarios, and the list of
+# (model, scenario) pairs reproducing the blog post examples. No functions or side effects.
+# KNOWN ISSUE: the "gpt-4.1-mini" and "gpt-5.2" entries map to model ids "gpt-4-turbo" and "gpt-4o" respectively, not the named models.
 """
 Configuration for LLM inference examples.
 
@@ -10,6 +15,9 @@ from typing import Literal
 
 @dataclass
 class ModelConfig:
+    # [CLASS DOC]
+    # Dataclass describing an LLM: display name, provider (anthropic, openai, qwen, huggingface or local), model id, the
+    # name of the environment variable holding its API key, and whether it accepts images.
     """LLM model configuration."""
     name: str
     provider: Literal["anthropic", "openai", "qwen", "huggingface", "local"]
@@ -96,6 +104,9 @@ MODELS = {
 
 @dataclass
 class ScenarioConfig:
+    # [CLASS DOC]
+    # Dataclass describing a scenario: server scenario name, description, expected behaviour text, and optional
+    # scenario_config overrides sent at reset (None by default).
     """Scenario configuration."""
     scenario_name: str  # OpenEnv scenario name
     description: str

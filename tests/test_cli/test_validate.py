@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for "openenv validate" and its helpers: runtime validation of a running server
+# (requests mocked), human-readable/JSON/file report output and exit codes, static local
+# validation, multi-mode deployment checks on a minimal fake env, and write_report typing.
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
@@ -22,11 +26,17 @@ runner = CliRunner()
 
 
 class _MockResponse:
+    # [CLASS DOC]
+    # HELPER: Minimal stand-in for a requests response with a status code and optional JSON.
     def __init__(self, status_code: int, payload: dict | None = None):
+        # [FUNCTION DOC]
+        # Stores status_code and the payload (None means no JSON body).
         self.status_code = status_code
         self._payload = payload
 
     def json(self) -> dict:
+        # [FUNCTION DOC]
+        # Returns the payload. Raises: ValueError if there is none.
         if self._payload is None:
             raise ValueError("No JSON payload")
         return self._payload
@@ -38,6 +48,10 @@ def _write_minimal_valid_env(
     main_signature: str = "def main():",
     main_invocation: str = "main()",
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Writes a minimal env into env_dir: openenv.yaml (no validation block), empty
+    # uv.lock, pyproject with openenv dependency and a "server" script, and server/app.py with
+    # a main function (signature and guarded invocation configurable).
     (env_dir / "server").mkdir(parents=True)
 
     (env_dir / "openenv.yaml").write_text(
@@ -59,7 +73,12 @@ def _write_minimal_valid_env(
 
 
 def test_validate_running_environment_success() -> None:
+    # [FUNCTION DOC]
+    # With all endpoints present and healthy (MCP returns a JSON-RPC error), the report passes
+    # 6/6 criteria in simulation mode with standard version 1.0.0.
     def _fake_get(url: str, timeout: float) -> _MockResponse:
+        # [FUNCTION DOC]
+        # HELPER: Mock GET returning openapi paths, health, metadata and schema; other URLs fail the test.
         if url.endswith("/openapi.json"):
             return _MockResponse(
                 200,
@@ -88,6 +107,8 @@ def test_validate_running_environment_success() -> None:
         raise AssertionError(f"Unexpected GET url: {url}")
 
     def _fake_post(url: str, json: dict, timeout: float) -> _MockResponse:
+        # [FUNCTION DOC]
+        # HELPER: Mock POST answering /mcp with a JSON-RPC Invalid Request error.
         if url.endswith("/mcp"):
             return _MockResponse(
                 200,
@@ -113,7 +134,11 @@ def test_validate_running_environment_success() -> None:
 
 
 def test_validate_running_environment_failure() -> None:
+    # [FUNCTION DOC]
+    # A 500 from /metadata fails only the metadata_endpoint criterion (5/6).
     def _fake_get(url: str, timeout: float) -> _MockResponse:
+        # [FUNCTION DOC]
+        # HELPER: Mock GET like the success case but /metadata returns 500.
         if url.endswith("/openapi.json"):
             return _MockResponse(
                 200,
@@ -139,6 +164,8 @@ def test_validate_running_environment_failure() -> None:
         raise AssertionError(f"Unexpected GET url: {url}")
 
     def _fake_post(url: str, json: dict, timeout: float) -> _MockResponse:
+        # [FUNCTION DOC]
+        # HELPER: Mock POST answering /mcp with a JSON-RPC error.
         if url.endswith("/mcp"):
             return _MockResponse(
                 200,
@@ -164,6 +191,8 @@ def test_validate_running_environment_failure() -> None:
 
 
 def test_validate_command_runtime_target_outputs_json() -> None:
+    # [FUNCTION DOC]
+    # URL target with --json prints the report JSON and validates with a 5 s timeout.
     mock_report = {
         "target": "https://example.com",
         "validation_type": "running_environment",
@@ -184,6 +213,8 @@ def test_validate_command_runtime_target_outputs_json() -> None:
 
 
 def test_validate_command_runtime_target_without_json_outputs_human_readable() -> None:
+    # [FUNCTION DOC]
+    # Without --json, prints a header, PASS lines and "Verdict: PASS".
     mock_report = {
         "target": "https://example.com",
         "validation_type": "running_environment",
@@ -215,6 +246,8 @@ def test_validate_command_runtime_target_without_json_outputs_human_readable() -
 def test_validate_command_runtime_target_failed_criterion_displays_expected_and_actual() -> (
     None
 ):
+    # [FUNCTION DOC]
+    # A failed criterion prints FAIL, details, expected/actual and exits 1.
     mock_report = {
         "target": "https://example.com",
         "validation_type": "running_environment",
@@ -254,6 +287,8 @@ def test_validate_command_runtime_target_failed_criterion_displays_expected_and_
 def test_validate_command_runtime_target_with_output_writes_file(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # --output writes the report JSON and still prints the human report.
     out_file = tmp_path / "report.json"
     mock_report = {
         "target": "https://example.com",
@@ -280,6 +315,8 @@ def test_validate_command_runtime_target_with_output_writes_file(
 def test_validate_command_runtime_target_with_output_and_json(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # --output with --json writes the file and prints JSON.
     out_file = tmp_path / "report.json"
     mock_report = {
         "target": "https://example.com",
@@ -313,6 +350,8 @@ def test_validate_command_runtime_target_with_output_and_json(
 def test_validate_command_runtime_target_output_write_failure(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # An unwritable --output path exits 3 with "Internal error:".
     out_file = tmp_path / "non_existent_dir" / "report.json"
     mock_report = {
         "target": "https://example.com",
@@ -343,6 +382,9 @@ def test_validate_command_runtime_target_output_write_failure(
 def test_validate_command_local_path_without_validation_block_fails(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Runs the CLI in a subprocess: static validation of an env without a validation block
+    # exits 1 citing static.manifest.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
 
@@ -369,6 +411,8 @@ def test_validate_command_local_path_without_validation_block_fails(
 def test_multi_mode_rejects_environment_package_as_runtime_dependency(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # Depending on an env package instead of openenv reports the missing openenv dependency.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
     (env_dir / "pyproject.toml").write_text(
@@ -390,6 +434,8 @@ def test_multi_mode_rejects_environment_package_as_runtime_dependency(
 def test_multi_mode_accepts_dockerfile_managed_openenv_runtime(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # An openenv install in server/Dockerfile satisfies the dependency check.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
     (env_dir / "pyproject.toml").write_text(
@@ -412,6 +458,8 @@ def test_multi_mode_accepts_dockerfile_managed_openenv_runtime(
 
 
 def test_multi_mode_accepts_main_call_with_arguments(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A guarded main(port=...) call counts as callable main.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(
         env_dir,
@@ -426,6 +474,8 @@ def test_multi_mode_accepts_main_call_with_arguments(tmp_path: Path) -> None:
 
 
 def test_multi_mode_rejects_nested_main_guard(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A __main__ guard nested inside another function is rejected.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
     (env_dir / "server" / "app.py").write_text(
@@ -442,6 +492,8 @@ def test_multi_mode_rejects_nested_main_guard(tmp_path: Path) -> None:
 
 
 def test_multi_mode_accepts_later_top_level_main_guard(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A later top-level guard calling main() is accepted.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
     (env_dir / "server" / "app.py").write_text(
@@ -461,6 +513,8 @@ def test_multi_mode_accepts_later_top_level_main_guard(tmp_path: Path) -> None:
 def test_multi_mode_syntax_error_fallback_requires_dunder_main(
     tmp_path: Path,
 ) -> None:
+    # [FUNCTION DOC]
+    # For unparseable app.py, the fallback text check rejects it.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
     (env_dir / "server" / "app.py").write_text(
@@ -474,6 +528,8 @@ def test_multi_mode_syntax_error_fallback_requires_dunder_main(
 
 
 def test_validate_command_rejects_mixed_path_and_url(tmp_path: Path) -> None:
+    # [FUNCTION DOC]
+    # A local path combined with --url fails.
     env_dir = tmp_path / "test_env"
     _write_minimal_valid_env(env_dir)
 
@@ -487,6 +543,8 @@ def test_validate_command_rejects_mixed_path_and_url(tmp_path: Path) -> None:
 
 
 def test_write_report_validation_report_only() -> None:
+    # [FUNCTION DOC]
+    # write_report is annotated with ValidationReport and raises AttributeError for a plain dict.
     assert write_report.__annotations__["report"] is ValidationReport
     with pytest.raises(AttributeError):
         write_report({"target": "http://example.com"})  # type: ignore[arg-type]

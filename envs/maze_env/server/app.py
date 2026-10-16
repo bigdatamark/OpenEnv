@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI server entry for the maze environment. At import time builds the module-level "app"
+# via create_app with MazeEnvironment and its models, env name "maze_env", and a concurrency
+# limit read from the MAX_CONCURRENT_ENVS environment variable (default 8).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -52,6 +56,9 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: parses --host (default 0.0.0.0) and --port (default 8000) from argv and runs
+    # the app with uvicorn. Blocks until the server stops.
     """
     Entry point for direct execution via uv run or python -m.
 

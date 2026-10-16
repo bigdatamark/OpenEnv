@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Integration tests for the WebSocket EnvClient architecture and the create_app factory
+# pattern: smoke tests (in-process), HTTP/WebSocket protocol tests and concurrency tests
+# against uvicorn subprocesses on fixed localhost ports (8100-8201). Inserts the repo
+# root into sys.path at import time.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -43,6 +48,14 @@ def run_server(
     startup_timeout: float = 10.0,
     env_vars: dict = None,
 ) -> Generator[subprocess.Popen, None, None]:
+    # [FUNCTION DOC]
+    # HELPER: Context manager that launches uvicorn serving "<module_path>:app" on
+    # 127.0.0.1:<port> with extra env vars, polls /health every 0.5 s until 200 or
+    # startup_timeout, then yields the Popen; always terminates (kills after 5 s) and closes pipes.
+    # Raises: TimeoutError with captured stderr if the server never becomes healthy.
+    # Side effects: subprocess, HTTP requests.
+    # KNOWN ISSUE: only ConnectionError is caught while polling; a requests Timeout would
+    # propagate. Reading stderr after timeout can block since the process is still running.
     """
     Context manager to start and stop a server process.
 
@@ -111,6 +124,9 @@ def run_server(
 
 
 def wait_for_server(base_url: str, timeout: float = 10.0) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Polls <base_url>/health until 200 or timeout. Returns True if healthy, else False.
+    # KNOWN ISSUE: unused in this module.
     """Wait for a server to be ready."""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -129,9 +145,13 @@ def wait_for_server(base_url: str, timeout: float = 10.0) -> bool:
 
 
 class TestSmokeFactoryPattern:
+    # [CLASS DOC]
+    # In-process checks that envs construct/reset and that create_app takes a factory.
     """Test that the factory pattern works correctly for all environments."""
 
     def test_smoke_echo_env_factory_pattern(self):
+        # [FUNCTION DOC]
+        # EchoEnvironment constructs, resets, and closes.
         """Test that EchoEnvironment can be created via factory."""
         from envs.echo_env.server.echo_environment import EchoEnvironment
 
@@ -146,6 +166,8 @@ class TestSmokeFactoryPattern:
         env.close()
 
     def test_smoke_connect4_env_factory_pattern(self):
+        # [FUNCTION DOC]
+        # Connect4Environment constructs, resets, and closes.
         """Test that Connect4Environment can be created via factory."""
         from envs.connect4_env.server.connect4_environment import Connect4Environment
 
@@ -158,6 +180,8 @@ class TestSmokeFactoryPattern:
         env.close()
 
     def test_smoke_create_app_accepts_class(self):
+        # [FUNCTION DOC]
+        # create_app accepts an environment class.
         """Test that create_app accepts a class (not instance)."""
         from envs.echo_env.server.echo_environment import EchoEnvironment
         from openenv.core.env_server.http_server import create_app
@@ -173,6 +197,8 @@ class TestSmokeFactoryPattern:
         assert app is not None
 
     def test_smoke_create_app_accepts_factory_function(self):
+        # [FUNCTION DOC]
+        # create_app accepts a zero-arg factory function.
         """Test that create_app accepts a factory function."""
         from envs.echo_env.server.echo_environment import EchoEnvironment
         from openenv.core.env_server.http_server import create_app
@@ -182,6 +208,8 @@ class TestSmokeFactoryPattern:
         )
 
         def create_echo_env():
+            # [FUNCTION DOC]
+            # HELPER: Factory returning a new EchoEnvironment.
             return EchoEnvironment()
 
         # Should not raise TypeError
@@ -191,6 +219,8 @@ class TestSmokeFactoryPattern:
         assert app is not None
 
     def test_smoke_create_app_rejects_instance(self):
+        # [FUNCTION DOC]
+        # create_app raises TypeError "must be a callable" for an instance.
         """Test that create_app rejects an instance (not callable)."""
         from envs.echo_env.server.echo_environment import EchoEnvironment
         from openenv.core.env_server.http_server import create_app
@@ -216,15 +246,21 @@ class TestSmokeFactoryPattern:
 
 @pytest.mark.integration
 class TestProtocolHttpEndpoints:
+    # [CLASS DOC]
+    # HTTP endpoint tests against an echo server on port 8100.
     """Test that HTTP endpoints work correctly."""
 
     @pytest.fixture
     def echo_server(self):
+        # [FUNCTION DOC]
+        # Fixture: runs the echo server on port 8100 and yields its URL.
         """Start echo environment server."""
         with run_server("envs.echo_env.server.app", port=8100) as proc:
             yield "http://127.0.0.1:8100"
 
     def test_protocol_health_endpoint(self, echo_server):
+        # [FUNCTION DOC]
+        # /health returns 200 with status "healthy".
         """Test /health endpoint."""
         response = requests.get(f"{echo_server}/health")
         assert response.status_code == 200
@@ -232,6 +268,8 @@ class TestProtocolHttpEndpoints:
         assert data.get("status") == "healthy"
 
     def test_protocol_schema_endpoint(self, echo_server):
+        # [FUNCTION DOC]
+        # /schema returns action and observation schemas.
         """Test /schema endpoint."""
         response = requests.get(f"{echo_server}/schema")
         assert response.status_code == 200
@@ -240,6 +278,8 @@ class TestProtocolHttpEndpoints:
         assert "observation" in data
 
     def test_protocol_reset_endpoint(self, echo_server):
+        # [FUNCTION DOC]
+        # POST /reset returns an observation.
         """Test /reset endpoint."""
         response = requests.post(f"{echo_server}/reset", json={})
         assert response.status_code == 200
@@ -247,6 +287,8 @@ class TestProtocolHttpEndpoints:
         assert "observation" in data
 
     def test_protocol_step_endpoint(self, echo_server):
+        # [FUNCTION DOC]
+        # POST /step with a call_tool action returns an observation.
         """Test /step endpoint with MCP action."""
         # First reset
         requests.post(f"{echo_server}/reset", json={})
@@ -267,6 +309,8 @@ class TestProtocolHttpEndpoints:
         assert "observation" in data
 
     def test_protocol_state_endpoint(self, echo_server):
+        # [FUNCTION DOC]
+        # GET /state after reset includes step_count.
         """Test /state endpoint."""
         # First reset
         requests.post(f"{echo_server}/reset", json={})
@@ -279,15 +323,21 @@ class TestProtocolHttpEndpoints:
 
 @pytest.mark.integration
 class TestProtocolWebSocketClient:
+    # [CLASS DOC]
+    # WebSocket client tests against an echo server on port 8101.
     """Test that WebSocket client (EnvClient) works correctly."""
 
     @pytest.fixture
     def echo_server(self):
+        # [FUNCTION DOC]
+        # Fixture: runs the echo server on port 8101 and yields its URL.
         """Start echo environment server."""
         with run_server("envs.echo_env.server.app", port=8101) as proc:
             yield "http://127.0.0.1:8101"
 
     def test_protocol_client_connect_and_reset(self, echo_server):
+        # [FUNCTION DOC]
+        # Sync client connects and reset returns an observation.
         """Test client can connect and reset via WebSocket."""
         from envs.echo_env.client import EchoEnv
 
@@ -297,6 +347,8 @@ class TestProtocolWebSocketClient:
             assert result.observation is not None
 
     def test_protocol_client_step(self, echo_server):
+        # [FUNCTION DOC]
+        # call_tool echo_message returns the message.
         """Test client can step via WebSocket."""
         from envs.echo_env.client import EchoEnv
 
@@ -307,6 +359,8 @@ class TestProtocolWebSocketClient:
             assert result == "Hello"
 
     def test_protocol_client_state(self, echo_server):
+        # [FUNCTION DOC]
+        # state().step_count is 1 after one tool call.
         """Test client can get state via WebSocket."""
         from envs.echo_env.client import EchoEnv
 
@@ -319,6 +373,9 @@ class TestProtocolWebSocketClient:
             assert state.step_count == 1
 
     def test_protocol_client_reconnects_after_close(self, echo_server):
+        # [FUNCTION DOC]
+        # Closes the inner websocket on the sync wrapper's loop behind the client's back,
+        # then checks reset and call_tool still work (client reconnects).
         """A socket closed by the far end must not disable the client."""
         from envs.echo_env.client import EchoEnv
 
@@ -340,6 +397,8 @@ class TestProtocolWebSocketClient:
             assert client.call_tool("echo_message", message="after") == "after"
 
     def test_protocol_client_multiple_episodes(self, echo_server):
+        # [FUNCTION DOC]
+        # step_count is 2 after two calls, 0 after reset, 1 after another call.
         """Test client can run multiple episodes."""
         from envs.echo_env.client import EchoEnv
 
@@ -369,6 +428,8 @@ class TestProtocolWebSocketClient:
 
 @pytest.mark.integration
 class TestConcurrencyMultipleSessions:
+    # [CLASS DOC]
+    # Concurrent session tests (skipped by default) on port 8102 with MAX_CONCURRENT_ENVS=10.
     """Test that multiple concurrent sessions work correctly.
 
     NOTE: These tests require the server to be configured with max_concurrent_envs > 1.
@@ -378,6 +439,8 @@ class TestConcurrencyMultipleSessions:
 
     @pytest.fixture
     def echo_server_concurrent(self):
+        # [FUNCTION DOC]
+        # Fixture: runs the echo server on port 8102 with MAX_CONCURRENT_ENVS=10.
         """Start echo environment server with concurrent sessions enabled."""
         # Pass MAX_CONCURRENT_ENVS env var to enable multiple sessions
         with run_server(
@@ -391,6 +454,8 @@ class TestConcurrencyMultipleSessions:
         reason="Concurrency requires server configuration - run manually with MAX_CONCURRENT_ENVS > 1"
     )
     def test_concurrency_two_independent_sessions(self, echo_server_concurrent):
+        # [FUNCTION DOC]
+        # Two clients keep independent step counts (3 and 1). Skipped.
         """Test that two clients can run independently."""
         from envs.echo_env.client import EchoEnv
 
@@ -418,6 +483,8 @@ class TestConcurrencyMultipleSessions:
         reason="Concurrency requires server configuration - run manually with MAX_CONCURRENT_ENVS > 1"
     )
     def test_concurrency_session_isolation(self, echo_server_concurrent):
+        # [FUNCTION DOC]
+        # Echo results are not mixed between two sessions. Skipped.
         """Test that session state is isolated between clients."""
         from envs.echo_env.client import EchoEnv
 
@@ -441,14 +508,20 @@ class TestConcurrencyMultipleSessions:
 
 @pytest.mark.integration
 class TestEchoEnvironment:
+    # [CLASS DOC]
+    # Echo-specific tool tests on port 8200.
     """Test EchoEnvironment specifically."""
 
     @pytest.fixture
     def server(self):
+        # [FUNCTION DOC]
+        # Fixture: runs the echo server on port 8200 and yields its URL.
         with run_server("envs.echo_env.server.app", port=8200) as proc:
             yield "http://127.0.0.1:8200"
 
     def test_echo_message_echoed(self, server):
+        # [FUNCTION DOC]
+        # echo_message returns the input.
         """Test that messages are echoed correctly."""
         from envs.echo_env.client import EchoEnv
 
@@ -458,6 +531,8 @@ class TestEchoEnvironment:
             assert result == "Hello World!"
 
     def test_echo_with_length(self, server):
+        # [FUNCTION DOC]
+        # echo_with_length returns the message and its length.
         """Test that echo_with_length returns message and length."""
         from envs.echo_env.client import EchoEnv
 
@@ -470,14 +545,20 @@ class TestEchoEnvironment:
 
 @pytest.mark.integration
 class TestConnect4Environment:
+    # [CLASS DOC]
+    # Connect4-specific tests on port 8201.
     """Test Connect4Environment specifically."""
 
     @pytest.fixture
     def server(self):
+        # [FUNCTION DOC]
+        # Fixture: runs the Connect4 server on port 8201 and yields its URL.
         with run_server("envs.connect4_env.server.app", port=8201) as proc:
             yield "http://127.0.0.1:8201"
 
     def test_connect4_initial_board(self, server):
+        # [FUNCTION DOC]
+        # Reset board is an all-zero 6x7 grid.
         """Test that initial board is empty."""
         from envs.connect4_env.client import Connect4Env
 
@@ -490,6 +571,8 @@ class TestConnect4Environment:
             assert all(cell == 0 for row in result.observation.board for cell in row)
 
     def test_connect4_legal_actions(self, server):
+        # [FUNCTION DOC]
+        # All 7 columns are legal after reset.
         """Test that all columns are legal initially."""
         from envs.connect4_env.client import Connect4Env
 

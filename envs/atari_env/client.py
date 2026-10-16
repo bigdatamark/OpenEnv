@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket client for the Atari environment server.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +27,9 @@ if TYPE_CHECKING:
 
 
 class AtariEnv(EnvClient[AtariAction, AtariObservation, AtariState]):
+    # [CLASS DOC]
+    # Typed EnvClient for Atari; implements payload serialization and result/state parsing. Connection management and
+    # Docker helpers are inherited.
     """
     Client for Atari Environment.
 
@@ -51,6 +56,8 @@ class AtariEnv(EnvClient[AtariAction, AtariObservation, AtariState]):
     """
 
     def _step_payload(self, action: AtariAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Serializes an action to a dict with action_id, game_name, obs_type and full_action_space.
         """
         Convert AtariAction to JSON payload for step request.
 
@@ -68,6 +75,10 @@ class AtariEnv(EnvClient[AtariAction, AtariObservation, AtariState]):
         }
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[AtariObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult from a server response. Observation fields (screen, screen_shape, legal_actions, lives,
+        # frame counters) default to empty lists / 0; metadata prefers the top-level "metadata", else the observation's.
+        # Returns: StepResult with reward (may be None), done (default False) and top-level metadata (may be None).
         """
         Parse server response into StepResult[AtariObservation].
 
@@ -99,6 +110,9 @@ class AtariEnv(EnvClient[AtariAction, AtariObservation, AtariState]):
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> AtariState:
+        # [FUNCTION DOC]
+        # HELPER: Builds an AtariState from a state response with defaults: game "unknown", obs_type "rgb", minimal action
+        # space, mode/difficulty None, sticky probability 0.0, frameskip 4.
         """
         Parse server response into AtariState object.
 

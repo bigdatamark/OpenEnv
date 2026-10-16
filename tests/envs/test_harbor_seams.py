@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for openenv.harbor.seams: what each harness seam's resolve hands the agent (model name,
+# kwargs, agent env) for step limits, training profiles and specific harnesses (copilot-cli,
+# grok-build, antigravity-cli).
 """Seam behaviour: how each harness learns about the capture proxy, and how it is bounded.
 
 A seam is the only place per-agent knowledge lives, so these tests assert on what a seam HANDS the
@@ -15,6 +19,8 @@ from openenv.harbor import seams
 
 
 def test_a_step_limit_reaches_the_agent_config():
+    # [FUNCTION DOC]
+    # mini-swe-agent's resolve with step_limit=20 sets config.agent.step_limit to 20.
     _, kwargs, _, _ = seams.get("mini-swe-agent").resolve(
         base_url="http://proxy", session="s1", model="Qwen/Qwen3.5-4B", step_limit=20
     )
@@ -22,6 +28,8 @@ def test_a_step_limit_reaches_the_agent_config():
 
 
 def test_no_step_limit_leaves_the_config_alone():
+    # [FUNCTION DOC]
+    # Without a step limit, mini-swe-agent kwargs have no "config".
     _, kwargs, _, _ = seams.get("mini-swe-agent").resolve(
         base_url="http://proxy", session="s1", model="Qwen/Qwen3.5-4B"
     )
@@ -29,6 +37,9 @@ def test_no_step_limit_leaves_the_config_alone():
 
 
 def test_training_profile_disables_nested_opencode_calls_without_losing_provider():
+    # [FUNCTION DOC]
+    # opencode with training=True disables task/question/webfetch tools while keeping the provider's
+    # baseURL (base + "/v1") and apiKey (session); without training no "tools" entry exists.
     seam = seams.get("opencode")
     _, train, _, _ = seam.resolve(
         base_url="http://proxy", session="s1", model="m", training=True
@@ -43,6 +54,8 @@ def test_training_profile_disables_nested_opencode_calls_without_losing_provider
 
 
 def test_a_step_limit_merges_instead_of_replacing_a_seams_own_config():
+    # [FUNCTION DOC]
+    # A custom Seam's step-limit config is deep-merged with its own kwargs config.
     """opencode carries a provider block. A shallow update would drop it along with the base_url."""
     seam = seams.Seam(
         name="fake",
@@ -60,6 +73,9 @@ def test_a_step_limit_merges_instead_of_replacing_a_seams_own_config():
 
 
 def test_a_harness_that_cannot_cap_steps_warns_rather_than_dropping_it(caplog):
+    # [FUNCTION DOC]
+    # opencode with a step limit logs a warning that the proxy enforces the budget and adds no
+    # step_limit to kwargs.
     """Silently ignoring the cap would let a caller believe its rollouts are bounded."""
     with caplog.at_level("WARNING"):
         _, kwargs, _, _ = seams.get("opencode").resolve(
@@ -70,6 +86,8 @@ def test_a_harness_that_cannot_cap_steps_warns_rather_than_dropping_it(caplog):
 
 
 def test_copilot_byok_routes_without_a_github_model_service():
+    # [FUNCTION DOC]
+    # copilot-cli env sets provider base URL (+"/v1"), API key = session and offline mode.
     from openenv.harbor.seams import SEAMS
 
     _, _, env, _ = SEAMS["copilot-cli"].resolve(
@@ -81,6 +99,9 @@ def test_copilot_byok_routes_without_a_github_model_service():
 
 
 def test_grok_primary_and_auxiliary_models_share_capture_endpoint():
+    # [FUNCTION DOC]
+    # grok-build config maps all model roles to the given model, pointing at the capture /v1 endpoint
+    # with OPENAI_API_KEY set to the session.
     from openenv.harbor.seams import SEAMS
 
     _, kwargs, env, _ = SEAMS["grok-build"].resolve(
@@ -94,6 +115,8 @@ def test_grok_primary_and_auxiliary_models_share_capture_endpoint():
 
 
 def test_antigravity_uses_the_existing_native_google_endpoint_setting():
+    # [FUNCTION DOC]
+    # antigravity-cli resolves model "google/<model>" and sets the Gemini base URL, key and disables ADC.
     from openenv.harbor.seams import SEAMS
 
     model, _, env, _ = SEAMS["antigravity-cli"].resolve(

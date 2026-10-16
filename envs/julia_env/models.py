@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the Julia environment: action (code and optional tests),
+# execution observation and cumulative state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,6 +18,8 @@ from openenv.core.env_server import Action, Observation, State
 
 
 class JuliaAction(Action):
+    # [CLASS DOC]
+    # Action: required core_code (Julia source) and optional test_code run after it.
     """
     Action for the Julia environment - code to execute.
 
@@ -28,6 +33,9 @@ class JuliaAction(Action):
 
 
 class JuliaObservation(Observation):
+    # [CLASS DOC]
+    # Observation: stdout, stderr, exit_code, tests_passed, tests_failed and
+    # code_compiles (defaults "", "", 0, 0, 0, True).
     """
     Observation from the Julia environment - execution results.
 
@@ -49,6 +57,9 @@ class JuliaObservation(Observation):
 
 
 class JuliaState(State):
+    # [CLASS DOC]
+    # State extended with last exit code, last compile flag and episode-cumulative
+    # passed/failed test counts.
     """
     State for Julia environment.
 

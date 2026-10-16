@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Manual end-to-end script (also collectable by pytest) exercising
+# LocalDockerProvider against a locally built "echo-env:latest" image: starts
+# containers, waits for /health, and calls the HTTP /reset, /step and /state
+# endpoints. Requires Docker and the image. Adds the src directory to sys.path
+# at import time. When run as a script, executes the three checks, prints a
+# summary and exits 0 if all passed, else 1.
 """
 End-to-end test for LocalDockerProvider.
 
@@ -21,6 +28,15 @@ from openenv.core.containers.runtime import LocalDockerProvider
 
 # TODO: Remove this test or make it a functional test since this will be tested in e2e test for echo env
 def test_local_docker_provider():
+    # [FUNCTION DOC]
+    # Starts an echo-env container on a random port, waits up to 30 s, and checks
+    # /health returns status "healthy", /reset returns the ready message, /step
+    # echoes a message with length 31, /state shows step_count 1, and that after
+    # three more steps step_count is 4. Prints progress; always stops the container.
+    # Returns True on success, False on any exception.
+    # KNOWN ISSUE: all exceptions (including assertion failures) are caught and
+    # turned into a False return, so under pytest the test never fails (and pytest
+    # warns about a non-None return).
     """Test LocalDockerProvider end-to-end."""
     print("=" * 60)
     print("LocalDockerProvider End-to-End Test")
@@ -148,6 +164,11 @@ def test_local_docker_provider():
 
 
 def test_provider_with_custom_port():
+    # [FUNCTION DOC]
+    # Starts the container on host port 8123, checks the base URL contains it,
+    # waits for readiness and checks /health is 200. Always stops the container.
+    # Returns True/False.
+    # KNOWN ISSUE: same swallowed-exception behavior as the end-to-end test.
     """Test provider with custom port."""
     print("=" * 60)
     print("LocalDockerProvider with Custom Port Test")
@@ -187,6 +208,11 @@ def test_provider_with_custom_port():
 
 
 def test_provider_with_env_vars():
+    # [FUNCTION DOC]
+    # Starts the container with DEBUG and LOG_LEVEL env vars, waits for readiness
+    # and checks /health is 200. Always stops the container. Returns True/False.
+    # KNOWN ISSUE: same swallowed-exception behavior; env vars are not verified to
+    # reach the container.
     """Test provider with environment variables."""
     print("=" * 60)
     print("LocalDockerProvider with Environment Variables Test")

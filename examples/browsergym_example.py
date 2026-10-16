@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Inference example for BrowserGym MiniWoB "click-test": a vision-language model (via the Hugging Face router,
+# OpenAI-compatible API, token from HF_TOKEN or API_KEY) chooses one BrowserGym action string per step from a text
+# prompt (goal, URL, recent history, clickable element IDs) plus a PNG screenshot. Runs up to MAX_STEPS steps against
+# a Docker-launched environment, printing rewards and errors. Side effects: Docker container, network calls, stdout.
 """BrowserGym MiniWoB example with Qwen deciding the next action.
 
 This is an inference example for the BrowserGym environment. It uses the OpenAI
@@ -66,12 +71,16 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 
 def build_history_lines(history: List[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the last 4 history lines joined by newlines, or "None" if history is empty.
     if not history:
         return "None"
     return "\n".join(history[-4:])
 
 
 def extract_screenshot_uri(observation) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Converts the observation's screenshot pixel array to a PNG and returns it as a base64 data URI, or None if there is no screenshot.
     if observation.screenshot is None:
         return None
     screen_array = np.array(observation.screenshot, dtype=np.uint8)
@@ -84,6 +93,10 @@ def extract_screenshot_uri(observation) -> Optional[str]:
 
 
 def extract_clickable_elements(observation) -> List[Dict[str, str]]:
+    # [FUNCTION DOC]
+    # Reads metadata["browsergym_obs"]["extra_element_properties"] from the observation and returns, sorted by id string,
+    # a list of dicts with "bid" and a comma-joined "bbox" string (or "?") for elements flagged clickable.
+    # KNOWN ISSUE: joining the bbox with a string join fails if the coordinates are numbers rather than strings.
     """Collect BrowserGym element IDs that can be clicked."""
 
     metadata = getattr(observation, "metadata", {}) or {}
@@ -110,6 +123,9 @@ def extract_clickable_elements(observation) -> List[Dict[str, str]]:
 
 
 def build_user_prompt(step: int, observation, history: List[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the per-step user prompt text with step number, goal, URL, history, last-action-error flag and the
+    # list of clickable element IDs. Returns the dedented string.
     goal = observation.goal or "(not provided)"
     url = observation.url or "(unknown)"
     error_note = "Yes" if observation.last_action_error else "No"
@@ -140,6 +156,11 @@ def build_user_prompt(step: int, observation, history: List[str]) -> str:
 
 
 def parse_model_action(response_text: str) -> str:
+    # [FUNCTION DOC]
+    # Extracts an action string from model text: for each non-empty line, strips an "action:"/"next action:" prefix and
+    # returns the first function-call-like match with whitespace collapsed; otherwise searches the whole text; falls back
+    # to "noop()" when nothing matches or the text is empty.
+    # KNOWN ISSUE: an inline comment mentions falling back to the single detected element ID for natural-language clicks, but no such logic exists.
     if not response_text:
         return FALLBACK_ACTION
 
@@ -170,6 +191,10 @@ def parse_model_action(response_text: str) -> str:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Runs the episode: creates the OpenAI client and env, resets, and per step builds the multimodal messages, queries
+    # the model (any exception uses the fallback action), parses and executes the action, records history and prints the
+    # reward; stops on done or after MAX_STEPS. Always closes the env.
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
     env = BrowserGymEnv.from_docker_image(

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Default seed data for the calendar database: four users (Alice, Bob, Carol, Dave) with
+# their own calendars, events, settings, ACL scopes and ACL rules, and a generator for
+# the full seed SQL (also pulling in enhanced event data, Google colors and watch channels).
+# This SQL is what /reset loads by default (see openenv_wrapper config).
 """
 Multi-User Sample Data for Calendar Application
 """
@@ -10,6 +15,9 @@ from .watch_channel_seed_data import get_watch_channel_sql
 
 
 def get_multi_user_sample_data() -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a dict with users (including static API tokens), calendars, events, settings,
+    # scopes, acls and a description. Event times are computed relative to now. No side effects.
     """
     Generate sample data for multiple users demonstrating multi-user scenarios
     """
@@ -430,6 +438,12 @@ def get_multi_user_sample_data() -> Dict[str, Any]:
 
 
 def get_multi_user_sql(database_name: str = "multi_user_calendar") -> str:
+    # [FUNCTION DOC]
+    # Builds the complete seed SQL text: header comments, INSERTs for users, calendars, then
+    # the enhanced event SQL, colors (type upper-cased to match the enum name), settings,
+    # scopes, ACLs and watch channels; returns them joined by newlines.
+    # Inputs: database_name - only used in a header comment.
+    # KNOWN ISSUE: the events in get_multi_user_sample_data are never written (events come only from generate_enhanced_event_sql); scope "value" None would be rendered as the string 'None'.
     """
     Generate SQL statements for multi-user sample data
     """

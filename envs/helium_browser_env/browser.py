@@ -1,3 +1,16 @@
+# [MODULE DOC]
+# Example script (runs at import, no functions): drives the browser environment
+# with a vision LLM. Requires BASE_URL (inference endpoint), BROWSER_BASE_URL
+# (env server) and MODEL_ID env vars (KeyError if missing). Resets to
+# example.com, then loops until done: sends a system prompt describing the JSON
+# action format plus a user message (task, URL, error, action history, and the
+# screenshot as a base64 PNG data URL) requesting a JSON object; parses the
+# reply, records it in history, rescales click x/y from the 0..1000 range to
+# pixel coordinates (0..799 / 0..599), validates it strictly as a BrowserAction,
+# steps, and prints the action.
+# Raises: ValueError for non-integer or out-of-range click coordinates; JSON or
+# validation errors on malformed model output.
+# Side effects: network calls to the LLM and env server, stdout.
 import json
 import os
 

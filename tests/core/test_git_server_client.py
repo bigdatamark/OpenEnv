@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for GitServerClient's local git configuration: it must not write into the user's home
+# directory and must pass quoted git arguments correctly. Runs real git commands in tmp dirs.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for GitServerClient git configuration."""
@@ -8,6 +12,9 @@ from openenv.core.tools.git_server_client import GitServerClient
 
 
 def test_git_config_does_not_touch_home(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # With HOME redirected to an empty temp dir, constructing the client leaves it empty, and git
+    # commands run by the client report the client's identity (openenv@local.env).
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -30,6 +37,9 @@ def test_git_config_does_not_touch_home(tmp_path, monkeypatch):
 
 
 def test_execute_git_command_keeps_quoted_args(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # A commit message given in double quotes is passed as a single argument and appears intact in
+    # the log.
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# TitanRL reward functions that turn the per-turn OpenEnv rewards (stored in each
+# turn's env_rewards mapping) into one scalar per rollout. Imports torchtitan.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -28,10 +31,15 @@ from torchtitan.rl.rubric import RewardFn
 
 
 class OpenEnvReward(RewardFn):
+    # [CLASS DOC]
+    # Reward function reading one env_rewards key from every turn that has it and
+    # aggregating with sum, last or mean.
     """Aggregate the per-step OpenEnv rewards attached to a rollout's turns."""
 
     @dataclass(kw_only=True, slots=True)
     class Config(RewardFn.Config):
+        # [CLASS DOC]
+        # Configuration: reward_name (the env_rewards key) and aggregate mode.
         reward_name: str = "openenv"
         """The ``env_rewards`` key to read (must match the env's ``reward_name``)."""
 
@@ -39,6 +47,9 @@ class OpenEnvReward(RewardFn):
         """How to combine per-turn rewards: ``"sum"``, ``"last"``, or ``"mean"``."""
 
     def __init__(self, config: Config) -> None:
+        # [FUNCTION DOC]
+        # Initializes the base RewardFn (sets weight) and stores the key and aggregate mode.
+        # Raises: ValueError if aggregate is not sum, last or mean.
         super().__init__(config)  # sets self.weight from RewardFn.Config
         if config.aggregate not in ("sum", "last", "mean"):
             raise ValueError(
@@ -48,6 +59,9 @@ class OpenEnvReward(RewardFn):
         self._aggregate = config.aggregate
 
     async def __call__(self, rollout: Rollout, env_input: object) -> float:
+        # [FUNCTION DOC]
+        # Async scorer: collects the configured reward from each turn that has it and returns
+        # the aggregate as float; 0.0 if no turn reported it. env_input is unused.
         rewards = [
             turn.env_rewards[self._reward_name]
             for turn in rollout.turns
@@ -63,6 +77,9 @@ class OpenEnvReward(RewardFn):
 
 
 class OpenEnvShapingReward(OpenEnvReward):
+    # [CLASS DOC]
+    # Identical behavior to OpenEnvReward under a different class name, so a rubric can
+    # hold both (rubric deduplicates by class name and labels the breakdown by it).
     """:class:`OpenEnvReward` over a shaping key, as a separately named reward fn.
 
     Behaviorally identical to its base class — only the name differs, and
@@ -76,6 +93,9 @@ class OpenEnvShapingReward(OpenEnvReward):
 
     @dataclass(kw_only=True, slots=True)
     class Config(OpenEnvReward.Config):
+        # [CLASS DOC]
+        # Redeclared config with the same fields, needed so the configurable framework builds
+        # this subclass rather than the base class.
         """Same fields as the base config.
 
         Redeclared because ``Configurable.__init_subclass__`` only wires

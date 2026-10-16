@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: an LLM (via the HF router with the OpenAI client) plays TextArena
+# Wordle-v0 inside a locally started textarena-env Docker container. API key comes
+# from API_KEY or HF_TOKEN; model, turn limit and verbosity are module constants.
+# KNOWN ISSUE: docstring says examples/wordle_inference.py and the DeepSeek Terminus
+# model, but the file name differs and MODEL is gpt-oss-120b.
 """Play TextArena Wordle with a hosted LLM via Hugging Face Inference Providers.
 
 This script mirrors the structure of the Kuhn Poker inference sample but targets
@@ -63,6 +69,9 @@ SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 
 def format_history(messages: Iterable[TextArenaMessage]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders messages as lines "[category] content" (category defaults to
+    # MESSAGE) joined by newlines.
     """Convert TextArena message history into plain text for the model."""
 
     lines: List[str] = []
@@ -73,6 +82,10 @@ def format_history(messages: Iterable[TextArenaMessage]) -> str:
 
 
 def extract_guess(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first bracketed five-letter word in text, lowercased. Otherwise
+    # strips non-letters, and returns the first 5 letters in brackets if at least 5
+    # remain, else the placeholder "[dunno]".
     """Return the first Wordle-style guess enclosed in square brackets."""
 
     match = re.search(r"\[[A-Za-z]{5}\]", text)
@@ -86,6 +99,9 @@ def extract_guess(text: str) -> str:
 
 
 def make_user_prompt(prompt_text: str, messages: Iterable[TextArenaMessage]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: builds the user prompt from the current prompt text, formatted message
+    # history and an instruction to reply with a bracketed guess.
     """Combine the TextArena prompt and feedback history for the model."""
 
     history = format_history(messages)
@@ -101,6 +117,12 @@ def make_user_prompt(prompt_text: str, messages: Iterable[TextArenaMessage]) -> 
 # ---------------------------------------------------------------------------
 
 def play_wordle(env: TextArenaEnv, client: OpenAI) -> None:
+    # [FUNCTION DOC]
+    # Plays one game: resets the env, then for up to MAX_TURNS turns (stopping when done)
+    # asks the model for a guess (system + user prompt, temperature 0.7), parses it and
+    # steps the env, printing feedback when VERBOSE; prints final reward and done.
+    # Side effects: network calls, stdout.
+    # KNOWN ISSUE: message content may be None, in which case calling strip raises.
     result = env.reset()
     observation = result.observation
 
@@ -148,6 +170,10 @@ def play_wordle(env: TextArenaEnv, client: OpenAI) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: raises SystemExit if no API key; creates the OpenAI client, starts the
+    # textarena-env:latest container configured for single-player Wordle-v0 on port 8000,
+    # plays one game and always closes the env.
     if not API_KEY:
         raise SystemExit("HF_TOKEN (or API_KEY) must be set to query the model.")
 

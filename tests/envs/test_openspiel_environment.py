@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Integration tests for the OpenSpiel env server: a module-scoped fixture launches it with gunicorn
+# on port 8010 and the tests use the OpenSpielEnv client for health, reset, step, state and step
+# counting. Skipped when gunicorn is not installed. Side effect at import: prepends the repo root to
+# sys.path.
 """Unit tests for OpenSpiel environment server."""
 
 import os
@@ -22,6 +27,14 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def server():
+    # [FUNCTION DOC]
+    # HELPER: Module-scoped fixture starting gunicorn (one uvicorn worker) serving
+    # envs.openspiel_env.server.app:app on fixed port 8010, polling /health up to 12 times with 10s
+    # sleeps after connection errors; skips with logs if unhealthy. Yields the base URL and kills the
+    # process afterwards. Side effects: subprocess, network, prints.
+    # KNOWN ISSUE: PYTHONPATH is set to src only, so importing "envs.openspiel_env" relies on the
+    # working directory being the repo root; BROWSERGYM_* variables are irrelevant here; the fixed port
+    # can collide with other services.
     """Starts the OpenSpiel environment server as a background process."""
     # Define paths for subprocess environment
     ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -97,6 +110,8 @@ def server():
 
 
 def test_health_endpoint(server):
+    # [FUNCTION DOC]
+    # GET /health returns 200 with a "status" key.
     """Test that the health endpoint works."""
     response = requests.get(f"{server}/health")
     assert response.status_code == 200
@@ -104,6 +119,9 @@ def test_health_endpoint(server):
 
 
 def test_reset(server):
+    # [FUNCTION DOC]
+    # reset returns a non-done observation with info_state, legal_actions, game_phase, player id and
+    # opponent_last_action.
     """Test that reset() returns a valid observation."""
     env = OpenSpielEnv(base_url=server)
     result = env.reset()
@@ -119,6 +137,8 @@ def test_reset(server):
 
 
 def test_reset_multiple_times(server):
+    # [FUNCTION DOC]
+    # Repeated resets succeed and yield different episode ids.
     """Test that reset() can be called multiple times."""
     env = OpenSpielEnv(base_url=server)
 
@@ -138,6 +158,8 @@ def test_reset_multiple_times(server):
 
 
 def test_step(server):
+    # [FUNCTION DOC]
+    # A step with action_id "0" returns an observation, numeric-or-None reward and bool done.
     """Test that step() returns a valid result."""
     env = OpenSpielEnv(base_url=server)
     env.reset()
@@ -153,6 +175,8 @@ def test_step(server):
 
 
 def test_step_multiple_times(server):
+    # [FUNCTION DOC]
+    # Two steps (actions "0" and "1") both return observations.
     """Test that step() can be called multiple times."""
     env = OpenSpielEnv(base_url=server)
     env.reset()
@@ -171,6 +195,8 @@ def test_step_multiple_times(server):
 
 
 def test_state_endpoint(server):
+    # [FUNCTION DOC]
+    # state exposes game_name, agent_player, opponent_policy, game_params and num_players.
     """Test that the state endpoint returns valid state."""
     env = OpenSpielEnv(base_url=server)
     env.reset()
@@ -187,6 +213,9 @@ def test_state_endpoint(server):
 
 
 def test_step_count_increments(server):
+    # [FUNCTION DOC]
+    # step_count goes 0, 1, 2. KNOWN ISSUE: it replays action "0" twice, which may be illegal in the
+    # game after the first move; the test only checks the counter.
     """Test that step count increments correctly."""
     env = OpenSpielEnv(base_url=server)
     env.reset()
@@ -208,6 +237,8 @@ def test_step_count_increments(server):
 
 
 def test_action_with_metadata(server):
+    # [FUNCTION DOC]
+    # An action with metadata is accepted.
     """Test that actions with metadata work."""
     env = OpenSpielEnv(base_url=server)
     env.reset()

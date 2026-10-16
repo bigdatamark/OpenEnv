@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Defines the client-side verifier-informed expert: a strong chat model that first distils a task's Python verifier
+# (read from the public dataset via awm_data) into success criteria, then on request produces step-by-step plans for
+# the small agent. Never touches the environment server.
 """The verifier-informed expert.
 
 The expert is a strong, frontier chat model that the small agent can consult on
@@ -24,6 +28,9 @@ from prompts import EXPERT_SYSTEM_PROMPT, VERIFIER_ANALYSIS_PROMPT
 
 
 class VerifierInformedExpert:
+    # [CLASS DOC]
+    # Wraps an OpenAI-compatible async client plus model name, optional temperature and token budgets for verifier
+    # analysis and plan generation. Stateless besides this configuration.
     """A frontier advisor that turns verifier code into agent guidance.
 
     Args:
@@ -50,6 +57,8 @@ class VerifierInformedExpert:
         analysis_max_tokens: int = 2000,
         plan_max_tokens: int = 4000,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the client, model, temperature and the two token budgets.
         self._client = client
         self._model = model
         self._temperature = temperature
@@ -57,10 +66,16 @@ class VerifierInformedExpert:
         self._plan_max_tokens = plan_max_tokens
 
     def verifier_code(self, scenario: str, task_idx: int) -> str | None:
+        # [FUNCTION DOC]
+        # Returns the verifier code for (scenario, task_idx) from awm_data, or None if absent. May trigger a dataset download.
         """Return the Python verifier source for a task, or `None` if absent."""
         return awm_data.get_verifier_code(scenario, task_idx)
 
     async def analyze(self, task: str, scenario: str, task_idx: int) -> str:
+        # [FUNCTION DOC]
+        # Formats VERIFIER_ANALYSIS_PROMPT with the verifier code and task, sends it as a single user message, and returns
+        # the model's text. Returns empty string if there is no verifier code or the LLM call raises any exception.
+        # Side effects: network call to the LLM.
         """Distil the task's verifier into a short list of success criteria.
 
         Returns an empty string when no verifier is available or the call fails.
@@ -88,6 +103,10 @@ class VerifierInformedExpert:
         context: str = "",
         success_criteria: str = "",
     ) -> str:
+        # [FUNCTION DOC]
+        # Builds a user prompt with sections for the task, optional tool schemas, optional success criteria, the agent
+        # context (default "just started") and an instruction to produce an ordered plan; sends it with EXPERT_SYSTEM_PROMPT.
+        # Returns the model's text, or a fixed "Expert unavailable" fallback string on any exception.
         """Produce a step-by-step plan for the agent.
 
         Args:

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Server-side Jupyter MCP environment. Each episode owns one E2B sandbox
+# (persistent Python kernel). Agents act only through FastMCP tools: run a code
+# cell, replace and rerun the last cell, run a shell command, get a notebook
+# summary, and submit a final answer. Optional per-episode setup commands run at
+# reset and verify commands run on final_answer; the reward is either a number
+# written by verify commands to REWARD_FILE (/home/user/logs/verifier/reward.txt)
+# or the verify pass rate.
 """Jupyter MCP environment.
 
 Exposes 4 notebook interaction tools via FastMCP:
@@ -34,6 +42,10 @@ _CLEAR_REWARD_FILE = f"rm -f {REWARD_FILE} && test ! -e {REWARD_FILE}"
 
 
 class JupyterEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment holding the sandbox (None until reset), a NotebookTracker, the
+    # model classes, a JupyterState and the submitted answer. Supports concurrent
+    # sessions (one instance per session).
     """
     Stateful Jupyter notebook environment backed by an E2B Code Interpreter sandbox.
 
@@ -49,6 +61,10 @@ class JupyterEnvironment(MCPEnvironment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes tracker and state (new UUID), imports the model classes (package or
+        # flat layout), registers the five MCP tools as closures over self, and passes
+        # the FastMCP server to MCPEnvironment. No sandbox is created yet.
         self._sandbox: Optional[E2BSandbox] = None
         self._tracker = NotebookTracker()
 
@@ -69,6 +85,11 @@ class JupyterEnvironment(MCPEnvironment):
 
         @mcp.tool
         def add_and_execute_code_cell(code: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool. Runs code in the sandbox, appends a tracker cell and a matching
+            # NotebookCell to state, updates last_cell_success, and returns the
+            # LLM-formatted output. Returns an error string if reset() has not created a
+            # sandbox.
             """
             Execute Python code in the stateful Jupyter notebook.
 
@@ -92,6 +113,11 @@ class JupyterEnvironment(MCPEnvironment):
 
         @mcp.tool
         def edit_and_execute_current_cell(code: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool. Runs code, replaces the last tracker cell and the last state cell
+            # with the new one, updates last_cell_success, and returns formatted output.
+            # Returns an error string without a sandbox.
+            # KNOWN ISSUE: the "last cell" replaced may be a shell cell, not a code cell.
             """
             Replace the last code cell with new code and re-execute it.
 
@@ -116,6 +142,10 @@ class JupyterEnvironment(MCPEnvironment):
 
         @mcp.tool
         def execute_shell_command(command: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool. Runs the shell command in the sandbox, appends a shell cell to the
+            # tracker and state, and returns formatted output (last_cell_success is not
+            # updated). Returns an error string without a sandbox.
             """
             Run a shell command inside the sandbox.
 
@@ -137,6 +167,9 @@ class JupyterEnvironment(MCPEnvironment):
 
         @mcp.tool
         def get_notebook_state(include_images: bool = False) -> str:
+            # [FUNCTION DOC]
+            # MCP tool. Returns the tracker's summary of the last 10 cells, optionally with
+            # inline base64 images.
             """
             Return a compact summary of all executed cells and their outputs.
 
@@ -155,6 +188,13 @@ class JupyterEnvironment(MCPEnvironment):
 
         @mcp.tool
         def final_answer(answer: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool. Records the answer in the instance and state. With no verify
+            # commands returns "Answer submitted: ..."; otherwise runs verification and
+            # also reports passed/total and the reward.
+            # KNOWN ISSUE: the docstring says this ends the task, but without verify
+            # commands (or with no sandbox) last_reward stays None and step() does not mark
+            # the episode done.
             """
             Submit your final answer to the question.
 
@@ -188,6 +228,21 @@ class JupyterEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Kills any existing sandbox, clears the tracker and submitted answer, and
+        # creates a fresh sandbox with E2B_API_KEY. Missing key or sandbox creation
+        # failure returns a done observation with error metadata (state reset, no
+        # sandbox). Otherwise creates a new state with the sandbox id, reads setup
+        # commands (kwarg "setup" or "setup_scripts") and verify commands ("verify" or
+        # "verify_scripts"), stores the verify commands, runs setup commands (after
+        # creating the verifier log dir) and returns a done error observation with all
+        # setup results if any failed. If kaggle_dataset_name and files kwargs are given
+        # and the dataset dir (KAGGLE_DATA_DIR or /fsx/<USER>/data/kaggle-data-10000)
+        # exists, uploads each file (exact name match via recursive search, else
+        # case-insensitive) to /home/user/input/ (upload errors logged). Returns a
+        # "ready" observation with message, sandbox id, files loaded, setup results and
+        # verify commands. seed is ignored.
+        # Side effects: remote sandbox creation/destruction, file uploads.
         """
         Start a new episode.
 
@@ -332,6 +387,9 @@ class JupyterEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Fallback for non-MCP actions: returns a non-terminal observation with an
+        # error message pointing to ListToolsAction/CallToolAction.
         """Fallback for non-MCP actions — direct users to use MCP tools."""
         return Observation(
             done=False,
@@ -348,6 +406,10 @@ class JupyterEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count and delegates to MCPEnvironment.step. If an answer has
+        # been submitted and a reward computed, marks the observation done and sets its
+        # reward to that value. Returns the observation.
         self._state.step_count += 1
         obs = super().step(action, timeout_s=timeout_s, **kwargs)
         if self._state.submitted_answer is not None and self._state.last_reward is not None:
@@ -361,6 +423,8 @@ class JupyterEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async counterpart of step with the same step counting and final-reward logic.
         self._state.step_count += 1
         obs = await super().step_async(action, timeout_s=timeout_s, **kwargs)
         if self._state.submitted_answer is not None and self._state.last_reward is not None:
@@ -370,21 +434,36 @@ class JupyterEnvironment(MCPEnvironment):
 
     @property
     def state(self):
+        # [FUNCTION DOC]
+        # Property returning the current JupyterState.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the sandbox if present and clears it.
         """Release the live E2B sandbox, if any."""
         if self._sandbox:
             self._sandbox.kill()
             self._sandbox = None
 
     def _run_shell_commands(self, commands: Iterable[str]):
+        # [FUNCTION DOC]
+        # HELPER: Runs each command in the sandbox shell and returns the list of
+        # CommandResult objects.
         return [
             _command_result_from_cell_result(command, self._sandbox.run_shell(command))
             for command in commands
         ]
 
     def _run_verify_commands(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Runs verification: returns passed/total 0 and reward None without a
+        # sandbox. Otherwise creates the verifier log dir, deletes any existing reward
+        # file (and confirms it is gone), runs all verify commands (stored in state),
+        # reads a reward override from the reward file, and falls back to passed/total
+        # when no override and at least one command ran. Stores verify results,
+        # last_reward and any override-rejection reason in state.
+        # Returns: dict with passed, total and reward.
         if not self._sandbox:
             return {"passed": 0, "total": 0, "reward": None}
 
@@ -411,6 +490,9 @@ class JupyterEnvironment(MCPEnvironment):
 
 
 def _cell_to_model_kwargs(cell: dict) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Returns the subset of a tracker cell dict whose keys are NotebookCell
+    # fields.
     """Extract fields matching NotebookCell from a tracker cell dict."""
     keys = {
         "cell_id",
@@ -427,6 +509,10 @@ def _cell_to_model_kwargs(cell: dict) -> dict:
 
 
 def _coerce_commands(value: Any) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Normalizes setup/verify input to a list of strings: None gives [],
+    # a string gives a one-item list (or [] if blank), an iterable gives its
+    # stringified non-blank items.
     if value is None:
         return []
     if isinstance(value, str):
@@ -435,6 +521,9 @@ def _coerce_commands(value: Any) -> list[str]:
 
 
 def _command_result_from_cell_result(command: str, result):
+    # [FUNCTION DOC]
+    # HELPER: Converts a CellResult into a CommandResult with the command,
+    # LLM-formatted output, error and success flag.
     try:
         from ..models import CommandResult
     except ImportError:  # pragma: no cover
@@ -451,6 +540,10 @@ def _command_result_from_cell_result(command: str, result):
 def _read_reward_override(
     sandbox, cleared: bool
 ) -> tuple[Optional[float], Optional[str]]:
+    # [FUNCTION DOC]
+    # HELPER: If the reward file could not be cleared before verification, returns
+    # (None, reason). Otherwise reads the file via the sandbox shell and parses it.
+    # Returns (reward or None, rejection reason or None).
     if not cleared:
         return None, "reward file could not be removed before verification"
     result = sandbox.run_shell(f"cat {REWARD_FILE} 2>/dev/null || true")
@@ -458,6 +551,11 @@ def _read_reward_override(
 
 
 def _parse_reward_override(raw: str) -> tuple[float | None, str | None]:
+    # [FUNCTION DOC]
+    # HELPER: Parses reward-file text: empty gives (None, None); non-numeric or
+    # non-finite gives (None, reason with the first 40 chars); otherwise (float
+    # value, None). Any finite value, including negatives and values above 1, is
+    # accepted.
     """Parse the reward file written by a verify command.
 
     The value comes from the task author rather than the agent, so any finite
@@ -481,6 +579,9 @@ def _parse_reward_override(raw: str) -> tuple[float | None, str | None]:
 
 
 def _get_notebook_cell_class():
+    # [FUNCTION DOC]
+    # HELPER: Imports and returns the NotebookCell class (package or flat layout).
+    # Currently unused.
     try:
         from ..models import NotebookCell
     except ImportError:
@@ -489,6 +590,10 @@ def _get_notebook_cell_class():
 
 
 def _format_for_llm(result) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats a CellResult for the LLM: stripped stdout, text results, an
+    # image-count note and "ERROR:" plus the error text, joined by newlines; returns
+    # "(no output)" if all are empty. stderr is not included.
     """Format a CellResult as a concise string for the LLM."""
     parts = []
     if result.stdout:

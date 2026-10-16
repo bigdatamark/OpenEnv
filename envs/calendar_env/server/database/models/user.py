@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# SQLAlchemy ORM model for calendar users (table "users").
 """
 User database model
 """
@@ -11,6 +13,12 @@ from .base import Base
 
 
 class User(Base):
+    # [CLASS DOC]
+    # ORM row for a user: string user_id PK, unique email, name, optional profile fields
+    # (given/family name, picture, locale default "en"), timezone (default "UTC"),
+    # is_active/is_verified flags, OAuth provider info, a unique required static_token used
+    # to authenticate MCP calls, hashed access/refresh tokens, timestamps, and cascading
+    # relationships to calendars, attendees and acls.
     """User database model"""
 
     __tablename__ = "users"
@@ -55,9 +63,15 @@ class User(Base):
     acls = relationship("ACLs", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
+        # [FUNCTION DOC]
+        # Returns a debug string with user_id, email and name.
         return f"<User(user_id='{self.user_id}', email='{self.email}', name='{self.name}')>"
 
     def to_dict(self):
+        # [FUNCTION DOC]
+        # Returns an API-facing dict: id (user_id), email, name, given/family name, picture,
+        # locale, timezone, is_active, is_verified and ISO-formatted created/updated/last_login
+        # timestamps (None when unset). Does not include tokens.
         """Convert to dictionary format for API responses"""
         return {
             "id": self.user_id,

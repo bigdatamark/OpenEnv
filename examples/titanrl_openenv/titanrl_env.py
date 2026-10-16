@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# TorchTitan-RL MessageEnv adapter backed by an OpenEnv server via the OpenEnvBridge.
+# Maps between message-space turns and bridge turns. Imports torchtitan and renderers.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -35,6 +38,11 @@ from .tasks import get_task_profile
 
 
 class OpenEnvMessageEnv(MessageEnv):
+    # [CLASS DOC]
+    # Multi-turn message env: init resets the OpenEnv env and builds the opening prompt
+    # (and tools in tool mode); each step converts the assistant message into an action,
+    # steps the env and returns the env reply message, done flag and env rewards (env reward
+    # plus any task-profile shaping rewards).
     """Multi-turn TitanRL env whose turns are served by an OpenEnv environment.
 
     Each rollout: ``init`` connects to the OpenEnv server, resets it, and returns
@@ -55,6 +63,10 @@ class OpenEnvMessageEnv(MessageEnv):
 
     @dataclass(kw_only=True, slots=True)
     class Config(MessageEnv.Config):
+        # [CLASS DOC]
+        # Configuration: server base_url, task profile name, action_mode (tool or text),
+        # action_key for text mode, reward_name for env_rewards, env_role for reply messages,
+        # and whether to include the initial observation in the prompt.
         base_url: str = "http://127.0.0.1:8010"
         """URL of the running OpenEnv environment server."""
 
@@ -77,6 +89,9 @@ class OpenEnvMessageEnv(MessageEnv):
         """Append the reset observation to the opening prompt as context."""
 
     def __init__(self, config: Config, *, env_input: OpenEnvSample) -> None:
+        # [FUNCTION DOC]
+        # Stores config and sample, resolves the task profile and builds the bridge (no I/O).
+        # Raises: ValueError for an unknown task name or invalid action_mode.
         self._config = config
         self._sample = env_input
         self._profile = get_task_profile(config.task)
@@ -90,6 +105,12 @@ class OpenEnvMessageEnv(MessageEnv):
         )
 
     async def init(self) -> MessageEnvInitOutput:
+        # [FUNCTION DOC]
+        # Resets the env with the sample's reset kwargs. Builds user messages: the sample prompt
+        # or else the profile instruction, then the initial observation text if enabled and
+        # non-empty; if neither, a single message with the observation text (possibly empty).
+        # Returns: init output with those messages and, in tool mode, a one-element tool list
+        # (profile tool or the default act tool), else no tools. Side effects: network I/O.
         turn = await self._bridge.start(**dict(self._sample.reset_kwargs or {}))
 
         # The sample's prompt wins; otherwise the task profile's instruction.
@@ -112,6 +133,13 @@ class OpenEnvMessageEnv(MessageEnv):
         return MessageEnvInitOutput(init_prompt_messages=messages, tools=tools)
 
     async def step(self, completion_message: Message) -> MessageEnvStepOutput:
+        # [FUNCTION DOC]
+        # In tool mode, ends the rollout (done, no messages) if the assistant made no tool
+        # calls, otherwise steps with the tool calls; in text mode steps with the message content
+        # (empty if missing). Returns: step output with an env-role message of the rendered
+        # text (if non-empty), done, and env_rewards containing the env reward under
+        # reward_name when present plus shaping rewards computed from the raw observation with
+        # reward/done re-added. Side effects: network I/O.
         if self._config.action_mode == "tool":
             tool_calls = completion_message.get("tool_calls") or []
             if not tool_calls:
@@ -147,4 +175,6 @@ class OpenEnvMessageEnv(MessageEnv):
         )
 
     async def close(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the bridge, closing the underlying client.
         await self._bridge.stop()

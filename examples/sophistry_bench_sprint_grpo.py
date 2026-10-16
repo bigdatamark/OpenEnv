@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Example script (also runnable as a uv inline-metadata script / HF Job): trains a
+# policy on the single-step sophistry_bench_sprint_env with TRL GRPOTrainer. The env is
+# started locally from its Hugging Face Space git repo through a UVProvider and
+# accessed via GenericEnvClient (one session only, so reward computation runs
+# sequentially on the same client).
 # SPDX-License-Identifier: BSD-3-Clause
 
 # /// script
@@ -49,6 +55,11 @@ SPACE_REPO_ID = "openenv-community/sophistry_bench_sprint_env"
 
 
 def _completion_text(completion) -> str:
+    # [FUNCTION DOC]
+    # HELPER: extracts the completion text from what TRL passes to reward functions.
+    # Returns the last message's content if given a list of chat dicts, or the string
+    # itself. Raises: ValueError for an empty list, a non-dict last element, or any
+    # other type.
     """TRL passes either a list of chat messages or a raw string, depending
     on whether the model/dataset use chat templating."""
     if isinstance(completion, list):
@@ -61,6 +72,10 @@ def _completion_text(completion) -> str:
 
 
 def build_dataset(client, n_episodes: int) -> Dataset:
+    # [FUNCTION DOC]
+    # Builds the training dataset by calling reset(seed=i) for i in 0..n_episodes-1.
+    # Each row has a single-message user prompt taken from the observation's "prompt"
+    # key and the seed. Returns: a datasets.Dataset. Side effects: env calls.
     """Walk `reset(seed=i)` to get a fixed, replayable set of advocacy tasks.
     Each row carries the `seed` needed to re-derive the same task later, in
     the reward function."""
@@ -72,11 +87,18 @@ def build_dataset(client, n_episodes: int) -> Dataset:
 
 
 def make_reward_func(client):
+    # [FUNCTION DOC]
+    # Returns a TRL reward function bound to the client.
     """Re-running `reset(seed=...)` before each `step(...)` recreates the
     exact task the completion was sampled for -- the server is
     single-session, so this runs sequentially against one client."""
 
     def reward_func(completions, seed, **kwargs) -> list[float]:
+        # [FUNCTION DOC]
+        # For each (completion, seed) pair, resets the env with that seed to recreate the
+        # task, steps with a dict containing the completion text and collects the step reward.
+        # Inputs: completions list, seed list (dataset column), extra kwargs ignored.
+        # Returns: list of rewards. Raises: AssertionError if lengths differ.
         assert len(completions) == len(seed), (
             f"completions/seed length mismatch: {len(completions)} vs {len(seed)}"
         )
@@ -91,6 +113,14 @@ def make_reward_func(client):
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: parses model, dataset size, steps, learning rate, batch size,
+    # num generations, completion length, output dir and --push-to-hub; errors if the
+    # batch size is not divisible by num generations. Starts the env via UVProvider from
+    # the Space git URL (180 s timeout), waits until ready, builds the dataset, trains
+    # with GRPOConfig (bf16, gradient checkpointing), saves the model and optionally
+    # pushes it to the Hub. Side effects: subprocess/server start, network, GPU training,
+    # writes model files.
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     ap.add_argument("--n-episodes", type=int, default=64, help="Dataset size.")

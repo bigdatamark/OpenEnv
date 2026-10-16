@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# WebSocket client for the Git environment; serializes GitAction and parses
+# responses into GitObservation/GitState.
 """
 GitEnv Client
 -------------
@@ -22,6 +25,10 @@ if TYPE_CHECKING:
 
 
 class GitEnv(EnvClient[GitAction, GitObservation, GitState]):
+    # [CLASS DOC]
+    # EnvClient specialization for the Git environment. Only implements the
+    # serialization hooks; connection, reset/step/close and Docker launching come
+    # from EnvClient.
     """
     Client for Git Environment with Gitea server.
 
@@ -56,6 +63,10 @@ class GitEnv(EnvClient[GitAction, GitObservation, GitState]):
     """
 
     def _step_payload(self, action: GitAction) -> dict:
+        # [FUNCTION DOC]
+        # Builds the step payload: always "action_type", plus repo_name, target_dir,
+        # command and working_dir (all fields always exist on GitAction, so every key is
+        # always included, target_dir possibly None).
         """
         Convert action to payload for server's /step endpoint.
 
@@ -83,6 +94,10 @@ class GitEnv(EnvClient[GitAction, GitObservation, GitState]):
         return payload
 
     def _parse_result(self, payload: dict) -> StepResult[GitObservation]:
+        # [FUNCTION DOC]
+        # Builds a GitObservation from payload["observation"] (raises KeyError if absent)
+        # and returns a StepResult with top-level reward and done (coerced to bool,
+        # default False). Metadata is not propagated.
         """
         Parse server response into StepResult.
 
@@ -100,6 +115,9 @@ class GitEnv(EnvClient[GitAction, GitObservation, GitState]):
         )
 
     def _parse_state(self, payload: dict) -> GitState:
+        # [FUNCTION DOC]
+        # Builds a GitState from episode_id, step_count (default 0), gitea_ready
+        # (default False) and workspace_path (default "/workspace").
         """
         Parse server response into GitState object.
 

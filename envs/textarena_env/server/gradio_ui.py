@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Custom Gradio tab for TextArena: shows env-specific heading/description and a static demo board for
+# Wordle or Sudoku aliases. Purely presentational; gameplay happens in the standard Playground tab.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,6 +18,8 @@ from openenv.core.env_server.types import EnvironmentMetadata
 
 
 def _wordle_demo_html() -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns static HTML of a sample 3-row Wordle board with instructions.
     """Static Wordle-style grid HTML for the Custom tab (demo only)."""
     return """
 <div class="wordle-demo" style="
@@ -53,6 +58,8 @@ def _wordle_demo_html() -> str:
 
 
 def _sudoku_demo_html() -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns static HTML of a 9x9 Sudoku grid with a few given digits and instructions.
     """Static Sudoku-style grid HTML for the Custom tab (demo only)."""
     cells = []
     givens = {
@@ -116,6 +123,10 @@ def _sudoku_demo_html() -> str:
 
 
 def _resolve_textarena_ui(web_manager: Any) -> tuple[str, str, Optional[str]]:
+    # [FUNCTION DOC]
+    # HELPER: reads the env id from the web manager's environment (empty if absent) and returns (heading,
+    # markdown description, demo HTML or None): Wordle or Sudoku variants by id prefix, else a generic overview
+    # with no demo.
     """Choose environment-specific copy and optional demo HTML."""
     env_id = getattr(getattr(web_manager, "env", None), "env_id", "") or ""
     normalized = env_id.lower()
@@ -153,6 +164,9 @@ def build_textarena_gradio_app(
     title: str,
     quick_start_md: str,
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Gradio builder for the custom tab: returns Blocks with the resolved heading, description and optional
+    # demo HTML. Only web_manager and title are used.
     """Build the Custom tab Blocks for TextArena aliases."""
     heading, description, demo_html = _resolve_textarena_ui(web_manager)
     with gr.Blocks(title=f"{title} — Custom") as blocks:

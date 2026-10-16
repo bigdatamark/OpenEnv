@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# LLM-judge rubric for proofs (ported from QED-Nano). Builds an evaluator prompt, calls an
+# OpenAI-compatible endpoint (Responses API with Chat Completions fallback), parses a "<score>N</score>"
+# tag (0-7), optionally thresholds partial credit, and normalises to a reward in [0, 1]. Also
+# collects verifier metrics, retries with back-off and includes schema and length-penalty helpers.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -35,6 +40,12 @@ from openenv.core.rubrics.base import Rubric
 
 
 def parse_schema(schema: Any) -> str:
+    # [FUNCTION DOC]
+    # Converts a marking scheme into text: strings returned unchanged, dicts stringified, lists of
+    # criterion mappings (title, points, desc or description) rendered as Markdown sections joined by
+    # blank lines. Raises TypeError for other types; ValueError for non-mapping entries or missing keys.
+    # KNOWN ISSUE: the docstring says only strings and lists are accepted, but a dict is silently
+    # converted with str().
     """Normalize a schema payload into the Markdown string used as {marking_scheme}.
 
     Ported from QED-Nano: training/pipelinerl/domains/math/verifier_api.py.
@@ -95,6 +106,9 @@ _TEMPLATE_VARS = ("{problem}", "{human_solution}", "{marking_scheme}", "{solutio
 
 @dataclass
 class GradingResult:
+    # [CLASS DOC]
+    # Mutable result of one grading call: integer score, full grader text as feedback, normalised reward
+    # and a metrics mapping (QED-Nano verifier metric names).
     """Structured output from a single MathProofRubric grading call."""
 
     score: int  # Raw integer score in [0, MAX_SCORE]
@@ -110,6 +124,9 @@ class GradingResult:
 
 
 def apply_score_threshold(score: float) -> float:
+    # [FUNCTION DOC]
+    # Collapses partial credit: scores below 1 unchanged, scores in [1, 6) become 1.0, scores 6 and
+    # above unchanged. Returns the float.
     """Apply reward thresholding based on verification score.
 
     Ported from QED-Nano: training/pipelinerl/domains/math/rollouts.py.
@@ -132,6 +149,10 @@ def apply_score_threshold(score: float) -> float:
 
 
 def length_penalty(max_length: int, sequence_length: int, buffer_tokens: int) -> float:
+    # [FUNCTION DOC]
+    # Returns a non-positive overlong penalty: 0.0 when buffer_tokens <= 0 or the length is outside
+    # (max_length - buffer_tokens, max_length]; otherwise (max_length - buffer_tokens - sequence_length)
+    # / buffer_tokens, which ranges down to -1. Not used elsewhere in this module.
     """Compute an overlong penalty for sequences approaching *max_length*.
 
     When ``buffer_tokens`` is 0 the penalty is always 0 (disabled).  Otherwise
@@ -156,6 +177,11 @@ def length_penalty(max_length: int, sequence_length: int, buffer_tokens: int) ->
 
 
 class MathProofRubric(Rubric):
+    # [CLASS DOC]
+    # Rubric that grades a proof with an LLM. Stores model id, prompt template, threshold flag, retry
+    # count and back-off list (default 15, 30, 60 s), per-attempt timeout (default 900 s), temperature
+    # (default 1.0), optional output-token cap, last observed token usage, and OpenAI client kwargs.
+    # The OpenAI client is created lazily.
     """LLM-based rubric for grading mathematical proofs on a 0-7 scale.
 
     Uses OpenAI-compatible endpoints to evaluate a
@@ -201,6 +227,9 @@ class MathProofRubric(Rubric):
         temperature: float = 1.0,
         max_output_tokens: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the configuration; base URL and API key are passed to the client only when given
+        # (otherwise the openai library reads OPENAI_BASE_URL / OPENAI_API_KEY).
         super().__init__()
         self.grader_model = grader_model
         self.prompt_template = prompt_template
@@ -223,12 +252,17 @@ class MathProofRubric(Rubric):
 
     @cached_property
     def _client(self) -> openai.AsyncOpenAI:
+        # [FUNCTION DOC]
+        # HELPER: Cached property creating the AsyncOpenAI client on first access.
         """Grader client, created on first use so the server starts without credentials."""
         return openai.AsyncOpenAI(**self._client_kwargs)
 
     # Rubric base-class interface
 
     async def forward(self, action: Any, observation: Any) -> float:
+        # [FUNCTION DOC]
+        # Rubric entry point: reads proof from the action (or its string form) and problem, reference
+        # solution and guidelines from the observation (empty when missing), grades, and returns the reward.
         """Evaluate a proof submission and return the normalized reward.
 
         Expected types (duck-typed):
@@ -257,6 +291,15 @@ class MathProofRubric(Rubric):
         reference_solution: str,
         grading_guidelines: Union[str, list, None] = "",
     ) -> GradingResult:
+        # [FUNCTION DOC]
+        # Grades one proof. Empty or whitespace proof returns score 0 immediately (no_input metric).
+        # Guidelines may be None, a string or a schema list (converted with parse_schema). Builds the prompt
+        # and makes up to max_retries attempts, each bounded by timeout_seconds; on success parses the score,
+        # records latency, retries and token counts (provider usage or a 4-chars-per-token estimate), and
+        # flags a missing score tag as a failure (score 0). Rate-limit, timeout and other errors are counted
+        # and followed by a back-off sleep. After all attempts fail, returns score 0, reward 0 and a feedback
+        # string listing the causes. Returns a GradingResult. Side effects: network calls, sleeps, updates
+        # last token usage.
         """Grade a proof and return a :class:`GradingResult`.
 
         Builds the evaluator prompt, calls the LLM, parses the
@@ -394,6 +437,8 @@ class MathProofRubric(Rubric):
     # Helpers
 
     def normalize_reward(self, score: int) -> float:
+        # [FUNCTION DOC]
+        # Returns the score (thresholded first if custom_threshold) divided by 7.
         """Normalize a 0-7 score to a [0, 1] reward.
 
         When ``custom_threshold`` is *True*, :func:`apply_score_threshold`
@@ -419,6 +464,11 @@ class MathProofRubric(Rubric):
         reference_solution: str,
         grading_guidelines: str,
     ) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Formats prompt_template with problem, human_solution, marking_scheme and solution when it
+        # contains any of those placeholders; otherwise builds a prompt from the template (or a default
+        # grader instruction) plus available problem, reference, guidelines, the proof and the required
+        # score-tag format. Raises KeyError/IndexError from formatting if the template has other placeholders.
         """Format the evaluator prompt template with grading variables.
 
         Variable mapping (QED-Nano verifier_api.py convention):
@@ -463,6 +513,11 @@ class MathProofRubric(Rubric):
         return "".join(parts)
 
     async def _call_llm(self, prompt: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Resets last token usage, calls the Responses API (model, input, temperature, optional
+        # max_output_tokens) and returns output_text or text extracted from output items; on any exception
+        # falls back to Chat Completions and returns the first choice content (or empty). Records usage.
+        # Errors from the fallback call propagate.
         """Send prompt to the model and return response text.
 
         Tries the Responses API first to align with QED-Nano behavior, then
@@ -502,6 +557,8 @@ class MathProofRubric(Rubric):
             return response.choices[0].message.content or ""
 
     def _capture_usage(self, response: Any, responses_api: bool) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stores integer input/output token counts from the response usage (Responses or Chat shapes); no-op without usage.
         """Record token usage from a grader response when available.
 
         Reads the Responses-API (``input_tokens``/``output_tokens``) or
@@ -523,6 +580,9 @@ class MathProofRubric(Rubric):
             self._last_output_tokens = output_tokens
 
     def _extract_response_text(self, response: Any) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Joins with newlines all non-empty "output_text" parts found in the response's output items;
+        # returns empty string if output is not a list.
         """Best-effort extraction of plain text from a Responses API payload."""
         output = getattr(response, "output", None)
         if not isinstance(output, list):
@@ -543,6 +603,8 @@ class MathProofRubric(Rubric):
         return "\n".join(chunks)
 
     def _parse_response(self, text: str) -> tuple[int, str]:
+        # [FUNCTION DOC]
+        # HELPER: Returns (score clamped to 0..7 from the first score tag, full text), or (0, text) if no tag.
         """Parse ``<score>N</score>`` from a grader response.
 
         Args:
@@ -559,6 +621,8 @@ class MathProofRubric(Rubric):
         return 0, text
 
     def _backoff(self, attempt: int) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns the back-off seconds for a 1-based attempt number, reusing the last entry for later attempts.
         """Return the sleep duration (seconds) for a given attempt number."""
         idx = min(attempt - 1, len(self.retry_backoff) - 1)
         return self.retry_backoff[idx]

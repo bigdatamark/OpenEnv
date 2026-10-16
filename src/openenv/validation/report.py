@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Result and report schema for validation runs: CheckResult per check, ValidationReport
+# (schema 1) and ValidationReportV2 (schema 2, allowing a V2 manifest), and a JSON writer.
 """Check results and the validation report.
 
 The report is the cross-operator contract: schema-versioned JSON embedding the
@@ -16,6 +19,9 @@ from .types import CheckStatus, Lane, Level, SignatureKind, Verdict
 
 
 class CheckResult(BaseModel):
+    # [CLASS DOC]
+    # One check's outcome: check_id matching "<namespace>.<name>" (lowercase/underscores),
+    # status, measured values, evidence lines, optional remediation and non-negative duration.
     """
     Outcome of one check, as emitted by its grader.
 
@@ -47,6 +53,9 @@ class CheckResult(BaseModel):
 
 
 class ValidationReport(BaseModel):
+    # [CLASS DOC]
+    # Schema-1 report: target, source digest, signature, manifest (None if parsing failed),
+    # policy version, lane, levels run, results and verdict.
     """
     One report per validation run, maximum information per run.
 
@@ -72,6 +81,8 @@ class ValidationReport(BaseModel):
 
 
 class ValidationReportV2(ValidationReport):
+    # [CLASS DOC]
+    # Schema-2 report: same fields, with the manifest allowed to be V2, V1 or None.
     """
     Report version 2 preserves runtime declarations and parse-failure reporting.
 
@@ -85,6 +96,9 @@ class ValidationReportV2(ValidationReport):
 
 
 def write_report(report: ValidationReport, path: Path | None = None) -> str:
+    # [FUNCTION DOC]
+    # Dumps the report to indented JSON; if path is given, also writes it with a trailing
+    # newline (overwrites the file). Returns the JSON string without the newline.
     """
     Serialize a validation report to schema-versioned JSON.
 

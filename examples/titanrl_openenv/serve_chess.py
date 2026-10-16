@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Launcher serving OpenEnv's chess environment with enough concurrent-session capacity
+# and worker processes for TitanRL rollouts. Adds the repo root to sys.path. Defaults
+# for max sessions, opponent depth, max moves, agent color and workers are read from
+# CHESS_* environment variables at import time (so uvicorn worker processes pick them
+# up), and a module-level app is built at import time.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -102,6 +108,9 @@ DEFAULT_WORKERS = int(os.environ.get("CHESS_WORKERS", "16"))
 
 
 class ConcurrentChessEnvironment(ChessEnvironment):
+    # [CLASS DOC]
+    # ChessEnvironment subclass whose only change is declaring it supports concurrent
+    # sessions, which lets the server allow more than one session.
     """``ChessEnvironment`` that declares itself safe for concurrent sessions.
 
     Nothing else changes: the server already gives every WebSocket session its
@@ -118,6 +127,11 @@ def build_app(
     max_moves: int = DEFAULT_MAX_MOVES,
     agent_color: str | None = DEFAULT_AGENT_COLOR,
 ):
+    # [FUNCTION DOC]
+    # Builds the FastAPI app: maps agent_color "alternate" to None (environment's per-
+    # episode alternation), creates a partial factory of the concurrent chess env with a
+    # moonfish opponent and the given depth/move limit/color, and returns create_app's
+    # result with max_concurrent_envs set to max_sessions.
     """Build the FastAPI app that serves the chess environment for training."""
     # ``"alternate"`` is the CLI/env spelling of the environment's own default;
     # normalize it here so worker processes, which read the setting back out of
@@ -158,6 +172,12 @@ app = build_app()
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point: parses host, port, max sessions, opponent depth, max moves, agent
+    # color and workers. With more than one worker, exports the settings as CHESS_*
+    # env vars, adds examples/ to sys.path and PYTHONPATH, and runs uvicorn with the import
+    # string of the module-level app; otherwise runs uvicorn directly on a freshly built app.
+    # Side effects: mutates os.environ and sys.path, starts a blocking server.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)

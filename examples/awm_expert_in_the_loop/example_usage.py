@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Minimal LLM-free walkthrough of the raw AWM environment API: reset into a scenario/task, list tools, call one
+# tool (get_current_user_profile), run the code verifier with an empty final answer, then end the episode.
 """Minimal example: drive a single AWM task by hand, without any LLM.
 
 This shows the raw environment API the expert-in-the-loop recipe is built on:
@@ -22,6 +25,9 @@ from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
 
 
 async def main() -> None:
+    # [FUNCTION DOC]
+    # Parses CLI args (scenario, task index, base url defaulting to AWM_BASE_URL), runs the walkthrough against the
+    # server and prints the task, discovered tools, profile result and verify reward. Side effects: network I/O, stdout.
     parser = argparse.ArgumentParser(description="Minimal AWM env walkthrough (no LLM)")
     parser.add_argument("scenario", nargs="?", default="marketplace_1")
     parser.add_argument("--task-idx", type=int, default=0)

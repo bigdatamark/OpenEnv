@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Webhook notification service for calendar watch channels. Looks up WatchChannel
+# rows via a SQLAlchemy session and POSTs JSON notifications (Google "api#channel"
+# shape) to the registered webhook addresses using requests.
 """
 Webhook notification service for calendar watch channels
 """
@@ -15,9 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationService:
+    # [CLASS DOC]
+    # Sends webhook notifications for watch channels and maintains channel state
+    # (notification counters, deactivation of expired channels) in the database.
+    # All public methods swallow exceptions and log them instead of raising.
     """Service for sending webhook notifications to watch channels"""
 
     def __init__(self, db: Session):
+        # [FUNCTION DOC]
+        # Stores the SQLAlchemy session used for all queries and commits.
         self.db = db
 
     def send_notification(
@@ -27,6 +37,18 @@ class NotificationService:
         resource_data: Dict[str, Any],
         resource_state: str = "sync",
     ) -> bool:
+        # [FUNCTION DOC]
+        # Sends one notification to the active channel with the given id.
+        # Inputs: channel_id; event_type (placed in "eventType"); resource_data (placed in
+        # "data"); resource_state (placed in "resourceState", default "sync").
+        # Behavior: loads the active channel (is_active == "true"); returns False if missing.
+        # If the channel is expired it is deactivated and False is returned. Otherwise builds
+        # a payload with kind, id, resourceId, resourceUri, eventType, resourceState, a UTC ISO
+        # timestamp ending in "Z" and data; sets JSON content type, a User-Agent and the
+        # X-Goog-Channel-Token header when the channel has a token; POSTs with a 30s timeout.
+        # Returns: True on HTTP 200/201/202/204 (and updates channel stats), else False.
+        # Raises: nothing; timeouts, request errors and any other exceptions are logged and give False.
+        # Side effects: network request, database commit, logging.
         """
         Send a notification to a specific watch channel
 
@@ -114,6 +136,12 @@ class NotificationService:
     def notify_acl_change(
         self, calendar_id: str, change_type: str, acl_rule_data: Dict[str, Any]
     ) -> int:
+        # [FUNCTION DOC]
+        # Notifies every active "acl" watch channel of a calendar about an ACL change.
+        # Expired channels are deactivated and skipped; others get send_notification with
+        # event type change_type, the ACL rule data and state "sync".
+        # Returns: number of successful notifications (0 on any error or when none exist).
+        # Side effects: network requests, database commits, logging.
         """
         Send ACL change notifications to all active watch channels for a calendar
 
@@ -170,6 +198,9 @@ class NotificationService:
     def notify_settings_change(
         self, user_id: str, change_type: str, setting_data: Dict[str, Any]
     ) -> int:
+        # [FUNCTION DOC]
+        # Same as notify_acl_change but for the active "settings" watch channels of a user.
+        # Returns: number of successful notifications (0 on error or none).
         """
         Send settings change notifications to all active watch channels for a user
 
@@ -225,6 +256,10 @@ class NotificationService:
             return 0
 
     def cleanup_expired_channels(self) -> int:
+        # [FUNCTION DOC]
+        # Deactivates all active channels whose expires_at is before the current UTC time.
+        # Returns: number of channels deactivated; 0 on error (after a rollback).
+        # Side effects: database commits, logging.
         """
         Clean up expired watch channels
 
@@ -261,6 +296,9 @@ class NotificationService:
             return 0
 
     def _update_channel_stats(self, channel: WatchChannel):
+        # [FUNCTION DOC]
+        # HELPER: Sets last_notification_at to now (UTC), increments notification_count and
+        # commits. On error logs and rolls back.
         """Update channel statistics after successful notification"""
         try:
             channel.last_notification_at = datetime.utcnow()
@@ -271,6 +309,8 @@ class NotificationService:
             self.db.rollback()
 
     def _deactivate_channel(self, channel: WatchChannel):
+        # [FUNCTION DOC]
+        # HELPER: Sets the channel's is_active to "false" and commits. On error logs and rolls back.
         """Deactivate a watch channel"""
         try:
             channel.is_active = "false"
@@ -282,5 +322,7 @@ class NotificationService:
 
 
 def get_notification_service(db: Session) -> NotificationService:
+    # [FUNCTION DOC]
+    # HELPER: Factory returning a new NotificationService bound to the given session.
     """Factory function to get notification service instance"""
     return NotificationService(db)

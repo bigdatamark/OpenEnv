@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Server-side Terminus environment: an MCP environment with one "terminal" tool backed by an E2B sandbox
+# per episode. reset() can run setup commands and register verify commands; submitting a final answer runs
+# the verify commands and computes a reward (the verify pass rate, or a finite override value written by a
+# verify command to the reward file). Defines the reward file path and a shell snippet that clears it.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,11 +35,16 @@ _CLEAR_REWARD_FILE = f"rm -f {REWARD_FILE} && test ! -e {REWARD_FILE}"
 
 
 class TerminusEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment holding the current sandbox (or None) and TerminusState. Supports concurrent sessions.
     """Single-tool terminal environment with one E2B sandbox per episode."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates an initial state and registers the "terminal" tool on a FastMCP server passed to the base class.
+        # No sandbox is created until reset.
         self._sandbox: Optional[E2BSandbox] = None
         self._state = TerminusState(episode_id=str(uuid4()), step_count=0)
 
@@ -42,6 +52,11 @@ class TerminusEnvironment(MCPEnvironment):
 
         @mcp.tool
         def terminal(command: str = "", final_answer: str = "") -> str:
+            # [FUNCTION DOC]
+            # MCP tool. Without a sandbox returns a "not reset" error string. With final_answer: stores it; if no verify
+            # commands are registered returns "Answer submitted"; otherwise runs verification and returns a summary with
+            # passed/total counts and reward. Otherwise requires a non-blank command (error string if blank), runs it,
+            # appends the result to state.commands and returns its formatted output.
             """Run a shell command or submit a final answer inside the sandbox.
 
             Args:
@@ -78,6 +93,13 @@ class TerminusEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Kills any existing sandbox and creates a fresh state (given or random episode id). Returns a done error
+        # observation if E2B_API_KEY is unset or sandbox creation fails. Otherwise records the sandbox id, reads
+        # setup commands (kwargs setup or setup_scripts) and verify commands (verify or verify_scripts), creates the
+        # verifier log dir, runs setup commands and returns a done error observation with their results if any
+        # failed. Returns: Observation (done False, reward None) with status "ready", sandbox id, message, setup
+        # results and verify commands in metadata.
         """Create a fresh E2B sandbox and run optional setup commands."""
         if self._sandbox:
             self._sandbox.kill()
@@ -166,6 +188,9 @@ class TerminusEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **_: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Handles non-MCP actions: returns an Observation (not done, reward None) with an "Unknown action type"
+        # error in metadata.
         return Observation(
             done=False,
             reward=None,
@@ -183,6 +208,11 @@ class TerminusEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count, delegates to the MCP base step, and if an answer has been submitted and a reward
+        # computed, marks the observation done with that reward.
+        # KNOWN ISSUE: when no verify commands are registered, last_reward stays None so submitting a final answer
+        # never ends the episode.
         self._state.step_count += 1
         obs = super().step(action, timeout_s=timeout_s, **kwargs)
         if self._state.submitted_answer is not None and self._state.last_reward is not None:
@@ -196,6 +226,8 @@ class TerminusEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async counterpart of step with the same counting and termination logic.
         self._state.step_count += 1
         obs = await super().step_async(action, timeout_s=timeout_s, **kwargs)
         if self._state.submitted_answer is not None and self._state.last_reward is not None:
@@ -205,17 +237,26 @@ class TerminusEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> TerminusState:
+        # [FUNCTION DOC]
+        # Property returning the current TerminusState.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Kills and drops the sandbox if present.
         if self._sandbox:
             self._sandbox.kill()
             self._sandbox = None
 
     def _run_shell_commands(self, commands: Iterable[str]) -> list[CommandResult]:
+        # [FUNCTION DOC]
+        # HELPER: runs each command in order and returns the list of CommandResults.
         return [self._run_shell_command(command) for command in commands]
 
     def _run_shell_command(self, command: str) -> CommandResult:
+        # [FUNCTION DOC]
+        # HELPER: runs one command in the sandbox and returns a CommandResult with output formatted for the LLM.
+        # Requires a sandbox (AttributeError otherwise).
         result = self._sandbox.run_shell(command)
         output = _format_for_llm(result)
         return CommandResult(
@@ -226,6 +267,11 @@ class TerminusEnvironment(MCPEnvironment):
         )
 
     def _run_verify_commands(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns zero counts and None reward without a sandbox. Otherwise ensures the verifier log dir,
+        # clears the reward file, runs all verify commands and stores their results, reads the reward override
+        # (recording why it was ignored, if so), falls back to passed/total when there is no override and at least
+        # one command, stores last_reward and returns a mapping with passed, total and reward.
         if not self._sandbox:
             return {"passed": 0, "total": 0, "reward": None}
 
@@ -247,6 +293,9 @@ class TerminusEnvironment(MCPEnvironment):
 
 
 def _coerce_commands(value: Any) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: normalises a command spec to a list of strings: None gives empty; a string gives itself if
+    # non-blank; any other iterable gives its stringified non-blank items.
     if value is None:
         return []
     if isinstance(value, str):
@@ -255,6 +304,9 @@ def _coerce_commands(value: Any) -> list[str]:
 
 
 def _format_for_llm(result) -> str:
+    # [FUNCTION DOC]
+    # HELPER: joins stripped stdout, stripped stderr and "ERROR:" plus the error text with newlines; returns
+    # "(no output)" if all are empty.
     parts = []
     if result.stdout:
         parts.append(result.stdout.strip())
@@ -268,6 +320,9 @@ def _format_for_llm(result) -> str:
 def _read_reward_override(
     sandbox: E2BSandbox, cleared: bool
 ) -> tuple[Optional[float], Optional[str]]:
+    # [FUNCTION DOC]
+    # HELPER: if the reward file could not be cleared beforehand, returns (None, reason). Otherwise reads the
+    # reward file in the sandbox and returns the parsed (reward, ignore-reason) pair.
     if not cleared:
         return None, "reward file could not be removed before verification"
     result = sandbox.run_shell(f"cat {REWARD_FILE} 2>/dev/null || true")
@@ -275,6 +330,9 @@ def _read_reward_override(
 
 
 def _parse_reward_override(raw: str) -> tuple[float | None, str | None]:
+    # [FUNCTION DOC]
+    # HELPER: parses reward file text: empty gives (None, None); non-numeric or non-finite gives (None, reason
+    # with the first 40 chars); any finite float gives (value, None).
     """Parse the reward file written by a verify command.
 
     The value comes from the task author rather than the agent, so any finite

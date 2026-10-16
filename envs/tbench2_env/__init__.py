@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Terminal-Bench 2 (TB2) environment package. Re-exports the client (Tbench2Env) and the
+# Tbench2Action / Tbench2Observation / Tbench2State models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

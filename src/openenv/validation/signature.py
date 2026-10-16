@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Detects which package format a directory contains based on well-known files, and defines errors
+# for ambiguous/unrecognized packages and for recognized-but-unsupported package categories.
+# WELL_KNOWN_FILES maps the formats with implemented parsers (only openenv.yaml) to filenames;
+# UNSUPPORTED_CATEGORIES maps category keys to explanations.
+
 """Well-known files, signature detection, and unsupported-package errors."""
 
 from pathlib import Path
@@ -29,6 +35,8 @@ UNSUPPORTED_CATEGORIES: dict[str, str] = {
 
 
 class SignatureError(Exception):
+    # [CLASS DOC]
+    # Exception for a path that is not a directory, matches no parseable format, or matches several formats.
     """
     Ambiguous or unrecognized package: zero or two+ well-known files matched.
 
@@ -37,6 +45,8 @@ class SignatureError(Exception):
 
 
 class UnsupportedPackageError(Exception):
+    # [CLASS DOC]
+    # Exception for a recognized package in an unsupported category; exposes category and reason.
     """
     A recognized package in a category local validation does not attempt.
 
@@ -50,6 +60,9 @@ class UnsupportedPackageError(Exception):
     """
 
     def __init__(self, category: str, reason: str):
+        # [FUNCTION DOC]
+        # Validates category is a key of UNSUPPORTED_CATEGORIES (else raises ValueError), sets the message
+        # "unsupported package (<category>): <reason>" and stores category and reason.
         if category not in UNSUPPORTED_CATEGORIES:
             raise ValueError(f"unknown unsupported-package category: {category!r}")
         super().__init__(f"unsupported package ({category}): {reason}")
@@ -58,6 +71,9 @@ class UnsupportedPackageError(Exception):
 
 
 def _has_yaml_frontmatter(path: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns True if the file's UTF-8 text (leading whitespace stripped) starts with "---";
+    # False on read or decode errors.
     try:
         return path.read_text(encoding="utf-8").lstrip().startswith("---")
     except (OSError, UnicodeError):
@@ -65,6 +81,9 @@ def _has_yaml_frontmatter(path: Path) -> bool:
 
 
 def _file_present(package_root: Path, kind: SignatureKind) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns whether the well-known file for the given kind exists as a regular file in the
+    # package root; for task.md (POSTTRAIN_TASK) also requires YAML frontmatter.
     path = package_root / kind.value
     if not path.is_file():
         return False
@@ -74,6 +93,10 @@ def _file_present(package_root: Path, kind: SignatureKind) -> bool:
 
 
 def detect_signature(package_root: Path) -> SignatureKind:
+    # [FUNCTION DOC]
+    # Returns the single SignatureKind of the package directory.
+    # Raises SignatureError if the path is not a directory, if more than one known format's file is
+    # present (ambiguous), or if none of the parseable formats' files is present (unrecognized).
     """
     Detect a package's format from its well-known file. Never a guess.
 

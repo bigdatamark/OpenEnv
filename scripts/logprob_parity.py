@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Verification script: checks that logprobs captured by the harness capture layer from an
+# OpenAI-compatible serving engine (vLLM or SGLang) are the ones the engine assigns. It
+# drives a multi-turn tool conversation at temperature 1.0, builds a RolloutGraph, exports
+# it to training turn records, re-scores each turn's prompt+completion through
+# /v1/completions, and compares captured vs recomputed logprobs, using two deliberately
+# misaligned negative controls as the scale for pass/fail. Adds src/ to sys.path only if
+# openenv is not importable.
 """Are the captured logprobs the ones the model actually assigned?
 
 Every other check in this project verifies the SHAPE of a rollout: ids present, lengths aligned,
@@ -94,6 +102,9 @@ TOOLS = [
 
 
 def post(url: str, body: dict, timeout: float = 300.0) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: POSTs a JSON body to url and returns the parsed JSON response.
+    # Raises: urllib HTTP/URL errors on failure.
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -106,6 +117,12 @@ def post(url: str, body: dict, timeout: float = 300.0) -> dict:
 def capture_conversation(
     base: str, model: str, n_turns: int, top_p: float | None = None
 ) -> RolloutGraph:
+    # [FUNCTION DOC]
+    # Runs n_turns chat completion requests (bash tool, max 96 tokens, temperature 1.0,
+    # logprobs and token ids requested, optional top_p), adding a TurnNode per turn with prompt
+    # ids, sampled ids, sampled logprobs and request/response data. Each reply is appended,
+    # followed by a canned tool result if it called a tool, else a user follow-up message.
+    # Returns: the RolloutGraph. Side effects: network calls.
     """Drive a multi-turn tool conversation and build the graph exactly as the proxy would.
 
     The conversation grows the way a real agent's does — assistant reply, tool result, next call —
@@ -177,6 +194,13 @@ def capture_conversation(
 def rescore(
     base: str, model: str, prompt_ids: list[int], completion_ids: list[int]
 ) -> list[float]:
+    # [FUNCTION DOC]
+    # Returns the engine's logprob for each completion token given the preceding tokens.
+    # First tries vLLM style (max_tokens 0 with prompt_logprobs), reading per-position dicts
+    # keyed by token id or "token_id:<id>"; on HTTP error or length mismatch falls back to
+    # SGLang style (max_tokens 1, echo, logprobs 1) reading the positional token_logprobs.
+    # Raises: SystemExit if vLLM scored a position without the sampled token, or the fallback
+    # returned fewer positions than the sequence.
     """The engine's logprob for each completion token, given the prompt that preceded it.
 
     Two engines, two spellings of "score this sequence", so both are tried:
@@ -246,6 +270,16 @@ def rescore(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point: parses --llm-url, --model, --turns, --top-p and --margin; captures the
+    # conversation; exports it via a minimal stand-in session object at "tokens" capture level
+    # (SystemExit if the rollout is not trainable); compares every non-empty turn (max abs
+    # diff, worst importance ratio), then runs negative controls on the longest turn (prompt
+    # truncated by one token, completion rotated by one). Prints a report including the mean
+    # signed residual. Raises SystemExit(1) if the residual is zero or the smaller control
+    # diff is less than margin times the worst aligned diff; otherwise prints PASS.
+    # KNOWN ISSUE: if no turn had completion tokens, worst stays 0 and the run reports FAIL;
+    # if records is empty, selecting the longest turn raises ValueError.
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--llm-url", required=True)
     ap.add_argument("--model", required=True)
@@ -277,6 +311,9 @@ def main() -> None:
     graph = capture_conversation(base, args.model, args.turns, top_p=args.top_p)
 
     class Session:
+        # [CLASS DOC]
+        # Minimal stand-in session object (id, metadata, findings; graph set afterwards) passed to
+        # export_session.
         session_id = "parity"
         metadata: dict = {}
         findings: list[str] = []
@@ -295,6 +332,10 @@ def main() -> None:
     signed: list[float] = []
 
     def compare(prompt_ids, completion_ids, captured):
+        # [FUNCTION DOC]
+        # Re-scores one (prompt, completion) pair, records signed residuals (captured minus
+        # recomputed) into the enclosing list, and returns (max abs diff, ratio farthest from 1,
+        # number of compared tokens). Raises ValueError if there are no pairs.
         recomputed = rescore(base, args.model, prompt_ids, completion_ids)
         pairs = [(a, b) for a, b in zip(captured, recomputed) if b is not None]
         diffs = [abs(a - b) for a, b in pairs]

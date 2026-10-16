@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Free-roam driving scenario: optional map selection, weather (including "random" from
+# WEATHER_PRESETS), NPC vehicles and pedestrians, and a goal chosen at a configurable route
+# distance. Provides a dense per-step reward for RL. Works in real CARLA or mock mode.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -40,6 +44,9 @@ WEATHER_PRESETS: List[str] = [
 
 @dataclass
 class FreeRoamConfig(ScenarioConfig):
+    # [CLASS DOC]
+    # ScenarioConfig plus map_name, NPC vehicle and pedestrian counts, success_radius (10 m),
+    # random_goal flag or fixed goal_location, route distance range (100-500 m) and max_steps 500.
     map_name: Optional[str] = None
     num_npc_vehicles: int = 0
     num_pedestrians: int = 0
@@ -52,13 +59,20 @@ class FreeRoamConfig(ScenarioConfig):
 
 
 class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
+    # [CLASS DOC]
+    # Navigate-to-goal scenario. Remembers the originally configured weather so "random" can be
+    # re-rolled each episode. Per-episode data lives in state["scenario_state"]["free_roam"].
     """Configurable autonomous driving: navigate to a goal with traffic."""
 
     def __init__(self, config: FreeRoamConfig):
+        # [FUNCTION DOC]
+        # Stores the config and the originally configured weather string.
         super().__init__(config)
         self._configured_weather: str = config.weather
 
     def spawn_requirements(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns no lane requirements, 10 m forward space, and map_name when configured.
         reqs: Dict[str, Any] = {
             "require_left": False,
             "require_right": False,
@@ -73,6 +87,10 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
     # ------------------------------------------------------------------
 
     def reset(self, state: Any) -> None:
+        # [FUNCTION DOC]
+        # Initializes free_roam scenario state (prev_goal_distance, initial_route_distance,
+        # collision_count) and, if the configured weather is "random", sets config.weather to a random preset.
+        # Side effects: mutates state and self.config.weather.
         state.setdefault("scenario_state", {})
         state["scenario_state"]["free_roam"] = {
             "prev_goal_distance": None,
@@ -86,6 +104,8 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
             self.config.weather = random.choice(WEATHER_PRESETS)
 
     def setup(self, state: Any) -> None:
+        # [FUNCTION DOC]
+        # Dispatches to real setup when state["carla"] is set, else mock setup.
         fr = state["scenario_state"]["free_roam"]
         runtime = state.get("carla")
         scenario_data = state.get("scenario_data", {})
@@ -106,6 +126,12 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
         runtime: Any,
         scenario_data: Dict[str, Any],
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Picks a goal (_pick_goal_real), stores it as scenario_data["goal_location"], sets the
+        # initial and previous goal distance to the straight-line XY distance, spawns up to
+        # num_npc_vehicles NPCs at shuffled spawn points more than 10 m from the ego, and spawns
+        # pedestrians at random navigation locations (up to 10 attempts each, raised 0.5 m).
+        # Side effects: spawns CARLA actors, logging.
         world = runtime.world_obj
         carla_map = world.get_map()
         spawn_points = carla_map.get_spawn_points()
@@ -167,6 +193,11 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
         spawn_points: list,
         carla_map: Any,
     ) -> Tuple[float, float, float]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the fixed goal_location when random_goal is False and a goal is set. Otherwise
+        # shuffles spawn points and returns the first whose straight-line distance is in the configured
+        # range and for which the GlobalRoutePlanner (2 m resolution) finds a route; falls back to the
+        # farthest spawn point. Returns an (x, y, z) tuple.
         """Pick a reachable goal within the configured distance range."""
         if not self.config.random_goal and self.config.goal_location is not None:
             return self.config.goal_location
@@ -210,6 +241,9 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
         fr: Dict[str, Any],
         scenario_data: Dict[str, Any],
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Sets the goal to (route_distance_min, 0, 0.5) and the initial/previous distances to
+        # route_distance_min.
         dist = self.config.route_distance_min
         goal = (dist, 0.0, 0.5)
 
@@ -225,6 +259,9 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
     # ------------------------------------------------------------------
 
     def is_done(self, state: Any) -> bool:
+        # [FUNCTION DOC]
+        # True when the step count reaches max_steps, goal_distance is below success_radius, or a
+        # collision was detected.
         step = int(state.get("env_step", state.get("step_count", 0)))
         if step >= self.config.max_steps:
             return True
@@ -243,6 +280,12 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
     # ------------------------------------------------------------------
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Computes the step reward: normalized progress (previous minus current goal distance divided by
+        # the initial distance) + 10 on arrival - 5 on collision - 0.01 time cost. Updates
+        # prev_goal_distance. Returns a dict with scenario, goal_reached, goal_distance, collision,
+        # reward, route_distance_total and route_distance_remaining.
+        # Side effects: mutates scenario state, so calling it twice per step changes the result.
         fr = state.get("scenario_state", {}).get("free_roam", {})
         goal_distance = state.get("goal_distance", float("inf"))
         collision = state.get("collision_detected", False)
@@ -282,6 +325,8 @@ class FreeRoamScenario(BaseScenario[FreeRoamConfig]):
     # ------------------------------------------------------------------
 
     def build_system_prompt(self, state: Any) -> str:
+        # [FUNCTION DOC]
+        # Returns a prompt describing the goal radius and available driving/navigation tools.
         cfg = self.config
         return (
             "You control a vehicle in an open driving environment.\n\n"

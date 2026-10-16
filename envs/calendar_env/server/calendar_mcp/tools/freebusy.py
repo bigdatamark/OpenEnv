@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Static MCP tool definitions for the FreeBusy part of the calendar MCP server.
+# Exposes FREEBUSY_TOOLS, a list with one tool descriptor ("query_freebusy") made of
+# a name, a long human/LLM-facing description and a JSON-Schema inputSchema requiring
+# timeMin, timeMax and items (list of objects with an "id"); optional timeZone,
+# groupExpansionMax, calendarExpansionMax.
+# Also defines FREEBUSY_CONCEPTS and FREEBUSY_EXAMPLES, purely informational nested
+# dicts (rules, timezone notes, error scenarios, sample requests). No logic, no side effects.
 """
 FreeBusy MCP tools for Google Calendar API v3 compatibility
 All FreeBusy API endpoints with clean tool definitions

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Script (uv inline-script dependencies) that trains a small LM with TRL GRPO on the BrowserGym MiniWoB "click-test"
+# task, where each training environment is a BrowserGym server launched in a Hugging Face Sandbox. At import time it
+# builds a constant-prompt dataset, a GRPOConfig (vLLM colocate by default, trackio reporting) and a GRPOTrainer whose
+# environment_factory is BrowserGymLLMEnv, then immediately starts training.
+# Side effects: sandbox provisioning, GPU training, writes to outputs/browsergym-grpo-<timestamp>, trackio logging.
 # Copyright 2020-2026 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -80,6 +86,8 @@ Complete the given task as efficiently as possible."""
 
 
 def reward_completion(environments, **kwargs) -> list[float]:
+    # [FUNCTION DOC]
+    # Reward function for TRL: returns each environment's current reward attribute, in order.
     return [env.reward for env in environments]
 
 
@@ -100,7 +108,14 @@ output_dir = Path("outputs") / f"browsergym-grpo-{timestamp}"
 
 
 class BrowserGymLLMEnv:
+    # [CLASS DOC]
+    # Tool-calling environment wrapper for TRL's environment_factory. Opens a synchronous BrowserGymEnv backed by an
+    # HFSandboxProvider, exposes reset plus the browser actions (click, fill, send_keys, scroll, noop) as tool methods
+    # returning text observations, and tracks reward, done flag and step count (episode forced done after MAX_STEPS).
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates the sync BrowserGymEnv client with a sandbox provider (120 s message timeout, 100 MB messages), enters its
+        # context to connect, and initialises reward, done flag and step count. Side effects: provisions a sandbox.
         self._context = None
         self._context = BrowserGymEnv(
             message_timeout_s=120.0,
@@ -117,16 +132,24 @@ class BrowserGymLLMEnv:
         self._step_count = 0
 
     def __enter__(self):
+        # [FUNCTION DOC]
+        # Returns self for use as a context manager.
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        # [FUNCTION DOC]
+        # Closes the underlying client context on exit.
         self._close()
 
     def __del__(self) -> None:
+        # [FUNCTION DOC]
+        # Best-effort close on garbage collection, suppressing any exception.
         with suppress(Exception):
             self._close()
 
     def reset(self, **kwargs) -> str:
+        # [FUNCTION DOC]
+        # Resets reward/done/step state, resets the remote env to TASK_NAME (ignores kwargs), and returns the formatted observation text.
         self.reward = 0.0
         self._done = False
         self._step_count = 0
@@ -135,6 +158,8 @@ class BrowserGymLLMEnv:
         return self._format_observation(result.observation)
 
     def click(self, bid: str) -> str:
+        # [FUNCTION DOC]
+        # Performs a click on the element with the given bid. Returns the formatted observation. Raises ValueError if the episode is done.
         """Click an element.
 
         Args:
@@ -143,6 +168,8 @@ class BrowserGymLLMEnv:
         return self._do_action(f"click({bid!r})")
 
     def fill(self, bid: str, text: str) -> str:
+        # [FUNCTION DOC]
+        # Fills the element with the given bid with text. Returns the formatted observation. Raises ValueError if done.
         """Fill an input element.
 
         Args:
@@ -152,6 +179,8 @@ class BrowserGymLLMEnv:
         return self._do_action(f"fill({bid!r}, {text!r})")
 
     def send_keys(self, text: str) -> str:
+        # [FUNCTION DOC]
+        # Sends the given keys/text. Returns the formatted observation. Raises ValueError if done.
         """Send keyboard input.
 
         Args:
@@ -160,6 +189,8 @@ class BrowserGymLLMEnv:
         return self._do_action(f"send_keys({text!r})")
 
     def scroll(self, direction: str) -> str:
+        # [FUNCTION DOC]
+        # Scrolls in the given direction. Returns the formatted observation. Raises ValueError if done.
         """Scroll the page.
 
         Args:
@@ -168,10 +199,16 @@ class BrowserGymLLMEnv:
         return self._do_action(f"scroll({direction!r})")
 
     def noop(self) -> str:
+        # [FUNCTION DOC]
+        # Performs a no-op action. Returns the formatted observation. Raises ValueError if done.
         """Do nothing."""
         return self._do_action("noop()")
 
     def _do_action(self, action_str: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Executes one action string. Raises ValueError if the episode is already done. Increments the step count,
+        # steps the env, sets reward to 1.0 if done with positive step reward, 0.0 if done otherwise, or the step reward if not
+        # done; marks done when MAX_STEPS is reached. Returns the formatted observation.
         if self._done:
             raise ValueError("Episode is done.")
 
@@ -194,6 +231,9 @@ class BrowserGymLLMEnv:
         return self._format_observation(observation)
 
     def _format_observation(self, observation) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Builds text with the goal, the error (only if the last action errored), and the accessibility tree truncated
+        # to 2000 chars; returns "No observation available." if all are empty.
         parts = []
         if observation.goal:
             parts.append(f"Goal: {observation.goal}")
@@ -207,6 +247,8 @@ class BrowserGymLLMEnv:
         return "\n\n".join(parts) if parts else "No observation available."
 
     def _close(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Exits the client context once (idempotent) and clears the reference.
         if self._context is not None:
             context = self._context
             self._context = None

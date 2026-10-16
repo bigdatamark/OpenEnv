@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Serves Claude Code as a tau2-bench customer-service agent in production mode over the harness WebSocket endpoint so a
+# human plays the customer (no scoring). Each connection gets a fresh Tau2Harness with its own task database and
+# Claude Code process. No authentication. Side effects: runs a uvicorn HTTP/WebSocket server, spawns subprocesses.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Serve Claude Code as a τ²-bench agent in production mode: you are the customer, on `WS /harness`.
@@ -30,6 +34,9 @@ from tau2_harness import Tau2Harness
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses domain, task id, model, Claude CLI path, host and port; builds a FastAPI app in production mode with a factory
+    # creating a new Tau2Harness per session, and runs it with uvicorn (blocking).
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--domain", default="airline")
     parser.add_argument(
@@ -46,6 +53,8 @@ def main() -> None:
     args = parser.parse_args()
 
     def make_env() -> HarnessEnvironment:
+        # [FUNCTION DOC]
+        # HELPER: Environment factory: creates a HarnessConfig (temp working dir) and a Tau2Environment on the "base" split, and returns a Tau2Harness for the configured task.
         config = HarnessConfig(
             name="claude-code",
             command=[args.claude],

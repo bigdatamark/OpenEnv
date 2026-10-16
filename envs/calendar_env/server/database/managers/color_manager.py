@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# SQLAlchemy-based access to the Google Calendar color palette stored in the colors table.
 """
 Color database manager with Google Calendar API v3 compatible operations
 Handles color definitions for calendars and events
@@ -15,14 +17,23 @@ logger = logging.getLogger(__name__)
 
 
 class ColorManager:
+    # [CLASS DOC]
+    # Manager bound to one database_id for color palette reads and bulk loads.
     """Color manager for database operations"""
 
     def __init__(self, database_id: str):
+        # [FUNCTION DOC]
+        # Stores database_id and calls init_database (engine creation only).
         self.database_id = database_id
         # Initialize database on first use
         init_database(database_id)
 
     def get_colors_response(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the Google "calendar#colors" resource: {"kind", "updated" (max updated_at or
+        # now, ISO string with "+00:00" replaced by ".000Z"), "calendar": id -> {background,
+        # foreground}, "event": id -> {...}}. Re-raises DB errors after logging.
+        # KNOWN ISSUE: SQLite returns naive datetimes, so stored timestamps have no "+00:00" and "updated" lacks the "Z" suffix.
         """
         Get the complete colors response in Google Calendar API v3 format
 
@@ -66,6 +77,9 @@ class ColorManager:
     def get_color_by_id(
         self, color_type: str, color_id: str
     ) -> Optional[Dict[str, str]]:
+        # [FUNCTION DOC]
+        # Returns {background, foreground} for color_type "calendar" or "event" and color_id,
+        # or None if the type is unknown, not found, or any error occurs (errors are swallowed and logged).
         """
         Get a specific color by type and ID
 
@@ -103,6 +117,8 @@ class ColorManager:
             session.close()
 
     def validate_color_id(self, color_type: str, color_id: str) -> bool:
+        # [FUNCTION DOC]
+        # Returns True if get_color_by_id finds the color, else False.
         """
         Validate if a color ID exists for the given type
 
@@ -116,6 +132,9 @@ class ColorManager:
         return self.get_color_by_id(color_type, color_id) is not None
 
     def get_all_colors_by_type(self, color_type: str) -> Dict[str, Dict[str, str]]:
+        # [FUNCTION DOC]
+        # Returns a dict color_id -> {background, foreground} for the given type; empty dict for
+        # unknown type or on any error (logged).
         """
         Get all colors of a specific type
 
@@ -150,6 +169,11 @@ class ColorManager:
             session.close()
 
     def load_sample_colors(self, color_data: List[Dict[str, Any]]) -> int:
+        # [FUNCTION DOC]
+        # Upserts colors from a list of dicts (color_id, color_type string, background,
+        # foreground): inserts new ones, updates colors and updated_at of existing ones. Commits
+        # and returns the number processed (inserted + updated).
+        # Raises: ValueError for invalid color_type, KeyError for missing keys, DB errors (rolled back).
         """
         Load sample color data into the database
 
@@ -205,6 +229,8 @@ class ColorManager:
             session.close()
 
     def clear_all_colors(self) -> int:
+        # [FUNCTION DOC]
+        # Deletes all color rows, commits and returns how many existed. Rolls back and re-raises on error.
         """
         Clear all colors from the database
 

@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# tau2-bench as an MCP OpenEnv environment. Each episode runs one tau2-bench task via tau2's AgentGymEnv
+# (simulation running in its own thread) with an LLM-simulated user. Tools exposed: the domain's tools,
+# respond_to_user(message) and done(). The episode ends when either side stops; tau2's evaluator gives
+# the reward.
+# Side effects at import: monkey-patches tau2's natural-language-assertion judge "generate" function to a
+# thread-local-configured wrapper. Defines provider defaults (HF router, default models), the tool timeout
+# (300 s) and the text output schema used by tools.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -52,6 +60,9 @@ END_TOKENS = (STOP, TRANSFER, OUT_OF_SCOPE)
 
 
 def without_end_tokens(text: str) -> str:
+    # [FUNCTION DOC]
+    # Returns text with tau2's end-of-conversation tokens (stop, transfer, out-of-scope) removed and whitespace
+    # stripped.
     """The customer's message without τ²-bench's end-of-conversation tokens."""
     for token in END_TOKENS:
         text = text.replace(token, "")
@@ -69,6 +80,11 @@ DEFAULT_MODELS = {
 def llm_config(
     provider: str, model: Optional[str] = None, hf_token: Optional[str] = None
 ) -> tuple[str, dict]:
+    # [FUNCTION DOC]
+    # Returns (litellm model name, call kwargs) for a provider. For "hf": "openai/<model>" with the HF router as
+    # api_base and api_key from hf_token or HF_TOKEN; for others "<provider>/<model>". All use temperature 0
+    # and 5 retries. Model defaults to the provider's default.
+    # Raises ValueError for an unknown provider.
     """
     The litellm model name and arguments for a provider.
 
@@ -107,6 +123,10 @@ _judge = threading.local()
 
 
 def _judge_generate(**kwargs):
+    # [FUNCTION DOC]
+    # HELPER: replacement for the judge's generate; calls tau2's generate with the given kwargs, overriding the
+    # model and extra args with the values stored in the current thread's judge settings.
+    # Raises AttributeError if the thread has no judge settings set.
     return generate(**{**kwargs, "model": _judge.model, **_judge.args})
 
 
@@ -128,12 +148,18 @@ TEXT_OUTPUT = {
 
 
 class Tau2Tool(Tool):
+    # [CLASS DOC]
+    # FastMCP Tool that forwards calls to the owning Tau2Environment (env attribute), returning text output.
     """An MCP tool that forwards its call to the running τ²-bench simulation."""
 
     env: Any = None
     output_schema: dict[str, Any] = TEXT_OUTPUT
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
+        # [FUNCTION DOC]
+        # For respond_to_user, the action is the "message" argument; for other tools, a JSON string with name and
+        # arguments. Runs env.act in a worker thread and returns a ToolResult with the text as content and as
+        # structured {"result": text}. Exceptions from act propagate.
         if self.name == "respond_to_user":
             action = arguments["message"]
         else:
@@ -152,6 +178,9 @@ RESPOND_TO_USER = {
 
 
 class Tau2Environment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment for one tau2-bench domain. Holds domain/split/max_steps, litellm user model and args,
+    # the split's task ids, the current AgentGymEnv (or None) and Tau2State. Supports concurrent sessions.
     """
     One τ²-bench domain as an MCP environment.
 
@@ -184,6 +213,10 @@ class Tau2Environment(MCPEnvironment):
         max_steps: int = 100,
         hf_token: Optional[str] = None,
     ):
+        # [FUNCTION DOC]
+        # Raises FileNotFoundError if tau2's data directory lacks tau2/domains. Resolves the user LLM config
+        # (ValueError on unknown provider), loads task ids for the split, and registers one Tau2Tool per domain
+        # tool (from its OpenAI schema) plus respond_to_user and done on a FastMCP server passed to the base class.
         if not (DATA_DIR / "tau2" / "domains").is_dir():
             raise FileNotFoundError(
                 f"τ²-bench data not found in {DATA_DIR}. Point TAU2_DATA_DIR at the `data` "
@@ -239,6 +272,13 @@ class Tau2Environment(MCPEnvironment):
         hf_token: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Optionally replaces the HF api key with hf_token (hf provider only). Raises ValueError if the hf provider
+        # has no key. Picks task_id or a random one seeded by seed, creates a new AgentGymEnv and resets it.
+        # Raises RuntimeError if the simulated user produced no opening message. Only then ends any previous
+        # unfinished conversation, installs the new gym and a fresh state (given or random episode id).
+        # Returns: Observation (done False, reward 0.0) whose metadata has user_message (prefix "user: " removed),
+        # policy and task_id.
         """
         Start a τ²-bench task: the simulated user opens the conversation.
 
@@ -302,6 +342,11 @@ class Tau2Environment(MCPEnvironment):
         )
 
     def act(self, action: str) -> str:
+        # [FUNCTION DOC]
+        # Advances the simulation with one agent action string. Raises RuntimeError if not reset. Returns a fixed
+        # "conversation has ended" text if already done. Sets the thread's judge model/args, steps the gym; on
+        # termination marks done and stores reward and parsed reward_info (RuntimeError if reward_info is empty).
+        # Returns the observation text with "user: " / "tool: " prefixes removed.
         """Advance the simulation with one agent action and return what came back."""
         if self._gym is None:
             raise RuntimeError("call reset() before calling tools")
@@ -324,6 +369,9 @@ class Tau2Environment(MCPEnvironment):
         return observation.removeprefix("user: ").removeprefix("tool: ")
 
     def _end_conversation(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: if a simulation is running and not done, sends the agent stop token to unblock its thread and
+        # drops the gym reference.
         """Stop an unfinished simulation, whose thread otherwise waits for the agent forever."""
         if self._gym is not None and not self._state.done:
             # The agent's own stop message ends it without scoring it.
@@ -333,10 +381,15 @@ class Tau2Environment(MCPEnvironment):
             self._gym = None
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Ends any unfinished conversation, then closes the base MCP environment.
         self._end_conversation()
         super().close()
 
     def _finish(self, observation: Observation) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: if the episode is done, returns a copy of the observation with done True, the state reward and
+        # reward_info added to metadata; otherwise returns it unchanged.
         if not self._state.done:
             return observation
         return observation.model_copy(
@@ -353,6 +406,9 @@ class Tau2Environment(MCPEnvironment):
     def step(
         self, action: Action, timeout_s: Optional[float] = None, **kwargs: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count, delegates to the MCP base step with timeout defaulting to 300 s, and applies
+        # _finish to the result.
         self._state.step_count += 1
         return self._finish(
             super().step(action, timeout_s=timeout_s or TOOL_TIMEOUT_S, **kwargs)
@@ -361,6 +417,8 @@ class Tau2Environment(MCPEnvironment):
     async def step_async(
         self, action: Action, timeout_s: Optional[float] = None, **kwargs: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async counterpart of step with the same step counting, default timeout and _finish handling.
         self._state.step_count += 1
         return self._finish(
             await super().step_async(
@@ -371,6 +429,9 @@ class Tau2Environment(MCPEnvironment):
     def _step_impl(
         self, action: Action, timeout_s: Optional[float] = None, **kwargs: Any
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Handles non-MCP actions: returns an Observation (not done, reward 0.0) with an "Unknown action type"
+        # error in metadata.
         return Observation(
             done=False,
             reward=0.0,
@@ -382,4 +443,6 @@ class Tau2Environment(MCPEnvironment):
 
     @property
     def state(self) -> Tau2State:
+        # [FUNCTION DOC]
+        # Property returning the current Tau2State.
         return self._state

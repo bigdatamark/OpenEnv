@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for OpenSpiel environments; contains only a docstring.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

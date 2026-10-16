@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Semantic scoring layer: asks a multimodal model (default Qwen2.5-VL-72B via Hugging Face
+# Inference Providers) two things about the rendered PNG concurrently: a blind one-sentence caption
+# and a strict JSON yes/no checklist of task features. Caption recognition and checklist results are
+# combined 50/50 into a score. Network calls happen only in HFVisionClient.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """The semantic layer: does the rendered drawing show what was asked for?
@@ -38,6 +43,8 @@ _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
 
 class VisionClient(Protocol):
+    # [CLASS DOC]
+    # Protocol for a multimodal chat endpoint: has a model name and an async complete_with_image method.
     """Minimal protocol for a multimodal chat endpoint."""
 
     model: str
@@ -50,10 +57,14 @@ class VisionClient(Protocol):
         schema: dict[str, Any] | None = None,
         max_tokens: int = 400,
     ) -> str:
+        # [FUNCTION DOC]
+        # Protocol method: send prompt plus PNG (optionally constrained by a JSON schema) and return reply text.
         """Send a prompt plus an image and return the reply text."""
 
 
 class HFVisionClient:
+    # [CLASS DOC]
+    # VisionClient implementation using huggingface_hub's AsyncInferenceClient chat completion.
     """Vision client backed by Hugging Face Inference Providers.
 
     Args:
@@ -79,6 +90,9 @@ class HFVisionClient:
         api_key: str | None = None,
         timeout: float = 120.0,
     ):
+        # [FUNCTION DOC]
+        # Stores model id, API key (falls back to the locally stored Hugging Face token, read at construction)
+        # and request timeout (default 120 s).
         from huggingface_hub import get_token
 
         self.model = model
@@ -93,6 +107,11 @@ class HFVisionClient:
         schema: dict[str, Any] | None = None,
         max_tokens: int = 400,
     ) -> str:
+        # [FUNCTION DOC]
+        # Sends one user message with the prompt text and the PNG as a base64 data URI (temperature 0,
+        # max_tokens), adding a strict JSON-schema response format when schema is given. Creates a new
+        # async client per call. Returns the first choice's content or an empty string.
+        # Raises: any network/HTTP/client error from huggingface_hub. Side effects: network request.
         """Send a prompt plus an image and return the reply text."""
         from huggingface_hub import AsyncInferenceClient
 
@@ -131,6 +150,10 @@ class HFVisionClient:
 
 @dataclass(frozen=True)
 class JudgeReport:
+    # [CLASS DOC]
+    # Immutable judge verdict: caption, blind_subject (1.0 exact name, 0.5 family word, 0.0 none),
+    # blind_vehicle (1.0 or 0.0), checklist mapping of question key to bool, model id, and error text
+    # (set when the judge could not be reached).
     """What the judge concluded about a rendered drawing.
 
     Attributes:
@@ -163,11 +186,15 @@ class JudgeReport:
 
     @property
     def blind_score(self) -> float:
+        # [FUNCTION DOC]
+        # Property: mean of blind_subject and blind_vehicle.
         """`float`: Mean of the two unprompted recognition signals."""
         return (self.blind_subject + self.blind_vehicle) / 2.0
 
     @property
     def checklist_score(self) -> float:
+        # [FUNCTION DOC]
+        # Property: fraction of checklist values that are true; 0.0 for an empty checklist.
         """`float`: Fraction of checklist items answered yes."""
         if not self.checklist:
             return 0.0
@@ -175,6 +202,8 @@ class JudgeReport:
 
     @property
     def score(self) -> float:
+        # [FUNCTION DOC]
+        # Property: 0.0 if error is set, else 0.5 times blind_score plus 0.5 times checklist_score.
         """`float`: Weighted combination of the blind and checklist scores."""
         if self.error is not None:
             return 0.0
@@ -184,6 +213,8 @@ class JudgeReport:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a JSON-safe mapping of all fields plus rounded blind, checklist and overall scores.
         """Return a JSON-serialisable summary."""
         return {
             "model": self.model,
@@ -199,11 +230,16 @@ class JudgeReport:
 
 
 def _mentions(text: str, terms: Sequence[str]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if any term appears as a whole word (case-insensitive) in text.
     lowered = text.lower()
     return any(re.search(rf"\b{re.escape(t.lower())}\b", lowered) for t in terms)
 
 
 def build_checklist(task: Task) -> dict[str, str]:
+    # [FUNCTION DOC]
+    # Returns the question mapping for a task: subject_recognisable, vehicle_recognisable,
+    # riding_posture, coherent_figure, plus subject_feature_N and vehicle_feature_N per catalogue feature.
     """Build the per-feature questions for a task.
 
     Args:
@@ -238,6 +274,8 @@ def build_checklist(task: Task) -> dict[str, str]:
 
 
 def _checklist_schema(questions: dict[str, str]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a strict JSON schema object requiring a boolean for every question key and no extra keys.
     return {
         "type": "object",
         "properties": {key: {"type": "boolean"} for key in questions},
@@ -247,6 +285,8 @@ def _checklist_schema(questions: dict[str, str]) -> dict[str, Any]:
 
 
 def _checklist_prompt(questions: dict[str, str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the grading prompt text listing each "key: question" line with strictness instructions.
     lines = "\n".join(f"- {key}: {text}" for key, text in questions.items())
     return (
         "You are grading a drawing that a language model produced blind, by "
@@ -262,6 +302,8 @@ def _checklist_prompt(questions: dict[str, str]) -> str:
 
 
 class VisionJudge:
+    # [CLASS DOC]
+    # Runs the two judge calls through a VisionClient and builds a JudgeReport.
     """Scores a rendered drawing against the task it was meant to satisfy.
 
     Args:
@@ -278,14 +320,23 @@ class VisionJudge:
     """
 
     def __init__(self, client: VisionClient):
+        # [FUNCTION DOC]
+        # Stores the vision client.
         self._client = client
 
     @property
     def model(self) -> str:
+        # [FUNCTION DOC]
+        # Property: the client's model id.
         """`str`: The judge model id, recorded on every result."""
         return self._client.model
 
     async def evaluate(self, png_bytes: bytes, task: Task) -> JudgeReport:
+        # [FUNCTION DOC]
+        # Concurrently requests the caption (max 120 tokens) and the schema-constrained checklist (max 400
+        # tokens). Any exception from either call yields a report with only model and error set. Otherwise
+        # scores the caption against subject synonyms/family and vehicle synonyms, parses the checklist and
+        # returns the full report.
         """Run the blind caption and the feature checklist against a drawing.
 
         Args:
@@ -335,6 +386,10 @@ class VisionJudge:
 
 
 def _parse_checklist(raw: str, questions: dict[str, str]) -> dict[str, bool]:
+    # [FUNCTION DOC]
+    # HELPER: Extracts the outermost-looking JSON object (first "{" to last "}") from raw text and
+    # returns a mapping with every question key set to True only where the parsed value is exactly
+    # JSON true; missing, non-boolean or unparseable answers become False.
     """Parse the judge's JSON reply, defaulting missing keys to false.
 
     A missing or unparseable answer counts against the submission rather than

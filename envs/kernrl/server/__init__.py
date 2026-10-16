@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server package for kernrl; re-exports KernelOptEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

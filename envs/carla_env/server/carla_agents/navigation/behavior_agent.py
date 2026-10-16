@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Vendored CARLA BehaviorAgent: a BasicAgent with configurable driving styles (cautious, normal,
+# aggressive from behavior_types) adding speed-limit following, pedestrian avoidance, car
+# following by time-to-collision, junction slowdown and tailgating-avoidance lane changes.
 # Copyright (c) 2018-2020 CVC.
 #
 # This work is licensed under the terms of the MIT license.
@@ -29,6 +33,9 @@ from carla_env.server.carla_agents.tools.misc import (
 
 
 class BehaviorAgent(BasicAgent):
+    # [CLASS DOC]
+    # Behavior-driven navigation agent. Speeds are km/h; per-step it refreshes ego speed, speed limit,
+    # current and look-ahead road options before deciding control.
     """
     BehaviorAgent implements an agent that navigates scenes to reach a given
     target destination, by computing the shortest possible path to it.
@@ -44,6 +51,10 @@ class BehaviorAgent(BasicAgent):
     def __init__(
         self, vehicle, behavior="normal", opt_dict=None, map_inst=None, grp_inst=None
     ):
+        # [FUNCTION DOC]
+        # Initializes BasicAgent (default target speed), sets state fields, sampling resolution 4.5 and the
+        # behavior parameter object for "cautious", "normal" or "aggressive".
+        # KNOWN ISSUE: any other behavior string leaves _behavior as None, causing AttributeError later.
         """
         Constructor method.
 
@@ -79,6 +90,10 @@ class BehaviorAgent(BasicAgent):
             self._behavior = Aggressive()
 
     def _update_information(self):
+        # [FUNCTION DOC]
+        # HELPER: Reads ego speed and speed limit, sets the planner speed to the limit, records the current
+        # road option (LANEFOLLOW if none), sets look-ahead steps to limit/10, and stores the incoming
+        # waypoint and direction from the planner.
         """
         This method updates the information regarding the ego
         vehicle based on the surrounding world.
@@ -101,6 +116,8 @@ class BehaviorAgent(BasicAgent):
             self._incoming_direction = RoadOption.LANEFOLLOW
 
     def traffic_light_manager(self):
+        # [FUNCTION DOC]
+        # Returns True if a red traffic light affects the vehicle (all scene lights checked).
         """
         This method is in charge of behaviors for red lights.
         """
@@ -111,6 +128,11 @@ class BehaviorAgent(BasicAgent):
         return affected
 
     def _tailgating(self, waypoint, vehicle_list):
+        # [FUNCTION DOC]
+        # HELPER: If a faster vehicle is detected behind (160-180 deg cone), tries to change to a free
+        # same-direction right lane (allowed by marking), else left; on success prints a message, sets
+        # tailgate_counter to 200 and re-plans from the side lane to the current target waypoint.
+        # Side effects: mutates the behavior object, re-plans route, prints.
         """
         This method is in charge of tailgating behaviors.
 
@@ -173,6 +195,11 @@ class BehaviorAgent(BasicAgent):
                     )
 
     def collision_and_car_avoid_manager(self, waypoint):
+        # [FUNCTION DOC]
+        # Filters vehicles within 45 m (excluding ego) and detects a blocking vehicle, using the side lane
+        # offset when changing lanes, otherwise a 30-degree forward cone; when following a lane with no
+        # obstacle, outside junctions, above 10 km/h and not cooling down, runs tailgating logic.
+        # Returns: (vehicle_state, vehicle, distance).
         """
         This module is in charge of warning in case of a collision
         and managing possible tailgating chances.
@@ -187,6 +214,8 @@ class BehaviorAgent(BasicAgent):
         vehicle_list = self._world.get_actors().filter("*vehicle*")
 
         def dist(v):
+            # [FUNCTION DOC]
+            # HELPER: Distance from an actor to the given waypoint.
             return v.get_location().distance(waypoint.transform.location)
 
         vehicle_list = [
@@ -227,6 +256,9 @@ class BehaviorAgent(BasicAgent):
         return vehicle_state, vehicle, distance
 
     def pedestrian_avoid_manager(self, waypoint):
+        # [FUNCTION DOC]
+        # Filters pedestrians within 10 m of the waypoint and detects one in the path (side lane offset when
+        # changing lanes, else 60-degree cone). Returns (walker_state, walker, distance).
         """
         This module is in charge of warning in case of a collision
         with any pedestrian.
@@ -241,6 +273,8 @@ class BehaviorAgent(BasicAgent):
         walker_list = self._world.get_actors().filter("*walker.pedestrian*")
 
         def dist(w):
+            # [FUNCTION DOC]
+            # HELPER: Distance from a walker to the given waypoint.
             return w.get_location().distance(waypoint.transform.location)
 
         walker_list = [w for w in walker_list if dist(w) < 10]
@@ -269,6 +303,11 @@ class BehaviorAgent(BasicAgent):
         return walker_state, walker, distance
 
     def car_following_manager(self, vehicle, distance, debug=False):
+        # [FUNCTION DOC]
+        # Computes time-to-collision using relative speed (at least 1 m/s). Under safety_time: slows to
+        # leader speed minus speed_decrease (capped by max speed and limit minus speed_lim_dist); within
+        # 1-2x safety_time: matches the leader speed (at least min speed); else normal speed. Runs the local
+        # planner and returns its control.
         """
         Module in charge of car-following behaviors when there's
         someone in front of us.
@@ -321,6 +360,11 @@ class BehaviorAgent(BasicAgent):
         return control
 
     def run_step(self, debug=False):
+        # [FUNCTION DOC]
+        # One control step: update info, decrement tailgate cooldown, emergency stop for red lights, for
+        # pedestrians or vehicles closer than braking_distance (bounding-box adjusted); otherwise car
+        # following, junction slowdown (limit - 5) for upcoming left/right turns, or normal speed.
+        # Returns a carla.VehicleControl.
         """
         Execute one step of navigation.
 
@@ -404,6 +448,10 @@ class BehaviorAgent(BasicAgent):
         return control
 
     def emergency_stop(self):
+        # [FUNCTION DOC]
+        # Returns a new control with throttle 0, brake max_brake, no hand brake.
+        # KNOWN ISSUE: docstring says it modifies a given control and keeps steering; it creates a fresh
+        # control so steering is reset to 0.
         """
         Overwrites the throttle a brake values of a control to perform an emergency stop.
         The steering is kept the same to avoid going out of the lane when stopping during turns

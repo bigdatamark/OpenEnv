@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI router for /settings (Google Calendar v3 settings: list, get, watch), scoped by user context from headers.
+# A module-level CalendarSessionManager is created but unused.
 """
 Calendar Settings API endpoints following Google Calendar API v3 structure
 Handles GET and LIST operations for calendar settings
@@ -25,11 +28,16 @@ session_manager = CalendarSessionManager()
 
 
 def get_setting_manager(database_id: str) -> SettingManager:
+    # [FUNCTION DOC]
+    # HELPER: Returns a new SettingManager for the database id.
     return SettingManager(database_id)
 
 
 @router.get("", response_model=SettingsListResponse, operation_id="list_settings")
 async def list_settings(user_context: tuple[str, str] = Depends(get_user_context)):
+    # [FUNCTION DOC]
+    # GET /settings: returns a SettingsListResponse with the user's settings and a fixed etag. Raises: HTTPException 500
+    # on error.
     """
     Lists all user-visible settings
 
@@ -52,6 +60,9 @@ async def list_settings(user_context: tuple[str, str] = Depends(get_user_context
 async def get_settings(
     settingId: str, user_context: tuple[str, str] = Depends(get_user_context)
 ):
+    # [FUNCTION DOC]
+    # GET /settings/{settingId}: returns the user's setting with that id. Raises: HTTPException 404 if not found, 500 on
+    # other errors.
     """
     Returns a setting for the user
 
@@ -82,6 +93,9 @@ async def watch_settings(
     watch_request: SettingsWatchRequest,
     user_context: tuple[str, str] = Depends(get_user_context),
 ):
+    # [FUNCTION DOC]
+    # POST /settings/watch: requires non-empty address and id (else 400), creates a notification channel via the manager
+    # and returns it. Raises: 400 for ValueError, 500 for unexpected errors. Side effects: persists a watch channel.
     """
     Watch for changes to settings
 
