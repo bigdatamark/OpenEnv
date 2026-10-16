@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Synthetic SSE replay: the proxy captures upstream non-streaming, then replays the
+# complete response to streaming clients as a well-formed SSE stream in the client's
+# dialect (typed "event:" frames for Anthropic/Responses, bare "data:" frames for chat and
+# Google, plus "[DONE]" for chat). Also provides a keepalive wrapper that sends SSE
+# comments while a slow upstream call is pending.
 """Synthetic SSE: capture non-streaming, reply streaming.
 
 Every coding harness streams. That is not a preference we can talk them out of -- opencode, codex and
@@ -47,6 +53,10 @@ KEEPALIVE = ": openenv keepalive\n\n"
 
 
 def _error_event(api_type: APIType, response: Response) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Converts an error JSON Response into a single SSE error event in the client's
+    # dialect (Anthropic error event, Responses error event, or a data-only error object with
+    # the HTTP status as code). Parses response.body as JSON.
     payload = json.loads(response.body)
     error = payload.get("error", payload)
     message = error.get("message", "upstream request failed")
@@ -72,6 +82,13 @@ def _error_event(api_type: APIType, response: Response) -> str:
 async def keepalive_response(
     pending: Awaitable[Response], api_type: APIType
 ) -> Response:
+    # [FUNCTION DOC]
+    # Awaits a pending Response for up to KEEPALIVE_INTERVAL_S (10s); if it finishes, returns
+    # it unchanged (keeping its status). Otherwise returns a streaming response that emits
+    # keepalive comments every 10s until done, then either an error event (status >= 400) or
+    # the finished StreamingResponse's body chunks. The pending task is cancelled if the
+    # initial wait is interrupted or the client disconnects.
+    # Raises: RuntimeError (inside the stream) if a successful result is not a StreamingResponse.
     """Keep a delayed replay connected while capturing the complete upstream reply.
 
     Fast responses retain their original HTTP status, including validation and
@@ -90,6 +107,8 @@ async def keepalive_response(
         return task.result()
 
     async def body():
+        # [FUNCTION DOC]
+        # HELPER: Async generator body for the delayed response described above.
         while not task.done():
             yield KEEPALIVE
             await asyncio.wait({task}, timeout=KEEPALIVE_INTERVAL_S)
@@ -103,7 +122,13 @@ async def keepalive_response(
             yield chunk
 
     class PendingResponse(StreamingResponse):
+        # [CLASS DOC]
+        # HELPER: StreamingResponse subclass that cancels and awaits the pending capture task
+        # once the response finishes or the client disconnects.
         async def __call__(self, scope, receive, send):
+            # [FUNCTION DOC]
+            # Sends the streaming response, then cancels the pending task if still running and
+            # awaits it, suppressing cancellation and other errors.
             try:
                 await super().__call__(scope, receive, send)
             finally:
@@ -118,6 +143,8 @@ async def keepalive_response(
 
 
 def _format_typed_events(events: list[dict[str, Any]]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats events as "event: <type>\ndata: <json>\n\n" frames, concatenated.
     """Anthropic and OpenAI-Responses both use named events (`event: <type>`)."""
     return "".join(
         f"event: {event.get('type', 'unknown')}\ndata: {json.dumps(event, default=str)}\n\n"
@@ -126,11 +153,16 @@ def _format_typed_events(events: list[dict[str, Any]]) -> str:
 
 
 def _format_data_only(chunk: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats one chunk as a "data: <json>\n\n" frame.
     """OpenAI chat-completions and Google use bare `data:` lines."""
     return f"data: {json.dumps(chunk, default=str)}\n\n"
 
 
 def format_events(api_type: APIType, events: list[dict[str, Any]]) -> str:
+    # [FUNCTION DOC]
+    # Formats all events for the dialect: typed frames for Anthropic/Responses, data-only
+    # frames otherwise.
     """Format EVERY event. Dropping any of them truncates the stream.
 
     This used to emit only `events[0]` for the data-only dialects, which is invisible for
@@ -156,6 +188,10 @@ def format_chunk(
     *,
     is_first: bool,
 ) -> str:
+    # [FUNCTION DOC]
+    # Fallback for transformers without stream state: transforms one chunk and formats it
+    # (typed frames for Anthropic, typed frames for Responses with single results wrapped in a
+    # list, data-only otherwise).
     """Fallback for transformers with no stream-state machine: one-shot chunk transform."""
     transformed = transformer.transform_stream_chunk(
         chunk, original_request, is_first=is_first
@@ -173,6 +209,11 @@ def format_chunk(
 
 
 def response_to_chunk(response: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Repackages a complete chat completion as one chat.completion.chunk: delta with role,
+    # content (if not None), reasoning_content (from reasoning_content or reasoning), and
+    # tool_calls re-indexed with index/id/type/function name and arguments; finish_reason
+    # and usage copied from the response.
     """Repackage a complete chat completion as a single `chat.completion.chunk` delta.
 
     One chunk carrying everything, rather than a plausible-looking token-by-token replay. The client
@@ -228,6 +269,10 @@ async def replay(
     response: dict[str, Any],
     original_request: dict[str, Any],
 ):
+    # [FUNCTION DOC]
+    # Async generator yielding the SSE body for one complete response: converts it to a
+    # chunk, then either runs the dialect's stream state (process_chunk with is_first, then
+    # finalize) or the one-shot fallback; appends "data: [DONE]" for chat-completions.
     """Async generator yielding the SSE body for one complete upstream response."""
     chunk = response_to_chunk(response)
     stream_state = transformer.create_stream_state(original_request)

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# OpenEnv environment wrapping a turn-based external agentic harness (RFC 005). reset
+# (re)starts the harness process and injects the environment's conflict-resolved MCP tools
+# via a loopback bridge; each step with a HarnessAction is one conversational turn whose
+# response and events become an observation (optionally scored by a rubric); MCP
+# list/call actions are routed normally. Failures produce terminal error observations and
+# tear the episode down.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Environment wrapper for turn-based external agentic harnesses (RFC 005)."""
@@ -32,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 
 class HarnessAction(Action):
+    # [CLASS DOC]
+    # Action carrying one user message (message field) for a harness turn.
     """
     Action carrying one user message for a conversational harness turn.
 
@@ -44,6 +53,10 @@ class HarnessAction(Action):
 
 
 class HarnessEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment wrapping one AgenticHarnessAdapter (not shared; no concurrent sessions).
+    # Holds the adapter, optional rubric, episode State, event trajectory, active/closed flags
+    # and the current tool bridge. Uses an empty FastMCP server when none is given.
     """
     Environment that wraps an external turn-based agentic harness.
 
@@ -85,6 +98,9 @@ class HarnessEnvironment(MCPEnvironment):
         rubric: Optional[Any] = None,
         transform: Optional[Any] = None,
     ):
+        # [FUNCTION DOC]
+        # Stores adapter/rubric, creates an empty FastMCP server if mcp is None (ModuleNotFoundError
+        # if fastmcp is missing), initializes MCPEnvironment and empty episode state. Starts nothing.
         if mcp is None:
             if FastMCP is None:  # pragma: no cover - fastmcp is a core dependency
                 raise ModuleNotFoundError(
@@ -102,11 +118,15 @@ class HarnessEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Returns the current State.
         """Current episode state."""
         return self._state
 
     @property
     def trajectory(self) -> list[HarnessEvent]:
+        # [FUNCTION DOC]
+        # Returns a copy of the event trajectory for the current episode.
         """Full event trajectory across all turns in the current episode."""
         return list(self._trajectory)
 
@@ -116,6 +136,19 @@ class HarnessEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Starts a fresh episode.
+        # Behavior: marks the episode inactive; stops the adapter; stops any previous bridge
+        # (re-raising on failure); enumerates injectable tools, resolves name conflicts against
+        # the adapter's built-ins; if any tools remain, builds a bridge server serving them under
+        # injected names and starts it in a thread; injects tools and bridge URL into the adapter;
+        # starts the adapter in its configured working directory; resets state (episode_id given
+        # or a new UUID, step_count 0), trajectory and rubric; marks active.
+        # Returns: transformed Observation (done False, reward 0.0, metadata episode_id and
+        # injected_tools names). seed is unused.
+        # Raises: any failure (including cancellation) after cleaning up the episode, except when
+        # the previous bridge failed to stop (cleanup is skipped then).
+        # Side effects: processes, threads, sockets.
         """
         Start a fresh harness process and conversation.
 
@@ -201,6 +234,8 @@ class HarnessEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Sync wrapper: runs reset_async via run_async_safely and returns its observation.
         """Sync facade over `reset_async` for non-async callers."""
         return run_async_safely(
             self.reset_async(seed=seed, episode_id=episode_id, **kwargs)
@@ -212,6 +247,9 @@ class HarnessEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Dispatches an action: ListToolsAction/CallToolAction go to MCPEnvironment.step_async;
+        # HarnessAction runs one turn via _run_turn. Raises TypeError for other action types.
         """
         Execute one action: a conversational turn or an MCP action.
 
@@ -243,6 +281,9 @@ class HarnessEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Sync step for non-MCP actions: runs _run_turn for a HarnessAction via
+        # run_async_safely; raises TypeError otherwise.
         """Sync facade for non-MCP actions; runs one conversational turn."""
         if isinstance(action, HarnessAction):
             return run_async_safely(self._run_turn(action, timeout_s=timeout_s))
@@ -256,6 +297,16 @@ class HarnessEnvironment(MCPEnvironment):
         action: HarnessAction,
         timeout_s: Optional[float] = None,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Runs one conversational turn.
+        # Raises HarnessNotRunningError if no episode is active. If the adapter is not alive,
+        # returns a terminal "harness_crashed" observation. Sends the message with a timeout
+        # (timeout_s or config.session_timeout_s); asyncio timeouts and HarnessTurnTimeoutError
+        # yield terminal "turn_timeout" observations, other HarnessError yields "harness_crashed".
+        # On success: appends events, increments step_count, builds an observation (done from the
+        # harness, reward 0.0 or the rubric's score, metadata response, turn_events, turn_number)
+        # and applies the transform. Any other exception or cancellation cleans up the episode and
+        # re-raises.
         """Send one message to the harness and build the turn's observation."""
         if not self._episode_active:
             raise HarnessNotRunningError(
@@ -319,10 +370,17 @@ class HarnessEnvironment(MCPEnvironment):
     async def _cleanup_episode(
         self, bridge_start: Optional[asyncio.Task[str]] = None
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Marks the episode inactive and runs cleanup in a separate task that waits for a
+        # pending bridge start, stops the adapter (ignoring errors) and stops the bridge. Shields
+        # the task so repeated cancellation still waits for it to finish, then re-raises
+        # CancelledError.
         """Finish teardown even when the caller is cancelled repeatedly."""
         self._episode_active = False
 
         async def cleanup() -> None:
+            # [FUNCTION DOC]
+            # HELPER: The cleanup coroutine described above.
             try:
                 if bridge_start is not None:
                     # Cancelling to_thread does not stop its worker. Startup
@@ -356,6 +414,10 @@ class HarnessEnvironment(MCPEnvironment):
     async def _terminal_error_observation(
         self, message: str, error_type: str
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Cleans up the episode, appends a non-recoverable ERROR event to the trajectory,
+        # and returns a transformed terminal Observation (done True, reward 0.0, metadata error,
+        # error_type, turn_events).
         """Stop the harness and return a terminal observation for a failed turn."""
         await self._cleanup_episode()
         error_event = HarnessEvent(
@@ -375,6 +437,10 @@ class HarnessEnvironment(MCPEnvironment):
         return self._apply_transform(observation)
 
     async def _collect_injectable_tools(self) -> list[Tool]:
+        # [FUNCTION DOC]
+        # HELPER: Lists the environment's MCP tools; raises HarnessError if listing reports an
+        # error; drops mode-specific tools (registered via mode) with a logged warning.
+        # Returns: list of Tool.
         """
         Enumerate the environment's MCP tools for injection into the harness.
 
@@ -403,6 +469,9 @@ class HarnessEnvironment(MCPEnvironment):
         return tools
 
     async def _stop_bridge(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Stops the bridge in a worker thread, ignoring errors. Does not clear the
+        # bridge reference.
         """Best-effort stop of the tool bridge, off the event loop."""
         if self._bridge is None:
             return
@@ -412,6 +481,10 @@ class HarnessEnvironment(MCPEnvironment):
             pass
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the adapter and bridge (errors ignored), clearing the bridge reference only if it
+        # stopped cleanly, marks closed/inactive, then calls MCPEnvironment.close(). Returns
+        # early if already closed with no bridge left.
         """Stop the harness process and release environment resources."""
         if self._closed and self._bridge is None:
             return

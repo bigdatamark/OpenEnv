@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines the ECHO hybrid objective: a REINFORCE/GRPO-style term on action tokens plus a weighted length-normalised
+# cross-entropy on environment observation tokens, computed from one set of logits.
 """The ECHO objective — ``L_ECHO = L_GRPO(action tokens) + λ · L_env(observation tokens)``.
 
 The whole idea in one function: the model already computes logits for the
@@ -31,6 +34,11 @@ def echo_loss(
     world_model_coeff: float = 0.05,  # λ. 0.0 == vanilla GRPO. Keep small (collapse risk).
     use_rl: bool = True,  # False == verifier-free (env-token loss only)
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    # [FUNCTION DOC]
+    # Uses next-token alignment (position t predicts t+1; masks from targets). RL term: negative advantage-weighted sum of
+    # target log-probs on action tokens divided by the action-token count (min 1), or zero when use_rl is false. Env term: mean
+    # negative log-prob over observation tokens (count min 1). Returns: tuple of (RL term + world_model_coeff * env term as a
+    # tensor, dict of floats "loss", "l_grpo", "l_env").
     """Compute the hybrid ECHO loss over a batch of rollouts.
 
     Next-token convention: position ``t`` predicts token ``t+1``; a token's role

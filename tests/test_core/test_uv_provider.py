@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Unit tests for UVProvider without launching uv or using the network: git+ project paths
+# are cloned (with timeout and cleanup) rather than abspath-mangled, the health poll backs
+# off between attempts, and wait_for_ready honours context_timeout_s.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Unit tests for UVProvider readiness handling.
@@ -18,18 +22,25 @@ from openenv.core.containers.runtime.uv_provider import _poll_health, UVProvider
 
 @pytest.fixture()
 def provider():
+    # [FUNCTION DOC]
+    # Fixture: a UVProvider for a local path with context_timeout_s 300, built with the uv
+    # installation check patched out.
     """A UVProvider that skips the real `uv --version` check."""
     with patch.object(uv_provider, "_check_uv_installed"):
         return UVProvider(project_path="/tmp/some-env", context_timeout_s=300.0)
 
 
 class TestGitProjectPath:
+    # [CLASS DOC]
+    # Tests handling of "git+<url>" project paths.
     """`project_path="git+<url>"` (as constructed by ``EnvClient.from_env``)
     must be cloned locally before being handed to ``uv run --project``, which
     only discovers projects in local directories.
     """
 
     def test_git_url_is_not_abspath_mangled(self):
+        # [FUNCTION DOC]
+        # A git+ path is stored unchanged.
         """`os.path.abspath` on a git URL collapses `https://` to `https:/`
         and prefixes cwd -- it must be left untouched until `start()` clones it.
         """
@@ -41,6 +52,9 @@ class TestGitProjectPath:
         assert provider.project_path == "git+https://huggingface.co/spaces/org/env"
 
     def test_start_clones_git_url_and_uses_local_path(self, tmp_path):
+        # [FUNCTION DOC]
+        # start clones via _clone_git_project with context_timeout_s and passes the clone dir,
+        # not the git URL, to the uv command (Popen patched).
         """`start()` must resolve the git spec to a local clone directory and
         pass *that* to `uv run --project`, not the raw `git+...` string.
         """
@@ -67,6 +81,8 @@ class TestGitProjectPath:
         assert "git+https://huggingface.co/spaces/org/env" not in command
 
     def test_clone_uses_timeout(self, tmp_path):
+        # [FUNCTION DOC]
+        # _clone_git_project passes timeout_s to subprocess.run.
         """`_clone_git_project` is passed a `timeout_s` so a hung/slow remote
         can't block `start()` (and the caller's readiness wait) forever.
         """
@@ -80,6 +96,8 @@ class TestGitProjectPath:
         assert mock_run.call_args.kwargs["timeout"] == 42.0
 
     def test_clone_timeout_raises_and_cleans_up(self, tmp_path):
+        # [FUNCTION DOC]
+        # A clone timeout raises "Timed out cloning" and removes the temp dir.
         """A `git clone` that exceeds `timeout_s` raises and removes the
         partial clone directory rather than leaving it on disk.
         """
@@ -100,6 +118,8 @@ class TestGitProjectPath:
         mock_rmtree.assert_called_once_with(str(tmp_path), ignore_errors=True)
 
     def test_stop_cleans_up_clone_dir(self, tmp_path):
+        # [FUNCTION DOC]
+        # stop deletes the clone dir and clears the reference.
         """A temp clone dir from `start()` must not leak after `stop()`."""
         clone_dir = tmp_path / "clone"
         clone_dir.mkdir()
@@ -114,6 +134,8 @@ class TestGitProjectPath:
         assert provider._clone_dir is None
 
     def test_restart_after_process_death_cleans_up_stale_clone_dir(self, tmp_path):
+        # [FUNCTION DOC]
+        # Restarting after the process exited removes the stale clone dir and keeps the new one.
         """If the spawned process died on its own (poll() is not None), the
         "already running" guard doesn't block a second `start()` call. That
         second call must not silently leak the first clone directory when it
@@ -141,6 +163,8 @@ class TestGitProjectPath:
         assert provider._clone_dir == str(new_clone_dir)
 
     def test_popen_failure_after_clone_cleans_up_clone_dir(self, tmp_path):
+        # [FUNCTION DOC]
+        # If launching uv fails after cloning, raises "Failed to launch" and removes the clone.
         """If `uv run` itself fails to launch right after a successful clone,
         the just-created clone directory must not leak.
         """
@@ -162,6 +186,8 @@ class TestGitProjectPath:
         assert provider._clone_dir is None
 
     def test_local_path_is_still_abspath_resolved(self):
+        # [FUNCTION DOC]
+        # Local paths are converted to absolute paths.
         """Plain local paths keep the existing `os.path.abspath` behavior."""
         with patch.object(uv_provider, "_check_uv_installed"):
             provider = UVProvider(project_path="relative/env")
@@ -170,9 +196,13 @@ class TestGitProjectPath:
 
 
 class TestPollHealth:
+    # [CLASS DOC]
+    # Tests _poll_health.
     """`_poll_health` must back off between attempts, not busy-spin."""
 
     def test_sleeps_between_refused_connections(self):
+        # [FUNCTION DOC]
+        # On repeated connection errors it sleeps between attempts and finally raises TimeoutError.
         """A refused connection returns instantly; without a pause between
         attempts the loop would peg a CPU core for the whole timeout window.
         The loop must therefore sleep on the connection-error path too.
@@ -189,6 +219,8 @@ class TestPollHealth:
         )
 
     def test_returns_when_healthy(self):
+        # [FUNCTION DOC]
+        # Returns once /health answers 200.
         """Returns as soon as /health responds 200."""
         ok = MagicMock(status_code=200)
         with (
@@ -201,9 +233,13 @@ class TestPollHealth:
 
 
 class TestWaitForReadyTimeout:
+    # [CLASS DOC]
+    # Tests the wait_for_ready timeout default.
     """`wait_for_ready()` must honor the configured `context_timeout_s`."""
 
     def test_defaults_to_context_timeout(self, provider):
+        # [FUNCTION DOC]
+        # Without a timeout, polls with context_timeout_s (300).
         """Called with no argument (as EnvClient does), the readiness wait uses
         the provider's `context_timeout_s` rather than a hardcoded default.
         """
@@ -217,6 +253,8 @@ class TestWaitForReadyTimeout:
         assert mock_poll.call_args.kwargs["timeout_s"] == 300.0
 
     def test_explicit_timeout_overrides(self, provider):
+        # [FUNCTION DOC]
+        # An explicit timeout_s wins.
         """An explicit timeout_s still wins over context_timeout_s."""
         provider._base_url = "http://localhost:8000"
         provider._process = None

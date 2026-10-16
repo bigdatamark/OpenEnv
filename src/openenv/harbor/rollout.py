@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Runs one Harbor trial through the capture proxy and turns it into a HarborRolloutResult:
+# mints a capture session (its id is the agent's API key), builds Harbor's TrialConfig
+# from the harness seam, runs the trial (handling harnesses that need process env vars via
+# a context-local os.environ overlay or a process-wide lock), forwards verifier rewards,
+# exports and validates the capture, reconciles it against ATIF, masks auxiliary calls,
+# and always deletes the session. Failures become ok=False results.
 """Run one Harbor trial through the capture proxy and return trainable output.
 
 This is where every piece meets: a task from the dataset, a harness from the seam table, a sandbox
@@ -76,6 +83,10 @@ _PROC_ENV_LOCK = threading.Lock()
 
 
 async def _acquire_proc_env() -> None:
+    # [FUNCTION DOC]
+    # HELPER: async acquisition of the process-env threading lock in a worker thread. If the
+    # waiting coroutine is cancelled, arranges for the lock to be released as soon as the
+    # abandoned acquire completes, then re-raises CancelledError.
     """Take `_PROC_ENV_LOCK` without leaking it if the caller is cancelled.
 
     `asyncio.to_thread` is not cancellable: cancelling the await abandons the future, but the worker
@@ -96,6 +107,10 @@ async def _acquire_proc_env() -> None:
 
 @contextlib.contextmanager
 def process_env(seam_name: str, env: dict[str, str]):
+    # [FUNCTION DOC]
+    # Context manager that sets the given process env vars (printing a warning when it
+    # overwrites an existing different OPENAI_API_KEY used by graders) and restores the
+    # previous values (or removes them) on exit. Side effects: mutates os.environ; not thread-safe alone.
     """Set the seam's process-level env vars for the duration of the block, then put them back.
 
     Restoring matters because this is global state. Without it the last rollout's session id stays
@@ -129,6 +144,9 @@ def process_env(seam_name: str, env: dict[str, str]):
 
 
 def _finite_reward(key: str, value: Any) -> float:
+    # [FUNCTION DOC]
+    # HELPER: converts value to float; raises TypeError/ValueError if not convertible, and
+    # ValueError (naming key) if NaN or infinite. Returns the float.
     """A verifier's value as a real float, or raise.
 
     Args:
@@ -153,6 +171,11 @@ def _finite_reward(key: str, value: Any) -> float:
 def _pick_reward(
     rewards: dict[str, float], reward_key: str = ""
 ) -> tuple[float | None, str]:
+    # [FUNCTION DOC]
+    # HELPER: selects the headline reward from the verifier dict. Empty -> (None, "").
+    # With reward_key: tries the literal key, then each comma-separated key in order; returns
+    # (value, key) for the first present, else raises ValueError. Without it: a single key is
+    # used; otherwise the "reward" key; otherwise raises ValueError (ambiguous).
     """Collapse Harbor's reward dict to the one scalar an RL trainer consumes.
 
     Refuses rather than guesses. Harbor lets a task emit any keys it likes, and inventing a rule to
@@ -210,6 +233,15 @@ def build_trial_config(
     training: bool = False,
     harness_profile: str | None = None,
 ) -> Any:
+    # [FUNCTION DOC]
+    # Builds a Harbor TrialConfig: resolves the seam (with optional profile) into model name,
+    # kwargs, agent-phase env (process env ignored here); applies an exact version pin from
+    # OPENENV_HARBOR_AGENT_VERSIONS (JSON mapping harness -> numeric version; ValueError if
+    # malformed); AgentConfig named by the seam's import path or harness, with timeout
+    # override; environment of the sandbox type (using the streaming E2B class when sandbox is
+    # e2b and OPENENV_E2B_STREAM_UPLOADS=1), deleted unless keep_sandbox, force_build flag;
+    # default verifier; trial name and trials dir. Harbor is imported lazily.
+    # Raises KeyError/ValueError from seam lookup, JSON errors from the env var.
     """Assemble Harbor's `TrialConfig` for one rollout.
 
     The seam decides how this particular agent learns about the proxy — an env var, a constructor
@@ -303,6 +335,27 @@ async def run_rollout(
     harness_profile: str | None = None,
     on_session_created: Callable[[str], None] | None = None,
 ) -> HarborRolloutResult:
+    # [FUNCTION DOC]
+    # Async, runs one rollout. Determines rollout type from purpose and capture level (and
+    # rejects a sampling override with purpose eval) -> failed eval result on ValueError.
+    # Creates a capture session (ValueError -> failed result) with upstream, level, model-call
+    # cap, sampling/purpose and metadata; uses the session's capture level. Calls
+    # on_session_created, enables shared E2B templates, then builds and runs the Harbor trial:
+    # directly if the seam has no process env, otherwise inside a context-local env overlay
+    # or, when that is disabled, under the global lock with process_env. Any Exception there
+    # marks the result failed (error truncated to 600). Records wall time. Rewards: drops
+    # non-finite/non-numeric keys with a WARN finding, picks the headline (ambiguity fails
+    # the rollout if require_reward, else WARN), collects per-step rewards (bad step dicts
+    # emptied), and records Harbor exception_info as failure. Capture: exports the session
+    # document, records turn/root/budget-stop counts, non-INFO document and per-sequence
+    # findings, loads the trace from the trial dir and reconciles (atif none/match/MISMATCH,
+    # trace source, non-INFO findings), demotes fully auxiliary agent sequences and masks
+    # auxiliary nodes in mixed ones, builds deduplicated turns, trainable token count and
+    # conversations; fails the result on a failed reconcile, any FATAL finding, or (for train)
+    # no trainable sequence; export errors fail the result. Records upstream param fixes and
+    # an "ungraded" WARN when no reward exists. Always deletes the session. Returns the result.
+    # KNOWN ISSUE: documented as never raising, but non-ValueError errors from
+    # registry.create, errors from registry.delete, and BaseExceptions propagate.
     """Run one rollout end to end. Never raises.
 
     Args:
@@ -742,6 +795,10 @@ async def run_rollout(
 def _mask_out_nodes(
     document: dict[str, Any], sequence: dict[str, Any], node_ids: set[str]
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: in place, zeroes the sequence's loss mask over each given node's sampled span
+    # [n_prompt, n_prompt + n_sampled) (clipped to mask length), then recomputes the
+    # sequence's n_trainable and trainable flag. No-op if the sequence has no mask.
     """Zero the loss mask over the given nodes' sampled spans, in place.
 
     Their tokens stay in `input_ids` as context — the model did condition on them — but stop being
@@ -781,6 +838,9 @@ def _mask_out_nodes(
 def _trial_dir(
     trial_result: Any, trials_dir: Path | str, trial_name: str
 ) -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the trial directory from the result's trial_uri (file URI decoded), else
+    # trials_dir/trial_name if it exists, else None.
     """Where Harbor wrote this trial's artifacts, including its trajectory."""
     uri = getattr(trial_result, "trial_uri", None) if trial_result is not None else None
     if uri:

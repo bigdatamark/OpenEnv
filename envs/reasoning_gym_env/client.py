@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket client for the Reasoning Gym environment (single question, single answer episodes).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -16,6 +18,9 @@ from .models import ReasoningGymAction, ReasoningGymObservation
 
 
 class ReasoningGymEnv(EnvClient[ReasoningGymAction, ReasoningGymObservation, State]):
+    # [CLASS DOC]
+    # EnvClient subclass implementing payload/parsing hooks; reset kwargs (dataset_name, dataset_config,
+    # seed, size) are forwarded to the server by the base class.
     """
     Client for the Reasoning Gym Environment.
 
@@ -63,6 +68,8 @@ class ReasoningGymEnv(EnvClient[ReasoningGymAction, ReasoningGymObservation, Sta
     """
 
     def _step_payload(self, action: ReasoningGymAction) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Returns a mapping with the single key "answer".
         """
         Convert ReasoningGymAction to JSON payload for step message.
 
@@ -77,6 +84,10 @@ class ReasoningGymEnv(EnvClient[ReasoningGymAction, ReasoningGymObservation, Sta
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[ReasoningGymObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult with a ReasoningGymObservation from the nested observation (question,
+        # score, correct_answer, dataset_metadata) and top-level done (default False), reward and metadata
+        # (top level preferred).
         """
         Parse server response into StepResult[ReasoningGymObservation].
 
@@ -105,6 +116,8 @@ class ReasoningGymEnv(EnvClient[ReasoningGymAction, ReasoningGymObservation, Sta
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # HELPER: Builds a generic State with episode_id and step_count (default 0).
         """
         Parse server response into State object.
 

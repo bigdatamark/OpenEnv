@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for reasoning_gym_env: ReasoningGymEnvironment dataset creation/reuse on reset (simple,
+# configured, composite, defaults, validation errors), single-step scoring, iterator wrap-around,
+# state/episode ids, models, and the client's payload/result/state parsing. Skipped without
+# reasoning_gym.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the Reasoning Gym Environment."""
@@ -11,9 +16,13 @@ from reasoning_gym_env.server.reasoning_gym_environment import ReasoningGymEnvir
 
 
 class TestReasoningGymEnvironment:
+    # [CLASS DOC]
+    # Environment behaviour tests.
     """Tests for the ReasoningGymEnvironment class."""
 
     def test_reset_with_simple_dataset(self):
+        # [FUNCTION DOC]
+        # Reset with leg_counting returns a non-done question observation with no score/answer and reward 0.
         """Test reset with a simple dataset configuration."""
         env = ReasoningGymEnvironment()
         obs = env.reset(
@@ -32,6 +41,8 @@ class TestReasoningGymEnvironment:
         assert obs.reward == 0.0
 
     def test_reset_with_dataset_config(self):
+        # [FUNCTION DOC]
+        # Reset with a dataset config returns a question.
         """Test reset with dataset config parameters."""
         env = ReasoningGymEnvironment()
         obs = env.reset(
@@ -45,6 +56,8 @@ class TestReasoningGymEnvironment:
         assert obs.question is not None
 
     def test_reset_with_composite_dataset(self):
+        # [FUNCTION DOC]
+        # A composite dataset with specs returns a question.
         """Test reset with a composite dataset."""
         env = ReasoningGymEnvironment()
         obs = env.reset(
@@ -61,6 +74,8 @@ class TestReasoningGymEnvironment:
         assert obs.question is not None
 
     def test_reset_reuses_dataset(self):
+        # [FUNCTION DOC]
+        # A parameterless reset advances to the next question of the same dataset.
         """Test that reset without parameters reuses existing dataset."""
         env = ReasoningGymEnvironment()
 
@@ -81,6 +96,8 @@ class TestReasoningGymEnvironment:
         assert obs2.question is not None
 
     def test_reset_without_params_creates_default_dataset(self):
+        # [FUNCTION DOC]
+        # First parameterless reset builds leg_counting with seed 42 and size 1000.
         """Test that reset without parameters creates default dataset."""
         env = ReasoningGymEnvironment()
 
@@ -94,6 +111,8 @@ class TestReasoningGymEnvironment:
         assert env._dataset_size == 1000
 
     def test_reset_default_can_be_overridden(self):
+        # [FUNCTION DOC]
+        # Explicit params replace the default dataset settings.
         """Test that default dataset can be overridden."""
         env = ReasoningGymEnvironment()
 
@@ -112,6 +131,8 @@ class TestReasoningGymEnvironment:
         assert env._dataset_size == 5
 
     def test_reset_missing_seed_raises_error(self):
+        # [FUNCTION DOC]
+        # Missing seed raises ValueError.
         """Test that reset without seed raises ValueError."""
         env = ReasoningGymEnvironment()
 
@@ -119,6 +140,8 @@ class TestReasoningGymEnvironment:
             env.reset(dataset_name="leg_counting", size=10)
 
     def test_reset_missing_size_raises_error(self):
+        # [FUNCTION DOC]
+        # Missing size raises ValueError.
         """Test that reset without size raises ValueError."""
         env = ReasoningGymEnvironment()
 
@@ -126,6 +149,8 @@ class TestReasoningGymEnvironment:
             env.reset(dataset_name="leg_counting", seed=42)
 
     def test_reset_composite_missing_specs_raises_error(self):
+        # [FUNCTION DOC]
+        # Composite without specs raises ValueError.
         """Test that composite dataset without specs raises ValueError."""
         env = ReasoningGymEnvironment()
 
@@ -133,6 +158,8 @@ class TestReasoningGymEnvironment:
             env.reset(dataset_name="composite", seed=42, size=10)
 
     def test_reset_composite_empty_specs_raises_error(self):
+        # [FUNCTION DOC]
+        # Composite with empty specs raises ValueError.
         """Test that composite dataset with empty specs raises ValueError."""
         env = ReasoningGymEnvironment()
 
@@ -140,6 +167,9 @@ class TestReasoningGymEnvironment:
             env.reset(dataset_name="composite", dataset_specs=[], seed=42, size=10)
 
     def test_step_scores_answer(self):
+        # [FUNCTION DOC]
+        # step returns a done observation with score in [0, 1], the correct answer, no question and
+        # reward equal to score.
         """Test step with an answer and check scoring."""
         env = ReasoningGymEnvironment()
         env.reset(
@@ -161,6 +191,8 @@ class TestReasoningGymEnvironment:
         assert obs.reward == obs.score
 
     def test_step_increments_state(self):
+        # [FUNCTION DOC]
+        # step increments step_count.
         """Test that step increments step count."""
         env = ReasoningGymEnvironment()
         env.reset(
@@ -177,6 +209,8 @@ class TestReasoningGymEnvironment:
         assert env.state.step_count == 1
 
     def test_step_without_current_entry(self):
+        # [FUNCTION DOC]
+        # With no current entry, step returns done with no score/answer and reward 0.
         """Test step when no current entry is set."""
         env = ReasoningGymEnvironment()
         env.reset(
@@ -197,6 +231,8 @@ class TestReasoningGymEnvironment:
         assert obs.reward == 0.0
 
     def test_dataset_iterator_wraps_around(self):
+        # [FUNCTION DOC]
+        # With a 2-item dataset, questions repeat after wrapping.
         """Test that dataset iterator restarts when exhausted."""
         env = ReasoningGymEnvironment()
 
@@ -218,6 +254,8 @@ class TestReasoningGymEnvironment:
         assert questions[0] == questions[2]
 
     def test_state_property(self):
+        # [FUNCTION DOC]
+        # A provided episode_id is kept in state with step_count 0.
         """Test state property returns current state."""
         env = ReasoningGymEnvironment()
 
@@ -235,6 +273,8 @@ class TestReasoningGymEnvironment:
         assert obs is not None
 
     def test_episode_id_generation(self):
+        # [FUNCTION DOC]
+        # An episode id is generated when not given.
         """Test that episode_id is auto-generated when not provided."""
         env = ReasoningGymEnvironment()
 
@@ -251,6 +291,8 @@ class TestReasoningGymEnvironment:
         assert obs is not None
 
     def test_dataset_metadata_in_observation(self):
+        # [FUNCTION DOC]
+        # dataset_metadata is None or a dict.
         """Test that dataset metadata is included in observation."""
         env = ReasoningGymEnvironment()
         env.reset(
@@ -266,14 +308,20 @@ class TestReasoningGymEnvironment:
         assert obs.dataset_metadata is None or isinstance(obs.dataset_metadata, dict)
 
     def test_supports_concurrent_sessions(self):
+        # [FUNCTION DOC]
+        # SUPPORTS_CONCURRENT_SESSIONS is True.
         """Test that environment declares concurrent session support."""
         assert ReasoningGymEnvironment.SUPPORTS_CONCURRENT_SESSIONS is True
 
 
 class TestReasoningGymModels:
+    # [CLASS DOC]
+    # Model defaults and fields.
     """Tests for the data models."""
 
     def test_reasoning_gym_action(self):
+        # [FUNCTION DOC]
+        # The action stores a string answer.
         """Test ReasoningGymAction model."""
         action = ReasoningGymAction(answer="42")
 
@@ -281,6 +329,8 @@ class TestReasoningGymModels:
         assert isinstance(action.answer, str)
 
     def test_reasoning_gym_observation_defaults(self):
+        # [FUNCTION DOC]
+        # Optional observation fields default to None.
         """Test ReasoningGymObservation default values."""
         obs = ReasoningGymObservation(
             done=False,
@@ -295,6 +345,8 @@ class TestReasoningGymModels:
         assert obs.reward == 0.0
 
     def test_reasoning_gym_observation_full(self):
+        # [FUNCTION DOC]
+        # All observation fields round-trip.
         """Test ReasoningGymObservation with all fields."""
         obs = ReasoningGymObservation(
             question="What is 2+2?",
@@ -314,9 +366,13 @@ class TestReasoningGymModels:
 
 
 class TestReasoningGymEnvClient:
+    # [CLASS DOC]
+    # Client parsing helpers (no server contacted).
     """Tests for the ReasoningGymEnv client."""
 
     def test_step_payload_conversion(self):
+        # [FUNCTION DOC]
+        # _step_payload returns a dict with the answer.
         """Test _step_payload converts action to dict."""
         from reasoning_gym_env import ReasoningGymEnv
 
@@ -329,6 +385,8 @@ class TestReasoningGymEnvClient:
         assert payload["answer"] == "test answer"
 
     def test_parse_result(self):
+        # [FUNCTION DOC]
+        # _parse_result builds a StepResult with a typed observation, reward and done.
         """Test _parse_result parses server response."""
         from openenv.core.client_types import StepResult
         from reasoning_gym_env import ReasoningGymEnv
@@ -359,6 +417,8 @@ class TestReasoningGymEnvClient:
         assert result.done is True
 
     def test_parse_state(self):
+        # [FUNCTION DOC]
+        # _parse_state builds a State.
         """Test _parse_state parses state response."""
         from openenv.core.env_server.types import State
         from reasoning_gym_env import ReasoningGymEnv
@@ -378,9 +438,13 @@ class TestReasoningGymEnvClient:
 
 
 class TestReasoningGymIntegration:
+    # [CLASS DOC]
+    # In-process multi-call workflows.
     """Integration tests for complete workflows."""
 
     def test_complete_episode_workflow(self):
+        # [FUNCTION DOC]
+        # Reset then step yields a scored done observation with step_count 1 and stable episode id.
         """Test a complete episode from reset to step."""
         env = ReasoningGymEnvironment()
 
@@ -408,6 +472,8 @@ class TestReasoningGymIntegration:
         assert env.state.episode_id == episode_id
 
     def test_multiple_episodes_with_dataset_reuse(self):
+        # [FUNCTION DOC]
+        # A second reset reuses the dataset with a new question and step_count 0.
         """Test multiple episodes reusing the same dataset."""
         env = ReasoningGymEnvironment()
 
@@ -431,6 +497,8 @@ class TestReasoningGymIntegration:
         assert env.state.step_count == 0  # Reset for new episode
 
     def test_dataset_recreation_with_new_params(self):
+        # [FUNCTION DOC]
+        # New params recreate the dataset and reset step_count.
         """Test that providing new params recreates dataset."""
         env = ReasoningGymEnvironment()
 

@@ -1072,8 +1072,6 @@ def create_app(
         # anthropic-beta/version headers; increment model_calls. Then complete_response runs
         # (wrapped in SSE keepalive when streaming).
         # Returns: JSONResponse or StreamingResponse.
-        # KNOWN ISSUE: for the native Anthropic path, a session whose eval_sampling attribute
-        # exists but is None would make the dict unpacking raise TypeError.
         """Catch-all: /v1/chat/completions, /v1/messages, /v1/responses, :generateContent."""
         headers = dict(request.headers)
         try:

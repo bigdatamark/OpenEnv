@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for the REPL environment; re-exports REPLEnvironment and PythonExecutor.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

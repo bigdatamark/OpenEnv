@@ -1,13 +1,20 @@
+# [MODULE DOC]
+# kernrl problem (level 1): 2D max pooling (kernel 2, stride 2, padding 1,
+# dilation 3) over a (16, 32, 128, 128) tensor.
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model wrapping nn.MaxPool2d with the given window parameters.
     """
     Simple model that performs Max Pooling 2D.
     """
 
     def __init__(self, kernel_size: int, stride: int, padding: int, dilation: int):
+        # [FUNCTION DOC]
+        # Creates the MaxPool2d submodule from kernel_size, stride, padding, dilation.
         """
         Initializes the Max Pooling 2D layer.
 
@@ -23,6 +30,8 @@ class Model(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns max-pooled x of shape (batch, channels, pooled_h, pooled_w).
         """
         Applies Max Pooling 2D to the input tensor.
 
@@ -46,9 +55,13 @@ dilation = 3
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, channels, height, width).
     x = torch.randn(batch_size, channels, height, width)
     return [x]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [kernel_size, stride, padding, dilation].
     return [kernel_size, stride, padding, dilation]

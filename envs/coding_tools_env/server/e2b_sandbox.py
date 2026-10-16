@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# E2B sandbox wrapper. Each helper runs a small generated Python script in the remote sandbox that prints
+# one JSON line, then decodes it into a ToolResult. The e2b_code_interpreter import is optional until use.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,6 +26,8 @@ except ImportError as _e2b_import_error:  # pragma: no cover
 
 @dataclass
 class ToolResult:
+    # [CLASS DOC]
+    # Dataclass result of a sandbox operation: ok flag, output text, optional error and metadata.
     ok: bool
     output: str = ""
     error: str | None = None
@@ -30,9 +35,14 @@ class ToolResult:
 
 
 class E2BSandbox:
+    # [CLASS DOC]
+    # One remote E2B sandbox per episode, with shell and file helpers.
     """One E2B sandbox per OpenEnv episode."""
 
     def __init__(self, api_key: str):
+        # [FUNCTION DOC]
+        # Creates a sandbox with the API key, records its id and creates /home/user/work.
+        # Raises: ImportError if e2b_code_interpreter is not installed. Side effects: network, remote resource creation.
         if Sandbox is None:
             raise ImportError(
                 "e2b-code-interpreter is not installed. Install coding_tools_env "
@@ -43,6 +53,10 @@ class E2BSandbox:
         self.run_shell("mkdir -p /home/user/work")
 
     def run_shell(self, command: str, timeout_s: float = 30) -> ToolResult:
+        # [FUNCTION DOC]
+        # Runs a shell command remotely via subprocess with a timeout (default 30 s). Returns ok when exit code is
+        # 0, output = stripped stdout and stderr joined, error "exit_code=N" otherwise, metadata exit_code.
+        # Returns an error result if no JSON line comes back (e.g. timeout or interpreter error).
         code = (
             "import subprocess, json\n"
             f"_r = subprocess.run({command!r}, shell=True, capture_output=True, text=True, timeout={float(timeout_s)!r})\n"
@@ -67,6 +81,9 @@ class E2BSandbox:
     def read_file(
         self, file_path: str, offset: int | None = None, limit: int | None = None
     ) -> ToolResult:
+        # [FUNCTION DOC]
+        # Reads a UTF-8 file remotely, optionally slicing characters from offset and to limit length. Returns the
+        # content, or an error result ("file not found" or execution error).
         code = (
             "from pathlib import Path\n"
             "import json\n"
@@ -92,6 +109,8 @@ class E2BSandbox:
         return ToolResult(ok=True, output=str(result.get("content", "")))
 
     def write_file(self, file_path: str, content: str) -> ToolResult:
+        # [FUNCTION DOC]
+        # Writes content (UTF-8) to the path via the sandbox files API. Returns ok with byte count, or an error result.
         try:
             self._sbx.files.write(file_path, content.encode("utf-8"))
             return ToolResult(ok=True, output="write ok", metadata={"bytes": len(content.encode("utf-8"))})
@@ -99,6 +118,8 @@ class E2BSandbox:
             return ToolResult(ok=False, error=f"write failed: {exc}")
 
     def glob_files(self, pattern: str, path: str | None = None) -> ToolResult:
+        # [FUNCTION DOC]
+        # Returns sorted paths matching the glob pattern under path (default "."), newline-joined, with a matches list in metadata.
         code = (
             "from pathlib import Path\n"
             "import json\n"
@@ -114,6 +135,9 @@ class E2BSandbox:
         return ToolResult(ok=True, output="\n".join(matches), metadata={"matches": matches})
 
     def list_dir(self, path: str = ".", ignore: list[str] | None = None) -> ToolResult:
+        # [FUNCTION DOC]
+        # Lists a directory (sorted, skipping names in ignore) as "[dir] name" / "[file] name" lines with an items
+        # metadata list; error result if the path does not exist.
         ignore = ignore or []
         code = (
             "from pathlib import Path\n"
@@ -141,6 +165,9 @@ class E2BSandbox:
         return ToolResult(ok=True, output="\n".join(lines), metadata={"items": items})
 
     def grep(self, pattern: str, path: str | None = None, include: str | None = None) -> ToolResult:
+        # [FUNCTION DOC]
+        # Searches readable UTF-8 files recursively under path for a regex, optionally filtering file names by an
+        # fnmatch include pattern. Returns "path:line:text" matches; error result if the path does not exist.
         root = path or "."
         code = (
             "from pathlib import Path\n"
@@ -176,6 +203,8 @@ class E2BSandbox:
         return ToolResult(ok=True, output="\n".join(matches), metadata={"matches": matches})
 
     def kill(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the sandbox, falling back to close; all errors are ignored.
         try:
             self._sbx.kill()
         except Exception:
@@ -186,6 +215,8 @@ class E2BSandbox:
 
 
 def _decode_json_line(lines: list[str] | None) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns the last stdout line that parses as a JSON object, or None.
     if not lines:
         return None
     for raw in reversed(lines):
@@ -202,6 +233,8 @@ def _decode_json_line(lines: list[str] | None) -> dict[str, Any] | None:
 
 
 def _format_error(execution: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "Name: value" from the execution error, else joined stderr, else "sandbox execution failed".
     if execution.error:
         return f"{execution.error.name}: {execution.error.value}"
     stderr = "\n".join(execution.logs.stderr or [])

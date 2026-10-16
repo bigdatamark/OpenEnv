@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Per-harness wiring table ("seams") describing how each Harbor agent is pointed at the
+# capture proxy: model name format, env vars for the sandbox agent phase and for this
+# process, extra AgentConfig kwargs (provider config blocks), optional import path of a
+# fixing subclass, training-only kwargs, a native step-limit mapping, trust status and
+# notes. The API key handed to every agent is the capture session id. Also exports the
+# list of ATIF-emitting agents, a bring-up priority list, and profile-specific variants.
+# Pure data plus small builders; importing it does not require Harbor.
 """How each Harbor harness is pointed at the intercept server.
 
 This is the ONLY per-agent knowledge in the stack, and it is deliberately data. For every Harbor
@@ -54,6 +62,11 @@ PI_PROVIDER = "intercept"
 
 
 def agent_facing_model(served_model: str) -> str:
+    # [FUNCTION DOC]
+    # Derives the model name given to a harness from the served model id: takes the part
+    # after the last slash (trailing slashes stripped). If that leaf is 64+ chars or contains
+    # characters outside [A-Za-z0-9._-], returns the sanitized first 54 chars plus "-" and an
+    # 8-hex sha256 prefix of the leaf. Raises ValueError for an empty/blank name or empty leaf.
     """The model name to hand a harness, derived from what the engine actually serves.
 
     THE PROBLEM. A vLLM started without `--served-model-name` serves under its full repo id, e.g.
@@ -101,6 +114,9 @@ def agent_facing_model(served_model: str) -> str:
 
 
 def _pi(base_url: str, session: str, model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns AgentConfig kwargs for InterceptPi: intercept_config with base_url,
+    # api_key (= session) and model.
     """pi's provider config, carried to our `InterceptPi` subclass via AgentConfig.kwargs."""
     return {
         "intercept_config": {"base_url": base_url, "api_key": session, "model": model}
@@ -112,6 +128,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Seam:
+    # [CLASS DOC]
+    # Frozen dataclass describing one harness's wiring (see module doc). status values:
+    # validated, unstable:<why>, unsupported:<why>, blocked:<why>, untested.
     """One harness's wiring. Three channels, in order of preference.
 
     `agent_env` is the RIGHT one and should be the default choice. It becomes `AgentConfig.env`,
@@ -165,6 +184,13 @@ class Seam:
         step_limit: int | None = None,
         training: bool = False,
     ) -> tuple[str, dict[str, Any], dict[str, str], dict[str, str]]:
+        # [FUNCTION DOC]
+        # Normalizes model via agent_facing_model, formats agent_env and env templates with
+        # {base_url}, {session}, {model}, builds kwargs from the seam's builder (if any), deep-merges
+        # training_kwargs when training, and deep-merges the native step-limit settings when a
+        # step_limit is requested (logging a warning if the seam cannot express one).
+        # Returns (formatted model name, AgentConfig kwargs, agent-phase env, process env).
+        # Raises ValueError from agent_facing_model; KeyError if a template uses an unknown field.
         """-> (model_name, AgentConfig.kwargs, AgentConfig.env, os.environ vars).
 
         `model` is normalised through `agent_facing_model` first, so a served id like
@@ -194,6 +220,9 @@ class Seam:
 
 
 def _deep_merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns a new dict with extra merged into base, recursing where both values are
+    # dicts and otherwise overwriting. Inputs are not mutated (nested dicts copied on merge).
     """Merge nested config without clobbering a sibling key.
 
     A shallow update of `{"config": {...}}` would replace a seam's whole config block with the step
@@ -209,12 +238,18 @@ def _deep_merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mini_swe_agent_step_limit(limit: int) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns {"config": {"agent": {"step_limit": limit}}} for mini-swe-agent.
     """mini-swe-agent takes a YAML config; Harbor's wrapper accepts it as a `config` mapping and dumps
     it (`harbor/agents/installed/mini_swe_agent.py`). `agent.step_limit` is the key it reads."""
     return {"config": {"agent": {"step_limit": limit}}}
 
 
 def _grok_build(base_url: str, session: str, model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns grok_config kwargs routing all of grok's model roles (default, session
+    # summary, image description, web search) to model, defining that model with base URL
+    # <base_url>/v1, OPENAI_API_KEY as key env and chat-completions backend.
     """Use Harbor's supported config merge, including all auxiliary model routes."""
     return {
         "grok_config": {
@@ -241,6 +276,10 @@ def _grok_build(base_url: str, session: str, model: str) -> dict[str, Any]:
 
 
 def _opencode(base_url: str, session: str, model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns opencode_config with a provider block named "intercepted" using the
+    # openai-compatible npm package, baseURL <base_url>/v1, apiKey = session, 600s timeout,
+    # and the single model.
     """opencode needs a full provider block; Harbor exposes exactly the right seam for it.
 
     Harbor writes `provider.<prefix>.options.baseURL` and nothing else (opencode.py:440-447), leaving
@@ -270,6 +309,11 @@ def _opencode(base_url: str, session: str, model: str) -> dict[str, Any]:
 
 
 def acp_opencode_config(base_url: str, session: str, model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns ACP agent kwargs for the pinned OpenCode 1.18.30 ACP profile: auth disabled and
+    # a registry entry launching "opencode-ai@1.18.30 acp" via npx with
+    # OPENCODE_CONFIG_CONTENT set to the opencode provider config extended with model and
+    # small_model "intercepted/<model>", permission allow and autoupdate off.
     """Explicit ACP qualification profile using OpenCode's native ACP command.
 
     Qualifies Harbor's ACP transport with this pinned implementation only;
@@ -303,6 +347,10 @@ def acp_opencode_config(base_url: str, session: str, model: str) -> dict[str, An
 
 
 def _terminus(base_url: str, session: str, model: str) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns kwargs for host-side terminus-2: api_base <base_url>/v1, llm_kwargs with
+    # the session as api_key, zero-cost model_info (65536 in / 8192 out tokens), native
+    # rollout detail collection on, and summarization disabled.
     """Terminus runs host-side, in OUR process, so there is no sandbox-side CLI to configure.
 
     It drives a TmuxSession over environment.exec and calls litellm directly: `api_base` is a
@@ -931,6 +979,13 @@ PRIORITY = [
 
 
 def get(name: str, *, profile: str | None = None) -> Seam:
+    # [FUNCTION DOC]
+    # Returns the seam for name; with a profile returns a modified copy: acp +
+    # "opencode-1.18.30" uses the ACP OpenCode config and intercepted/ model format;
+    # nemo-agent + "shell-1.9.0" uses the NemoShellProfile class with llm_type openai, version
+    # 1.9.0 and the examples/harbor/nemo_shell_profile workflow package from this checkout.
+    # Raises KeyError for an unknown harness, ValueError for an unknown profile or when the
+    # NeMo example package is not present.
     if name not in SEAMS:
         raise KeyError(f"no seam for {name!r}. Known: {sorted(SEAMS)}")
     if profile is None:

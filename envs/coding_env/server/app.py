@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI app for the coding environment using PythonCodeActEnv as the session factory. Imports use
+# absolute coding_env package paths.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -34,6 +37,10 @@ app = create_app(PythonCodeActEnv, CodeAction, CodeObservation, env_name="coding
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs uvicorn on the port from SBX_SERVICE_PORT (default 8000). If SBX_PROXY_DIR is set, serves on a
+    # Unix socket "<port>.sock" in that directory (creating it and removing a stale socket); otherwise on
+    # 0.0.0.0. Blocking.
     """Main entry point for running the server."""
     import uvicorn
 

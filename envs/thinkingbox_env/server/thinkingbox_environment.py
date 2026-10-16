@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Trusted server-side ThinkingBox environment. One instance runs one benchmark episode at a time: resolves
+# and validates the pinned data bundle, hydrates the task by UID, opens a Session Proxy session for tool
+# execution, records the native conversation driven by OpenEnv actions (tool calls, parallel batches,
+# assistant messages, terminal turns), runs the simulated user between assistant messages, and on finish
+# evaluates with the native TestScript/Judge to a binary reward. Private context (user context, tool
+# side effects, settings) never leaves the server; only public observations and provenance metadata do.
+# Infrastructure failures are "latched" (first stage recorded) and produce a system_error terminal result
+# with reward 0. Defines a set of reserved control tool names that scenarios/agents may not use.
 """Orchestrate one isolated ThinkingBox benchmark episode through OpenEnv.
 
 The environment keeps hydration, simulated-user context, tool side effects,
@@ -75,6 +84,9 @@ logger = logging.getLogger(__name__)
 def _redacted_exc_info(
     exc: Exception,
 ) -> tuple[type[RuntimeError], RuntimeError, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns an exc_info triple whose exception is a RuntimeError carrying only the original type
+    # name (message redacted) and the original traceback, for safe logging.
     redacted = RuntimeError(f"{type(exc).__name__}: details redacted")
     return type(redacted), redacted, exc.__traceback__
 
@@ -102,9 +114,14 @@ _RESERVED_TOOL_NAMES = frozenset(
 
 
 class RecordingAgentSession(AgentSessionBase):
+    # [CLASS DOC]
+    # Native AgentSessionBase subclass that only stores conversation state; assistant turns come from OpenEnv
+    # actions instead of an internal model.
     """Store native ThinkingBox conversation state driven by OpenEnv actions."""
 
     def add_messages(self, messages: list[Message], add_to_llm: bool = True) -> None:
+        # [FUNCTION DOC]
+        # Appends messages to the conversation (the add-to-LLM flag is ignored).
         """Append native messages without invoking an internal model session."""
         del add_to_llm
         self.conversation.messages.extend(messages)
@@ -112,17 +129,24 @@ class RecordingAgentSession(AgentSessionBase):
     async def decode_turn_iter(
         self, user_message: Text | None
     ) -> AsyncIterator[Message]:
+        # [FUNCTION DOC]
+        # Always raises NotImplementedError: native decoding is not used.
         """Reject native decoding because OpenEnv actions drive assistant turns."""
         del user_message
         raise NotImplementedError("OpenEnv actions drive decoding")
         yield  # pragma: no cover
 
     def can_end_conversation(self) -> bool:
+        # [FUNCTION DOC]
+        # Always returns True.
         """Return whether trusted OpenEnv orchestration may finalize the session."""
         return True
 
 
 def _run_sync(coro: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: runs a coroutine with asyncio.run when no loop is running in this thread; raises RuntimeError
+    # (telling callers to use the async methods) if called from inside a running loop.
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -133,6 +157,13 @@ def _run_sync(coro: Any) -> Any:
 class ThinkingBoxEnvironment(
     Environment[ThinkingBoxAction, ThinkingBoxObservation, ThinkingBoxState]
 ):
+    # [CLASS DOC]
+    # OpenEnv Environment for one isolated ThinkingBox episode. Holds injectable dependencies (bundle
+    # resolver, manifest loader, case hydrator, settings loader, proxy factory, user model/simulator
+    # factories, evaluator), runtime provenance, the public ThinkingBoxState and private per-episode fields
+    # (proxy client/context, recording session, hydrated case, settings, tool definitions and allow-lists,
+    # user context/model, turn counters and limits, finish reason, latched infrastructure stage, the
+    # terminal observation and the in-flight finalize task). Supports concurrent sessions.
     """Run one isolated ThinkingBox benchmark episode.
 
     Args:
@@ -182,6 +213,10 @@ class ThinkingBoxEnvironment(
         evaluator: Callable[[HydratedTestCase, TestContext, RuntimeSettings], Any]
         | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores defaults (proxy URL, dataset path, agent and config path from args or server config/env) and
+        # the dependency overrides (falling back to native implementations), loads installed-runtime provenance
+        # (RuntimeError if ThinkingBox is not installed), and initialises empty episode state.
         super().__init__()
         self._proxy_url = proxy_url or server_config.SESSION_PROXY_URL
         self._default_dataset = (
@@ -235,6 +270,8 @@ class ThinkingBoxEnvironment(
 
     @property
     def state(self) -> ThinkingBoxState:
+        # [FUNCTION DOC]
+        # Property returning the public ThinkingBoxState.
         """Return non-sensitive lifecycle state for the active episode."""
         return self._state
 
@@ -244,6 +281,8 @@ class ThinkingBoxEnvironment(
         episode_id: str | None = None,
         **kwargs: Any,
     ) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # Synchronous wrapper running reset_async; raises RuntimeError if called inside a running event loop.
         """Synchronously start the task selected by UID.
 
         Args:
@@ -272,6 +311,17 @@ class ThinkingBoxEnvironment(
         config: str | None = None,
         **kwargs: Any,
     ) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # Records the running loop, waits for any in-flight finalization, tears down the previous proxy session
+        # and clears private state, then resets episode fields and creates a new state (given or random episode
+        # id, status idle). Returns an error observation (via _reset_failure) if the previous teardown failed or
+        # test_uid is missing. Otherwise, staged with failure attribution: resolves the data bundle and checks the
+        # UID is in its manifest (data), hydrates the case for the selected agent (hydration), loads runtime
+        # settings and creates the proxy client (configuration), rejects reserved scenario tool names, creates the
+        # proxy session with the merged world/init config (proxy_create), and starts the episode (episode_init).
+        # Any exception yields the error observation. On success marks status active and returns a reset
+        # observation with task text, system and bot instructions, public tools, visible messages and metadata.
+        # Seed and unknown kwargs are ignored. Side effects: file I/O, network calls to the Session Proxy.
         """Asynchronously start the task selected by UID.
 
         Args:
@@ -376,6 +426,15 @@ class ThinkingBoxEnvironment(
     async def _start_episode(
         self, tc: HydratedTestCase, scenario_tool_names: list[str]
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: lists proxy tools and requires every scenario tool to be present (RuntimeError otherwise),
+        # applies client tool config, formats query/user context/test instructions with the proxy init result when
+        # the case requests it, merges bot instructions, builds the tool list (agent built-ins plus MCP tools;
+        # names must be unique and not reserved, ValueError otherwise), creates the RecordingAgentSession with a
+        # system prefix, replays any history tool calls through the proxy (RuntimeError on replay warnings), and
+        # appends the user query. Stores allow-lists, direct-response templates, end-turn tools, limits (user turn
+        # limit +1 when the user can end the conversation) and creates the user model when the case has user
+        # context (RuntimeError if no user model is configured).
         assert self._proxy is not None
         assert self._settings is not None
 
@@ -464,6 +523,8 @@ class ThinkingBoxEnvironment(
         timeout_s: float | None = None,
         **kwargs: Any,
     ) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # Synchronous wrapper running step_async; raises RuntimeError if called inside a running event loop.
         """Synchronously apply one public or trusted harness action.
 
         Args:
@@ -487,6 +548,13 @@ class ThinkingBoxEnvironment(
         timeout_s: float | None = None,
         **kwargs: Any,
     ) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # Returns the cached terminal observation if the episode ended; awaits the in-flight finalization if one
+        # exists; returns an error observation if not active. ListToolsAction returns a "tools" observation without
+        # counting a step. If the agent turn limit is reached, finishes with "agent_limit". Otherwise dispatches:
+        # parallel CallToolAction to the batch handler, single CallToolAction to the single handler,
+        # SubmitMessageAction to the terminal-turn handler (if it has terminal calls) or the message handler,
+        # _FinishAction to finish with its reason; anything else gives an error observation.
         """Asynchronously apply one public or trusted harness action.
 
         Args:
@@ -533,6 +601,13 @@ class ThinkingBoxEnvironment(
         return self._error_observation("Unsupported action")
 
     async def _call_tool(self, action: CallToolAction) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: handles a single tool call. Unknown tools are recorded with a "does not exist" response and return
+        # a tool observation with tool_not_found. End-turn tools are recorded with an empty response and finish the
+        # episode ("end_turn_tool"). Otherwise calls the proxy (any exception latches "proxy_call" and finishes with
+        # system_error), renders an optional direct response from the tool's template, records the exchange, adds a
+        # direct assistant message (counting an extra agent turn) when present, and returns a tool observation.
+        # Each call counts one agent turn and one step.
         assert self._session is not None
         assert self._proxy is not None
         assert action.tool_name is not None
@@ -626,6 +701,13 @@ class ThinkingBoxEnvironment(
         )
 
     async def _call_tool_batch(self, action: CallToolAction) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: handles a parallel batch as one agent turn and one step. If any call is an end-turn tool, records
+        # the batch and empty responses for end-turn calls and finishes ("end_turn_tool"). Otherwise processes calls
+        # in order: parse errors give invalid_args responses, unknown tools give tool_not_found, valid tools are
+        # executed through the proxy (exception latches and finishes with system_error) with optional direct
+        # responses. Records all exchanges and direct assistant messages (each counting an agent turn). Returns a
+        # tool_batch observation with ordered ToolCallResults.
         assert self._session is not None
         assert self._proxy is not None
         calls = [
@@ -745,6 +827,12 @@ class ThinkingBoxEnvironment(
     async def _submit_terminal_turn(
         self, action: SubmitMessageAction
     ) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: records a provider turn that ended with terminal tool calls (never executed). Returns an error
+        # observation if any call names an unavailable tool or none is an end-turn tool. Otherwise records empty
+        # responses for end-turn calls, adds the batch and the optional assistant text (marked done if it matches
+        # the done convention) in provider order, counts agent turns per added message and one step, and finishes
+        # with "end_turn_tool".
         assert self._session is not None
         calls = [
             self._make_tool_call(
@@ -795,6 +883,13 @@ class ThinkingBoxEnvironment(
         return await self._finish("end_turn_tool")
 
     async def _submit_message(self, content: str) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: records an assistant text message (done-marked when applicable), counting one agent turn and one
+        # step. Finishes when the session says the conversation should end, the agent limit is reached, there is no
+        # user model ("no_user_llm") or the user turn limit is exceeded. Otherwise generates the simulated user's
+        # reply with the private user context (exception latches "user_simulator" and finishes with system_error),
+        # records it, finishes with "user_done" if the user may end and did, else returns a "user" observation with
+        # the assistant response and the user's message.
         assert self._session is not None
         assert self._settings is not None
         message = Text(role="assistant", content=content)
@@ -847,6 +942,10 @@ class ThinkingBoxEnvironment(
         )
 
     async def _finish(self, reason: str) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: returns the cached terminal observation if present; otherwise, on first call records the reason,
+        # sets status finalizing and starts a single finalize task. Awaits the (shielded) task and returns its
+        # observation, so concurrent callers share one finalization.
         if self._terminal_observation is not None:
             return self._terminal_observation
         if self._finalize_task is None:
@@ -856,6 +955,15 @@ class ThinkingBoxEnvironment(
         return await asyncio.shield(self._finalize_task)
 
     async def _finalize_once(self) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: produces the terminal observation exactly once. If no failure is latched, builds the native test
+        # context with UID, case metadata and provenance, runs the evaluator (awaiting if needed; TypeError if it
+        # does not return a TestResult), and derives pass/graded/system-error (a native system error is latched as
+        # "evaluator"). Exceptions latch "effects_or_evaluator". Always tears down the proxy (failure latched as
+        # "teardown"). Reward is 1.0 only if passed with no latched failure. Returns a terminal observation with
+        # response, messages captured before teardown, finish reason, reward type, system error flag, test summary
+        # (including the failure stage), error text, reward and done; caches it, updates state status (done or
+        # error) and clears private state.
         response = ""
         passed = False
         graded = False
@@ -955,6 +1063,9 @@ class ThinkingBoxEnvironment(
         context: TestContext,
         settings: RuntimeSettings,
     ) -> TestResult:
+        # [FUNCTION DOC]
+        # HELPER: default evaluator: builds a Judge (with an LLM session when a judge model is configured), the
+        # case fixtures and a TestScript for the case's test code, and returns the awaited evaluation TestResult.
         judge_llm = (
             create_llm_session(settings.judge_model)
             if settings.judge_model is not None
@@ -971,6 +1082,9 @@ class ThinkingBoxEnvironment(
         return await script.evaluate(context)
 
     async def _prepare_for_reset(self) -> Exception | None:
+        # [FUNCTION DOC]
+        # HELPER: waits for any in-flight finalization, tears down the proxy session and clears private state.
+        # Returns the teardown exception, or None.
         if self._finalize_task is not None and not self._finalize_task.done():
             await asyncio.shield(self._finalize_task)
         error = await self._teardown_proxy()
@@ -978,6 +1092,9 @@ class ThinkingBoxEnvironment(
         return error
 
     def _reset_episode_fields(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: clears closed flag, terminal observation, finalize task, latched failure, finish reason and turn
+        # counters.
         self._closed = False
         self._terminal_observation = None
         self._finalize_task = None
@@ -990,6 +1107,10 @@ class ThinkingBoxEnvironment(
     async def _reset_failure(
         self, stage: str, exc: Exception, test_uid: str | None
     ) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: latches the failure stage, tears down the proxy (latching teardown failures), builds and caches a
+        # done "error" observation with reward 0.0, reward type system_error and the failing stage in the error
+        # text, sets state status error with system_error True, clears private state and returns the observation.
         self._latch_infrastructure(stage, exc)
         teardown_error = await self._teardown_proxy()
         if teardown_error is not None:
@@ -1013,6 +1134,9 @@ class ThinkingBoxEnvironment(
         return observation
 
     async def _teardown_proxy(self) -> Exception | None:
+        # [FUNCTION DOC]
+        # HELPER: detaches the proxy client and context and, if a client existed, destroys its session. Returns the
+        # exception raised by session_destroy, or None.
         client, self._proxy_client = self._proxy_client, None
         self._proxy = None
         if client is None:
@@ -1024,6 +1148,9 @@ class ThinkingBoxEnvironment(
         return None
 
     async def aclose(self) -> None:
+        # [FUNCTION DOC]
+        # Idempotent async close: waits for in-flight finalization, tears down the proxy (latching failures),
+        # clears private state and sets status closed with system_error reflecting any latched failure.
         """Asynchronously destroy the proxy session and clear private state."""
         if self._closed:
             return
@@ -1038,6 +1165,11 @@ class ThinkingBoxEnvironment(
         self._state.system_error = self._infrastructure_stage is not None
 
     def close(self) -> Any:
+        # [FUNCTION DOC]
+        # Synchronous close that works from any context: inside the episode's own (or no recorded) running loop it
+        # schedules aclose as a task and returns the task; from another thread while the episode loop runs, it
+        # submits aclose to that loop and returns an awaitable wrapper (if the caller has a loop) or blocks for the
+        # result; with no running loops it runs aclose with asyncio.run.
         """Synchronously destroy the proxy session and clear private state."""
         try:
             current_loop = asyncio.get_running_loop()
@@ -1055,6 +1187,9 @@ class ThinkingBoxEnvironment(
         return asyncio.run(self.aclose())
 
     def _record_tool_exchange(self, call: ToolCall, response: ToolResponse) -> None:
+        # [FUNCTION DOC]
+        # HELPER: records a single call as a one-call batch message, its response in the conversation's tool_calls
+        # metadata, and the response message.
         assert self._session is not None
         self._session.add_messages([ParallelToolCall(tool_calls=[call])])
         self._session.conversation.metadata["tool_calls"].append(
@@ -1070,6 +1205,9 @@ class ThinkingBoxEnvironment(
         *,
         parse_error: str | None = None,
     ) -> ToolCall:
+        # [FUNCTION DOC]
+        # HELPER: builds a native ToolCall with name and arguments, setting the id only when given and storing a
+        # parse error in metadata under "error".
         values: dict[str, Any] = {"name": name, "arguments": arguments}
         if call_id is not None:
             values["id"] = call_id
@@ -1078,9 +1216,14 @@ class ThinkingBoxEnvironment(
         return ToolCall(**values)
 
     def _increment_step(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: increments state step_count.
         self._state.step_count += 1
 
     def _public_tools(self) -> list[Tool]:
+        # [FUNCTION DOC]
+        # HELPER: returns public OpenEnv Tool descriptors (name, description or "", input schema or {}) for the
+        # episode's tools.
         return [
             Tool(
                 name=tool.name,
@@ -1091,6 +1234,8 @@ class ThinkingBoxEnvironment(
         ]
 
     def _visible_messages(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: returns the conversation messages dumped in JSON mode, or [] without a session.
         if self._session is None:
             return []
         return [
@@ -1099,6 +1244,8 @@ class ThinkingBoxEnvironment(
         ]
 
     def _last_assistant_response(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns the content of the most recent assistant Text message tagged "text", or "".
         if self._session is None:
             return ""
         for message in reversed(self._session.conversation.messages):
@@ -1111,6 +1258,10 @@ class ThinkingBoxEnvironment(
         return ""
 
     def _public_metadata(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns public metadata: benchmark name, ThinkingBox revision, data release/revision (bundle
+        # values or pinned defaults), selected agent, full execution provenance when bundle and settings exist, and
+        # the case's scenario and tags when a case is loaded.
         metadata: dict[str, Any] = {
             "benchmark": benchmark_data.DATASET_NAME,
             "thinkingbox_revision": self._runtime_provenance.identity,
@@ -1149,6 +1300,9 @@ class ThinkingBoxEnvironment(
         return metadata
 
     def _error_observation(self, message: str) -> ThinkingBoxObservation:
+        # [FUNCTION DOC]
+        # HELPER: returns a non-terminal "error" observation with the message, visible messages, step count and
+        # public metadata.
         return ThinkingBoxObservation(
             kind="error",
             task_uid=self._state.task_uid,
@@ -1159,6 +1313,9 @@ class ThinkingBoxEnvironment(
         )
 
     def _latch_infrastructure(self, stage: str, exc: Exception) -> None:
+        # [FUNCTION DOC]
+        # HELPER: logs the failure (redacted exception, stage, whether primary, task and episode ids) and records
+        # the stage and exception type name only for the first failure of the episode.
         primary = self._infrastructure_stage is None
         logger.error(
             "ThinkingBox infrastructure failure",
@@ -1177,6 +1334,9 @@ class ThinkingBoxEnvironment(
             self._infrastructure_detail = type(exc).__name__
 
     def _clear_sensitive(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: drops all private per-episode data (session, case, settings, tools and allow-lists, user context
+        # and model, query, bot instructions, bundle, selected agent).
         self._session = None
         self._tc = None
         self._settings = None

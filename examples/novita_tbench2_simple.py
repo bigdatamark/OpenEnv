@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Minimal example running the tbench2 environment in a Novita sandbox: reset to a task, run "ls -la" and a curl against
+# the local server, print outputs. Requires NOVITA_API_KEY. Side effects: creates/destroys a remote sandbox, network I/O, stdout.
 """Minimal example for the TB2 OpenEnv runner (Novita sandbox mode).
 
 Usage:
@@ -16,6 +19,10 @@ from tbench2_env import Tbench2Action, Tbench2Env
 
 
 async def main() -> int:
+    # [FUNCTION DOC]
+    # Reads TB2_TASK_ID (default headless-terminal), builds the image, starts the sandbox (blocking), waits up to 300 s,
+    # resets, executes the two commands printing results, and always stops the container. Returns 0.
+    # KNOWN ISSUE: TB2_TASKS_DIR is read only to print a notice; it is never passed to the environment.
     tasks_dir = os.environ.get("TB2_TASKS_DIR")
     if not tasks_dir:
         print("TB2_TASKS_DIR not set. TB2 repo will be downloaded.")

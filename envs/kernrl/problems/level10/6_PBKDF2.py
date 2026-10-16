@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 10): PBKDF2-style key derivation (default 1000
+# iterations, 32-byte output) built on a toy byte-mixing "HMAC" (not real
+# HMAC-SHA256), so outputs are only self-consistent.
 """
 PBKDF2 Key Derivation
 
@@ -21,6 +25,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model storing the iteration count and derived key length.
     """
     PBKDF2-HMAC-SHA256 key derivation.
 
@@ -28,15 +34,23 @@ class Model(nn.Module):
     """
 
     def __init__(self, iterations: int = 1000, dk_len: int = 32):
+        # [FUNCTION DOC]
+        # Stores iterations (default 1000) and dk_len (default 32).
         super(Model, self).__init__()
         self.iterations = iterations
         self.dk_len = dk_len
 
     def _xor(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Elementwise XOR of two tensors.
         """XOR two byte tensors."""
         return a ^ b
 
     def _simple_hmac(self, key: torch.Tensor, message: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Toy PRF: accumulates key followed by message into 32 byte slots
+        # (slot = slot*31 + byte, mod 256), then 4 mixing passes combining each slot
+        # with slots +17 and +11. Returns a (32,) int64 tensor.
         """Simplified HMAC (not cryptographically secure - for demo)."""
         # Real HMAC-SHA256 would be: H(key ^ opad || H(key ^ ipad || message))
         # This is a placeholder that produces consistent output
@@ -57,6 +71,11 @@ class Model(nn.Module):
         return result
 
     def forward(self, password: torch.Tensor, salt: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # For each 32-byte output block i (1-based), computes U1 = PRF(password,
+        # salt || [0, 0, 0, i]) then iterates U_j = PRF(password, U_{j-1}) for
+        # iterations-1 times, XOR-accumulating into F. Concatenates blocks and returns
+        # the first dk_len bytes (int64).
         """
         Derive key from password using PBKDF2.
 
@@ -97,10 +116,14 @@ class Model(nn.Module):
 
 # Problem configuration
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a random 16-byte password and 16-byte salt (int64 byte values).
     password = torch.randint(0, 256, (16,), dtype=torch.int64)  # 16-byte password
     salt = torch.randint(0, 256, (16,), dtype=torch.int64)  # 16-byte salt
     return [password, salt]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [1000, 32] (iterations, dk_len).
     return [1000, 32]  # iterations, dk_len

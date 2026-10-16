@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Sandboxed Python executor for the REPL environment built on smolagents' LocalPythonExecutor
+# (operation-count limits rather than wall-clock timeouts, restricted imports). Keeps a persistent
+# namespace, supports loading context, injecting callables, listing and reading variables, and
+# returns captured output truncated to a configurable length.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,6 +35,8 @@ logger.addHandler(logging.NullHandler())
 
 
 class PythonExecutor:
+    # [CLASS DOC]
+    # Executor wrapper tracking user-set variable names and injected callables (passed to smolagents as tools).
     """Sandboxed Python code executor with persistent namespace.
 
     Wraps smolagents.LocalPythonExecutor with RLM-specific features:
@@ -44,6 +51,10 @@ class PythonExecutor:
         max_output_length: int = 8192,
         allowed_imports: Optional[List[str]] = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the output limit (default 8192), the allowed import list (a default set of standard-library
+        # modules when not given), creates the smolagents executor and registers helper functions
+        # (format_exc and safe_json_dumps).
         """Initialize the executor.
 
         Args:
@@ -105,6 +116,8 @@ class PythonExecutor:
         self._register_helpers()
 
     def _register_helpers(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Injects format_exc (traceback formatter) and safe_json_dumps (JSON with repr fallback).
         """Register helper functions with the executor."""
         helpers = {
             "format_exc": traceback.format_exc,
@@ -115,6 +128,8 @@ class PythonExecutor:
             self.inject_function(name, func)
 
     def _sync_callable_tools(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Sends all injected callables to the smolagents executor as tools; failures are logged at debug level and ignored.
         """Sync callable functions with the executor via send_tools."""
         if self._callable_tools:
             try:
@@ -127,6 +142,8 @@ class PythonExecutor:
                 )
 
     def set_context(self, context: str, variable_name: str = "context") -> None:
+        # [FUNCTION DOC]
+        # Stores context in the namespace under variable_name (default "context").
         """Load context into namespace as a variable.
 
         Args:
@@ -136,6 +153,8 @@ class PythonExecutor:
         self.set_variable(variable_name, context)
 
     def set_variable(self, name: str, value: Any) -> None:
+        # [FUNCTION DOC]
+        # Sends a single variable into the executor namespace and records its name.
         """Set a variable in the namespace.
 
         Args:
@@ -146,6 +165,8 @@ class PythonExecutor:
         self._user_variables.add(name)
 
     def get_variable(self, name: str) -> Optional[Any]:
+        # [FUNCTION DOC]
+        # Returns the namespace value for name, or None if absent.
         """Retrieve a variable from namespace.
 
         Args:
@@ -157,6 +178,8 @@ class PythonExecutor:
         return self._executor.state.get(name)
 
     def list_variables(self) -> List[str]:
+        # [FUNCTION DOC]
+        # Returns the names of non-underscore namespace keys plus recorded user variables (unordered list).
         """List non-private variables in namespace.
 
         Returns:
@@ -167,6 +190,13 @@ class PythonExecutor:
         return list(variables)
 
     def execute(self, code: str) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Runs code in the executor. Returns a mapping with stdout (executor logs plus the JSON or repr of the
+        # last expression value), stderr (exception text with traceback on failure), locals_snapshot (repr,
+        # capped at 500 characters, of new non-underscore namespace keys), execution_time, success and
+        # exception. Output streams are truncated to max_output_length with a total-length note. Executor
+        # exceptions are caught; namespace mutations persist. Only keys new to the namespace are reported, so
+        # reassigned variables are not included.
         """Execute Python code and return results.
 
         Args:
@@ -249,6 +279,8 @@ class PythonExecutor:
         }
 
     def reset(self) -> None:
+        # [FUNCTION DOC]
+        # Replaces the executor with a fresh one, clears tracked variables and tools, and re-registers helpers.
         """Reset namespace to initial state."""
         # Create a new executor instance
         self._executor = LocalPythonExecutor(
@@ -259,6 +291,8 @@ class PythonExecutor:
         self._register_helpers()
 
     def inject_function(self, name: str, func: Callable[..., Any]) -> None:
+        # [FUNCTION DOC]
+        # Records func as a tool under name, adds the name to user variables and re-syncs all tools to the executor.
         """Inject a callable function into the namespace.
 
         Args:

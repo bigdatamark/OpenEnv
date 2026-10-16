@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Local RLM runner: drives the iterative prompt / execute loop against an in-process REPL. Each
+# iteration sends the message history to the chat function, extracts code blocks from the reply,
+# executes them, stops when an execution finalises the answer, and otherwise feeds formatted outputs
+# back. Recursion is provided through a backend wired into the REPL's helper functions.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -37,6 +42,8 @@ ChatFn = Callable[..., str]
 
 @dataclass
 class RLMRunResult:
+    # [CLASS DOC]
+    # Mutable result of a run: final answer (or None), the message history, iterations used, depth and child traces.
     final_answer: str | None
     messages: list[dict[str, str]]
     iterations: int
@@ -45,6 +52,9 @@ class RLMRunResult:
 
 
 class LocalRLMRunner:
+    # [CLASS DOC]
+    # Orchestrator holding the chat function, prompt and iteration settings, depth limits, backend
+    # factory, child limits, callbacks and a verbose flag.
     """Local recursive RLM orchestrator built on top of LocalREPLEnv."""
 
     def __init__(
@@ -67,6 +77,8 @@ class LocalRLMRunner:
         | None = None,
         verbose: bool = False,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores all configuration; uses the default backend factory when none is given.
         self.llm_chat_fn = llm_chat_fn
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
@@ -86,6 +98,9 @@ class LocalRLMRunner:
     def _default_backend_factory(
         self, llm_chat_fn: ChatFn, **kwargs
     ) -> RecursiveBackend:
+        # [FUNCTION DOC]
+        # HELPER: Builds a LocalChildRLMBackend with fresh BackendLimits from this runner's settings and
+        # the system prompt, iterations, multiplier and depth from kwargs.
         limits = BackendLimits(
             max_depth=self.max_depth,
             max_batch_workers=self.max_batch_workers,
@@ -114,6 +129,14 @@ class LocalRLMRunner:
         model: str | None = None,
         timeout_s: float | None = None,
     ) -> RLMRunResult:
+        # [FUNCTION DOC]
+        # Runs the loop. Creates a backend and a LocalREPLEnv wired to it, resets with the context and task
+        # (env iteration cap = max_iterations times the multiplier), builds the system and first user
+        # messages, then for up to max_iterations: checks the cooperative timeout (returning an error answer
+        # string), calls the model, nudges it when no code block is present, executes all blocks, returns when
+        # any observation is done (final answer from env state), else appends the assistant reply and the
+        # formatted observations with the next user prompt. When iterations run out, uses the state's final
+        # answer or asks the model once more. Returns an RLMRunResult. Prints progress when verbose.
         backend = self.backend_factory(
             self.llm_chat_fn,
             system_prompt=self.system_prompt,
@@ -229,6 +252,10 @@ class LocalRLMRunner:
     def _default_answer(
         self, messages: list[dict[str, str]], model: str | None = None
     ) -> str | None:
+        # [FUNCTION DOC]
+        # HELPER: Asks the model once for a final answer; returns the text inside the first balanced
+        # FINAL(...) if present, else the stripped reply (None if empty). Any exception returns None.
+        # FINAL_VAR replies are returned raw because no REPL lookup is done here.
         """Make one final LLM call asking for an answer when iterations are exhausted."""
         final_prompt = messages + [
             {
@@ -261,6 +288,8 @@ class LocalRLMRunner:
             return None
 
     def _chat(self, messages: list[dict[str, str]], model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Calls the chat function with messages and model, retrying without the model on TypeError.
         try:
             return self.llm_chat_fn(messages, model)
         except TypeError:

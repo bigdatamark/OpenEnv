@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Minimal client example for a locally running Echo server (ECHO_BASE_URL, default http://localhost:8000): resets,
+# lists MCP tools and calls echo_message / echo_with_length for a few messages via the synchronous client wrapper.
+# Exit status reflects success. Side effects: network I/O, stdout.
 """Minimal Echo environment client example.
 
 Start the Echo server first:
@@ -16,6 +20,10 @@ from echo_env import EchoEnv
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the sequence described in the module doc and closes the client. Returns True on success; on any exception prints
+    # the traceback and returns False.
+    # KNOWN ISSUE: on an exception the client connection is not closed.
     """Exercise the MCP Echo tools through the Python client."""
     base_url = os.getenv("ECHO_BASE_URL", "http://localhost:8000")
 

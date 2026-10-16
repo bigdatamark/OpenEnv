@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Implements "openenv build": builds a Docker image for an environment directory. Detects whether
+# the environment is standalone or inside an OpenEnv repo checkout (envs/<name>), copies it into a
+# temporary build directory (for in-repo builds also vendoring the repo's openenv sources and
+# pointing the dependency at that local copy), locates the Dockerfile and runs docker build with
+# BUILD_MODE and ENV_NAME build args. Also contains a helper to tag and push images.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Build Docker images for OpenEnv environments."""
@@ -22,6 +28,10 @@ _OPENENV_RUNTIME_DEP_RE = re.compile(r"^openenv(?:\s*(?:$|[<>=!~@;])|\[)")
 
 
 def _is_openenv_runtime_dependency(dep: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if a dependency string (trimmed, lowercased) names the openenv runtime
+    # distribution (openenv with optional extras/specifier) or openenv-core / openenv_core, but not
+    # other openenv-* environment packages.
     """Return True for the OpenEnv runtime distribution, not openenv-* envs."""
     normalized = dep.strip().lower()
     return (
@@ -32,6 +42,9 @@ def _is_openenv_runtime_dependency(dep: str) -> bool:
 
 
 def _is_in_repo_env_path(env_path: Path, repo_root: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if env_path is relative to repo_root and lies under its envs/ directory
+    # (at least two path parts starting with "envs").
     """Return whether env_path points to an environment below repo_root/envs."""
     try:
         rel_path = env_path.relative_to(repo_root)
@@ -41,6 +54,10 @@ def _is_in_repo_env_path(env_path: Path, repo_root: Path) -> bool:
 
 
 def _detect_build_context(env_path: Path) -> tuple[str, Path, Path | None]:
+    # [FUNCTION DOC]
+    # HELPER: makes env_path absolute and searches it and its parents for a .git entry. Returns
+    # ("in-repo", repo_root, repo_root) if found and the env is under repo_root/envs, otherwise
+    # ("standalone", env_path, None).
     """
     Detect whether we're building a standalone or in-repo environment.
 
@@ -74,6 +91,10 @@ def _detect_build_context(env_path: Path) -> tuple[str, Path, Path | None]:
 
 
 def _prepare_standalone_build(env_path: Path, temp_dir: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: copies the environment (preserving symlinks) into temp_dir/<env name> and, if
+    # pyproject.toml exists and tomli is importable, warns when no dependency starts with "openenv".
+    # Returns: the build directory. Side effects: file copies, console output.
     """
     Prepare a standalone environment for building.
 
@@ -121,6 +142,14 @@ def _prepare_standalone_build(env_path: Path, temp_dir: Path) -> Path:
 
 
 def _prepare_inrepo_build(env_path: Path, repo_root: Path, temp_dir: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: copies the environment into temp_dir/<env name>; if the repo has src/openenv, copies it
+    # to <build>/openenv/src/openenv along with the repo pyproject.toml and README.md, then (when
+    # tomli/tomli_w are available) rewrites the env's pyproject dependencies to drop openenv runtime
+    # dependencies and add "openenv @ file:///app/env/openenv", and deletes uv.lock. Warns if the
+    # package sources are missing. Returns: the build directory.
+    # KNOWN ISSUE: the pyproject file is opened for writing before tomli_w is imported, so if tomli_w is
+    # missing the copied pyproject.toml is left truncated (empty).
     """
     Prepare an in-repo environment for building.
 
@@ -209,6 +238,10 @@ def _run_command(
     cwd: Path | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess:
+    # [FUNCTION DOC]
+    # HELPER: prints and runs a command capturing output, echoing stdout to the console and stderr to
+    # stderr. Returns: the CompletedProcess. With check=True a failure prints details and raises
+    # typer.Exit(1). (With check=False, failures are returned as normal results.)
     """Run a shell command and handle errors."""
     console.print(f"[bold cyan]Running:[/bold cyan] {' '.join(cmd)}")
     try:
@@ -239,6 +272,14 @@ def _build_docker_image(
     build_args: dict[str, str] | None = None,
     no_cache: bool = False,
 ) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: detects the build mode, prepares the temporary build directory, picks the Dockerfile
+    # (given path, else <build>/server/Dockerfile, else <build>/Dockerfile), defaults the tag to
+    # "openenv-<name without _env>", adds BUILD_MODE and ENV_NAME build args (mutating the given dict)
+    # and runs docker build. Returns: True on success; False if no Dockerfile exists or the build
+    # failed.
+    # KNOWN ISSUE: context_path is resolved but never used, so --context has no effect; the build
+    # context is always the prepared temporary directory.
     """Build Docker image for the environment with smart context detection."""
 
     # Detect build context (standalone vs in-repo)
@@ -312,6 +353,9 @@ def _docker_build_command(
     build_args: dict[str, str],
     no_cache: bool,
 ) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the docker build argument list: tag, Dockerfile, optional --no-cache, one
+    # --build-arg per entry, and the build directory last.
     """Build the docker build command for an OpenEnv environment."""
     cmd = ["docker", "build", "-t", tag, "-f", str(dockerfile)]
 
@@ -326,6 +370,9 @@ def _docker_build_command(
 
 
 def _push_docker_image(tag: str, registry: str | None = None) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: optionally tags the image as <registry>/<tag> (raising typer.Exit on failure) and runs
+    # docker push. Returns: True if the push exit code is 0.
     """Push Docker image to registry."""
     if registry:
         full_tag = f"{registry}/{tag}"
@@ -339,6 +386,9 @@ def _push_docker_image(tag: str, registry: str | None = None) -> bool:
 
 
 def _parse_build_args(raw_args: list[str] | None) -> dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: parses repeated KEY=VALUE strings into a dict (split on the first "="); entries without
+    # "=" are skipped with a warning on stderr.
     """Parse Docker build args from repeated KEY=VALUE CLI options."""
     build_args: dict[str, str] = {}
 
@@ -402,6 +452,10 @@ def build(
         ),
     ] = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: resolves the environment path (default current directory), exits 1 if it does not
+    # exist, is not a directory or lacks openenv.yaml; parses build args and builds the image with the
+    # optional tag, Dockerfile and no-cache flag. Exits 1 if the build fails; prints success otherwise.
     """
     Build Docker images for OpenEnv environments.
 

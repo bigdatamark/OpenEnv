@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Simple usage test for CodingEnv.from_docker_image: starts the coding-env:latest container, resets, prints state,
+# executes several Python snippets including error cases, prints outputs and final state, and closes.
+# Exit status reflects success. Side effects: sys.path change, Docker container, stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 """
 Simple test showing how users will use CodingEnv.from_docker_image().
@@ -17,6 +21,9 @@ from coding_env import CodeAction, CodingEnv
 
 
 async def main():
+    # [FUNCTION DOC]
+    # Runs the test sequence described in the module doc. Returns True on success; on any exception prints the traceback and
+    # returns False. Always closes the client if it is still open.
     """Test CodingEnv.from_docker_image()."""
     print("=" * 60)
     print("CodingEnv.from_docker_image() Test")

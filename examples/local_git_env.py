@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Usage test for GitEnv.from_docker_image: loads Gitea credentials from a .env file, starts the git-env:latest container
+# with them, resets, prints state, lists repositories, clones "OpenEnv", runs a few git commands and prints outputs and
+# final state. Exit status reflects success. Side effects: reads .env into the process environment, sys.path change,
+# Docker container, network I/O, stdout.
 """
 Simple test showing how users will use GitEnv.from_docker_image().
 
@@ -25,6 +30,10 @@ from git_env import GitAction, GitEnv
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the test sequence. Returns False if any of GITEA_URL/GITEA_USERNAME/GITEA_PASSWORD is missing or on any exception
+    # (traceback printed), True on success.
+    # KNOWN ISSUE: on an exception after the container starts, the client is not closed, leaving the container running.
     """Test GitEnv.from_docker_image()."""
     print("=" * 60)
     print("GitEnv.from_docker_image() Test")

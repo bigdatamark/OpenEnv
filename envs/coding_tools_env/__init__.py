@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Coding tools environment package: an MCP tool environment (shell, file and todo tools in an E2B
+# sandbox). Re-exports the CodingToolsEnv client, state/result models and the MCP CallToolAction /
+# ListToolsAction types.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

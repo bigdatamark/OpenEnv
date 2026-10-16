@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Collects role-tagged rollouts in the mini terminal env: scripted oracle rollouts (default data source) and sampled
+# rollouts from a policy model. Shell prompts are CONTEXT, commands ACTION, a "[stdout]" tag WARNING, and command output ENV_OUTPUT.
 """Collect rollouts in the mini-terminal env and tag them by token role.
 
 `oracle_rollout` runs a known-good command sequence so the env produces *diverse,
@@ -22,6 +25,10 @@ STDOUT_TAG = "\n[stdout] "  # harness boilerplate (warning role)
 
 
 def oracle_rollout(task: Task) -> Trajectory:
+    # [FUNCTION DOC]
+    # Builds a trajectory for the task's oracle commands: a task CONTEXT segment, then per command a prompt CONTEXT, the
+    # command ACTION, the stdout-tag WARNING and the real output ENV_OUTPUT; finally a prompt and an "answer: <solution>" ACTION.
+    # Returns a Trajectory with reward 1.0.
     """Build a clean, role-tagged trajectory by running the task's oracle commands."""
     segs: list[Segment] = [Segment(CONTEXT, f"Task: {task.prompt}")]
     for cmd in task.oracle:
@@ -38,6 +45,11 @@ def oracle_rollout(task: Task) -> Trajectory:
 def model_rollout(
     model, tokenizer, task: Task, *, max_turns: int = 4, max_new: int = 12
 ) -> Trajectory:
+    # [FUNCTION DOC]
+    # Samples up to max_turns commands from the model: each turn appends the prompt to a text transcript, generates up to
+    # max_new tokens with sampling (temperature 1.0, no gradients), takes the first line of the decoded continuation (or "ls"
+    # if empty) as the action, steps the env and records ACTION, WARNING and ENV_OUTPUT segments; stops when the env reports
+    # done. Returns a Trajectory whose reward is the max step reward.
     """Roll out the *policy* itself: the model proposes each command, the env
     answers with a real observation (including realistic errors for bad
     commands). Used for the RL / "failures still teach" path."""

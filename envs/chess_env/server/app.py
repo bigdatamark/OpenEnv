@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI app for the chess environment; the environment class is the session factory and
+# MAX_CONCURRENT_ENVS (default 8) caps concurrent sessions.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

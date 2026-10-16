@@ -1,3 +1,9 @@
+# [PACKAGE DOC]
+# Server-side package of openenv.core: environment interfaces, transforms,
+# exceptions, the HTTP/WebSocket server factory, MCP and JSON-RPC types, route
+# configuration, (de)serialization helpers and the shared wire types. Optional
+# pieces degrade gracefully: MCPEnvironment and the web interface names are set
+# to None when their optional dependencies are not installed.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Core environment interfaces and types."""

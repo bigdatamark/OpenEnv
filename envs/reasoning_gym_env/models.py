@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for Reasoning Gym: the answer action and the observation carrying the question
+# (on reset) or the score and correct answer (after step).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -19,12 +22,17 @@ from pydantic import Field
 
 
 class ReasoningGymAction(Action):
+    # [CLASS DOC]
+    # Action with a required answer string.
     """Action for the Reasoning Gym environment - the agent's answer."""
 
     answer: str = Field(..., description="The agent's answer to the current question")
 
 
 class ReasoningGymObservation(Observation):
+    # [CLASS DOC]
+    # Observation: question (None after step), score in [0, 1], correct_answer (revealed after step) and
+    # dataset entry metadata; inherits done/reward/metadata.
     """Observation from the Reasoning Gym environment."""
 
     question: Optional[str] = Field(

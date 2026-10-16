@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Connect4 environment server package. Re-exports Connect4Environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

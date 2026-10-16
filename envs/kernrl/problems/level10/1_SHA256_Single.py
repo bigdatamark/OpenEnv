@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 10, cryptography): SHA-256 compression of a single
+# 64-byte block, implemented naively with scalar int64 tensor operations
+# (32-bit words emulated by masking with 0xFFFFFFFF).
 """
 SHA-256 Hash - Single Message
 
@@ -20,6 +24,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference SHA-256 model. Registers buffers K (64 round constants) and H0 (8
+    # initial hash words) as int64 tensors.
     """
     SHA-256 hash computation using PyTorch operations.
 
@@ -28,6 +35,8 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the K and H0 constant buffers.
         super(Model, self).__init__()
 
         # SHA-256 constants (first 32 bits of fractional parts of cube roots of first 64 primes)
@@ -119,28 +128,48 @@ class Model(nn.Module):
         self.register_buffer("H0", H0)
 
     def _rotr(self, x: torch.Tensor, n: int) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: 32-bit right rotation of x by n bits (masked to 32 bits).
         """Right rotation."""
         return ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF
 
     def _ch(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: SHA-256 choose function: (x AND y) XOR (NOT x AND z), masked.
         return (x & y) ^ (~x & z) & 0xFFFFFFFF
 
     def _maj(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: SHA-256 majority function: (x AND y) XOR (x AND z) XOR (y AND z).
         return (x & y) ^ (x & z) ^ (y & z)
 
     def _sigma0(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Big sigma 0: rotr 2 XOR rotr 13 XOR rotr 22.
         return self._rotr(x, 2) ^ self._rotr(x, 13) ^ self._rotr(x, 22)
 
     def _sigma1(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Big sigma 1: rotr 6 XOR rotr 11 XOR rotr 25.
         return self._rotr(x, 6) ^ self._rotr(x, 11) ^ self._rotr(x, 25)
 
     def _gamma0(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Small sigma 0 for the message schedule: rotr 7 XOR rotr 18 XOR shr 3.
         return self._rotr(x, 7) ^ self._rotr(x, 18) ^ (x >> 3)
 
     def _gamma1(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Small sigma 1 for the message schedule: rotr 17 XOR rotr 19 XOR shr 10.
         return self._rotr(x, 17) ^ self._rotr(x, 19) ^ (x >> 10)
 
     def forward(self, message: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Packs the 64 input bytes big-endian into 16 words, extends the message
+        # schedule to 64 words, runs the 64 compression rounds starting from H0, and
+        # returns H0 + final working variables (mod 2^32) as an (8,) int64 tensor.
+        # Note: no SHA-256 padding is applied; the block is hashed as given, so the
+        # result equals the single-block compression, not hashlib's SHA-256 of 64 bytes.
         """
         Compute SHA-256 hash.
 
@@ -203,10 +232,14 @@ class Model(nn.Module):
 
 # Problem configuration
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns one random 64-byte block as an int64 tensor of values 0..255.
     # One 512-bit block (64 bytes)
     message = torch.randint(0, 256, (64,), dtype=torch.int64)
     return [message]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

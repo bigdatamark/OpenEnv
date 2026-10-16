@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI app for the chat environment. Reads SYSTEM_PROMPT at import and TOKENIZER_NAME (default
+# gpt2) when creating environments; supports in-repo (relative) and standalone imports.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -43,6 +46,11 @@ except ImportError as e:
 
 # Initialize tokenizer based on environment variable
 def get_tokenizer():
+    # [FUNCTION DOC]
+    # Loads a Hugging Face AutoTokenizer by TOKENIZER_NAME and prints a message. If transformers is not
+    # installed, prints a warning, prepends this directory to sys.path and returns the MockTokenizer from
+    # test_chat_env.
+    # Side effects: network/disk access for the tokenizer, stdout, sys.path mutation.
     """Get tokenizer from environment or use a mock for testing."""
     tokenizer_name = os.environ.get("TOKENIZER_NAME", "gpt2")
 
@@ -75,6 +83,9 @@ system_prompt = os.environ.get("SYSTEM_PROMPT", None)
 
 # Factory function to create ChatEnvironment instances
 def create_chat_environment():
+    # [FUNCTION DOC]
+    # Factory for create_app: returns a ChatEnvironment with a freshly loaded tokenizer and the system prompt.
+    # KNOWN ISSUE: the tokenizer is reloaded for every new environment/session.
     """Factory function that creates ChatEnvironment with tokenizer."""
     tokenizer = get_tokenizer()
     return ChatEnvironment(tokenizer=tokenizer, system_prompt=system_prompt)
@@ -88,6 +99,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

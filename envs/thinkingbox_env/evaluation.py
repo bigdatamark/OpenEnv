@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Command-line evaluation harness that runs ThinkingBox benchmark manifests through an OpenEnv ThinkingBox
+# server. For each selected UID x repetition it connects a client, resets, drives either the natively
+# configured ThinkingBox agent (tool calls forwarded through OpenEnv) or a custom policy, and converts the
+# terminal result into a privacy-reviewed canonical DecodeResult JSONL record; operational failures go to
+# a redacted errors JSONL sidecar and are retryable. Supports sharding, limits, resume, strict coverage
+# validation (canary = 1 repetition, full = 20 over the canonical manifest) and native aggregation.
+# Provenance (runtime, data, config, framework source hash, policy, run parameters) is embedded in every
+# record and must match exactly. Module constants list safe model fields, the result schema version (3),
+# native finish reasons, forbidden field names for canonical output, and framework source paths to hash.
 """Run ThinkingBox manifests through OpenEnv with native model configuration.
 
 The harness preserves native agent, user, judge, and aggregation semantics
@@ -146,17 +156,27 @@ _FRAMEWORK_IGNORED_PARTS = {
 
 
 class CoverageError(ValueError):
+    # [CLASS DOC]
+    # ValueError subclass raised when canonical results do not exactly and validly cover the requested plan.
     """Canonical results do not exactly cover the requested evaluation plan."""
 
 
 class _OperationalResultError(RuntimeError):
+    # [CLASS DOC]
+    # HELPER: RuntimeError for an operational (non-benchmark) failure, optionally carrying the offending
+    # client result for auditing.
     def __init__(self, message: str, result: Any | None = None):
+        # [FUNCTION DOC]
+        # Stores the message and the optional result.
         super().__init__(message)
         self.result = result
 
 
 @dataclass
 class _ExecutionTrace:
+    # [CLASS DOC]
+    # HELPER: mutable accumulator of an episode's native messages, usage records, max steps taken, and the
+    # server-reported execution provenance (plus whether it was valid and consistent).
     messages: list[MessageT] = field(default_factory=list)
     usage: list[Usage] = field(default_factory=list)
     steps_taken: int = 0
@@ -164,6 +184,9 @@ class _ExecutionTrace:
     execution_provenance_valid: bool = True
 
     def capture_agent(self, agent: Any) -> None:
+        # [FUNCTION DOC]
+        # Copies the agent conversation's messages (deep) and its valid usage entries (invalid ones skipped); no-op
+        # if the agent has no conversation.
         conversation = getattr(agent, "conversation", None)
         if conversation is None:
             return
@@ -179,6 +202,10 @@ class _ExecutionTrace:
                 continue
 
     def capture_result(self, result: Any) -> None:
+        # [FUNCTION DOC]
+        # From a client result's observation: keeps the max non-negative steps_taken, and validates
+        # metadata.execution_provenance. Marks provenance invalid if it fails validation or differs from the first
+        # one seen; otherwise stores the first normalised value.
         observation = getattr(result, "observation", None)
         if observation is None:
             return
@@ -203,6 +230,9 @@ class _ExecutionTrace:
 
 @dataclass
 class _EpisodeOutcome:
+    # [CLASS DOC]
+    # HELPER: dataclass of an episode's final client result (or None), the exception raised (or None) and its
+    # trace.
     result: Any | None
     error: Exception | None
     trace: _ExecutionTrace
@@ -210,6 +240,9 @@ class _EpisodeOutcome:
 
 @dataclass(frozen=True)
 class CoverageReport:
+    # [CLASS DOC]
+    # Frozen dataclass summarising validated coverage: tuple of canonical DecodeResults, UID count, repetition
+    # indexes and total result count.
     """Summarize exact validated UID-by-repetition coverage.
 
     Args:
@@ -230,12 +263,21 @@ class CoverageReport:
 
 
 class _EpisodeEnded(RuntimeError):
+    # [CLASS DOC]
+    # HELPER: exception used to unwind the native agent loop when a tool call made the episode terminal;
+    # carries the terminal client result.
     def __init__(self, result: Any):
+        # [FUNCTION DOC]
+        # Stores the terminal result with a fixed message.
         super().__init__("ThinkingBox episode ended while executing a tool")
         self.result = result
 
 
 class _OpenEnvProxy:
+    # [CLASS DOC]
+    # HELPER: minimal native MCP proxy context handed to the native agent; forwards tool calls through the
+    # OpenEnv client. Matches individual call_tool requests to calls in the agent's latest provider batch so a
+    # parallel batch is submitted to OpenEnv once, and serves each call's result from the batch response.
     """Minimal native MCP context that forwards calls through OpenEnv."""
 
     def __init__(
@@ -244,6 +286,9 @@ class _OpenEnvProxy:
         tools: list[ToolDef],
         trace: _ExecutionTrace | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the client, deep copies of the public tool definitions and optional trace, and initialises the
+        # bound agent, returned call ids, per-batch submission tasks, batch results and message start index.
         self._env = env
         self._tools = [tool.model_copy(deep=True) for tool in tools]
         self._trace = trace
@@ -254,18 +299,28 @@ class _OpenEnvProxy:
         self._message_start = 0
 
     def bind(self, agent: Any) -> None:
+        # [FUNCTION DOC]
+        # Binds the native agent whose conversation is inspected for provider calls.
         self._agent = agent
 
     def begin_decode(self) -> None:
+        # [FUNCTION DOC]
+        # Records the current conversation length so later matching only considers messages from this decode.
         if self._agent is not None:
             self._message_start = len(self._agent.conversation.messages)
 
     async def list_tools(self) -> list[ToolDef]:
+        # [FUNCTION DOC]
+        # Returns deep copies of the tool definitions.
         return [tool.model_copy(deep=True) for tool in self._tools]
 
     def _provider_call(
         self, name: str, arguments: dict[str, Any]
     ) -> tuple[Any, ParallelToolCall] | None:
+        # [FUNCTION DOC]
+        # HELPER: searches batches added since begin_decode for a not-yet-returned call with the same name and
+        # arguments; prefers a call without a parse error, else returns the first errored match. Returns (call,
+        # batch message) or None (also when no agent is bound).
         if self._agent is None:
             return None
         errored_match: tuple[Any, ParallelToolCall] | None = None
@@ -284,6 +339,10 @@ class _OpenEnvProxy:
         return errored_match
 
     async def _submit_batch_once(self, message: ParallelToolCall) -> None:
+        # [FUNCTION DOC]
+        # HELPER: submits a batch via the client's call_tools, records the result in the trace, raises
+        # _EpisodeEnded if the episode ended, RuntimeError if no batch results came back, and stores each child's
+        # content by call id.
         result = await self._env.call_tools(
             [
                 SubmittedToolCall(
@@ -307,6 +366,9 @@ class _OpenEnvProxy:
         )
 
     async def submit_batch(self, message: ParallelToolCall) -> None:
+        # [FUNCTION DOC]
+        # Submits a batch at most once (keyed by message identity, shared task) and awaits it. End-turn batches are
+        # skipped (they are submitted later as terminal turns).
         if message.metadata.get("is_end_turn_tool", False):
             return
         batch_key = id(message)
@@ -317,6 +379,10 @@ class _OpenEnvProxy:
         await submission
 
     async def call_tool(self, tool_name: str, /, **arguments: Any) -> str:
+        # [FUNCTION DOC]
+        # If the call matches a provider batch call, marks it returned, ensures the batch is submitted and returns
+        # that call's stored result (RuntimeError if missing). Otherwise makes a single call_tool request, records
+        # it, raises _EpisodeEnded if terminal and RuntimeError if no tool result; returns the result text.
         matched = self._provider_call(tool_name, arguments)
         if matched is None:
             result = await self._env.call_tool(tool_name, arguments)
@@ -340,6 +406,8 @@ class _OpenEnvProxy:
 
 
 def load_thinkingbox_config(path: str | Path) -> ConfigFile:
+    # [FUNCTION DOC]
+    # Loads and validates a native ThinkingBox config from a user-expanded, resolved path.
     """Load an ordinary native ThinkingBox configuration.
 
     Args:
@@ -356,6 +424,8 @@ def load_thinkingbox_config(path: str | Path) -> ConfigFile:
 def load_thinkingbox_config_with_sha256(
     path: str | Path,
 ) -> tuple[ConfigFile, str]:
+    # [FUNCTION DOC]
+    # Returns (native config, SHA-256 of its bytes) for a user-expanded, resolved path.
     """Load the exact native configuration payload and fingerprint.
 
     Args:
@@ -370,6 +440,8 @@ def load_thinkingbox_config_with_sha256(
 
 
 def configured_agent_session_factory(config: ConfigFile) -> Any:
+    # [FUNCTION DOC]
+    # Returns the native agent-session factory for the config's orchestrator.
     """Construct the native agent factory from the configured orchestrator.
 
     Args:
@@ -383,6 +455,9 @@ def configured_agent_session_factory(config: ConfigFile) -> Any:
 
 
 def _model_provenance(model: Any | None) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: returns only the safe fields (type, deployment, model, reasoning, temperature, etc.) of a model
+    # config's JSON dump, or None for no model.
     if model is None:
         return None
     raw = model.model_dump(mode="json")
@@ -395,6 +470,9 @@ def config_provenance(
     *,
     sha256: str | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns credential-free config provenance: SHA-256 (given or computed from the file), safe agent/user/
+    # judge model fields, judge type and user-can-end flag.
     """Return credential-free provenance for the exact native configuration.
 
     Args:
@@ -421,10 +499,14 @@ def config_provenance(
 
 
 def _sha256_file(path: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: SHA-256 hex of a file's bytes.
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _sha256_json(value: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: SHA-256 hex of compact, key-sorted JSON.
     encoded = json.dumps(
         value,
         ensure_ascii=False,
@@ -435,6 +517,8 @@ def _sha256_json(value: Any) -> str:
 
 
 def _git_revision(root: Path) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: returns HEAD commit of the git repo at root via a git subprocess, or None on failure/empty.
     try:
         completed = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -449,6 +533,8 @@ def _git_revision(root: Path) -> str | None:
 
 
 def _git_root(path: Path) -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the resolved top-level dir of the git repo containing path, or None.
     try:
         completed = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
@@ -463,6 +549,8 @@ def _git_root(path: Path) -> Path | None:
 
 
 def _git_tracked_files(root: Path) -> list[Path] | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the repo's tracked files as relative Paths (git ls-files -z), or None on failure.
     try:
         completed = subprocess.run(
             ["git", "-C", str(root), "ls-files", "-z"],
@@ -475,6 +563,10 @@ def _git_tracked_files(root: Path) -> list[Path] | None:
 
 
 def _is_framework_path(relative: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if a relative path is part of the framework fingerprint: not under ignored/build/egg-info
+    # dirs, and either one of the exact framework files or a .py file under envs/thinkingbox_env or
+    # src/openenv/core.
     if any(
         part in _FRAMEWORK_IGNORED_PARTS or part.endswith(".egg-info")
         for part in relative.parts
@@ -488,6 +580,11 @@ def _is_framework_path(relative: Path) -> bool:
 
 
 def _framework_sha256(root: Path) -> str:
+    # [FUNCTION DOC]
+    # HELPER: hashes framework files of a checkout (git-tracked when available, else exact paths plus .py files
+    # under the source prefixes), sorted by path, hashing path and bytes with NUL separators; missing files are
+    # skipped.
+    # KNOWN ISSUE: appears unused in this module; the run provenance uses _runtime_framework_sha256 instead.
     resolved_root = root.resolve()
     tracked = _git_tracked_files(resolved_root)
     if tracked is not None:
@@ -520,6 +617,9 @@ def _framework_sha256(root: Path) -> str:
 
 
 def _module_source_root(module_name: str) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns the source directory of an importable module or package. Raises RuntimeError if the
+    # module or its location cannot be found.
     spec = importlib.util.find_spec(module_name)
     if spec is None:
         raise RuntimeError(f"Framework module {module_name!r} is unavailable")
@@ -531,6 +631,9 @@ def _module_source_root(module_name: str) -> Path:
 
 
 def _framework_checkout_root(package_root: Path) -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the git checkout root only if its envs/thinkingbox_env is the imported package directory
+    # (i.e. running from a source checkout), else None.
     checkout_root = _git_root(package_root)
     if checkout_root is None:
         return None
@@ -539,6 +642,10 @@ def _framework_checkout_root(package_root: Path) -> Path | None:
 
 
 def _runtime_framework_sha256(checkout_root: Path | None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: hashes all non-ignored .py files of the imported thinkingbox_env and openenv.core packages
+    # (labelled by package) plus, when running from a checkout, the runtime exact framework files (pyproject /
+    # lock files of the env and the example script). Returns the hex digest.
     roots = {
         "thinkingbox_env": _module_source_root("thinkingbox_env"),
         "openenv.core": _module_source_root("openenv.core"),
@@ -576,6 +683,9 @@ def _runtime_framework_sha256(checkout_root: Path | None) -> str:
 
 
 def _policy_provenance(spec: str | None, policy: Any | None) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: returns {spec, sha256 of the policy's source} or None if no policy. Falls back to hashing the
+    # whole source file; raises ValueError if no source can be found.
     if spec is None or policy is None:
         return None
     try:
@@ -602,6 +712,11 @@ def _base_provenance(
     policy_spec: str | None,
     policy: Any | None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: builds the run-independent provenance mapping: schema version, ThinkingBox runtime identity/hash/
+    # type, data release/revision/bundle hash, config provenance, manifest path and hashes (recomputed and
+    # required to match the bundle, ValueError otherwise), task count, requested test-list hash (or manifest
+    # hash), framework revision and runtime hash, policy provenance and Python version.
     package_root = _module_source_root("thinkingbox_env")
     checkout_root = _framework_checkout_root(package_root)
     runtime = load_thinkingbox_runtime_provenance()
@@ -652,6 +767,9 @@ def _run_provenance(
     args: argparse.Namespace,
     selected_uids: list[str],
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns base provenance plus a "run" mapping: agent, repeat, repetition start, shard index/count,
+    # limit, message timeout, SHA-256 of the base URL and of the selected UID list.
     return {
         **base,
         "run": {
@@ -671,6 +789,9 @@ def _run_provenance(
 
 
 def _native_mcp_tools(test_case: Any, reset_observation: Any) -> list[ToolDef]:
+    # [FUNCTION DOC]
+    # HELPER: converts the reset observation's public tools (excluding the agent's built-in tools) into native
+    # ToolDefs and applies the scenario's client tool config. Returns the list.
     builtin_names = {tool.name for tool in test_case.agent.builtin_tools}
     tools = [
         ToolDef(
@@ -688,6 +809,9 @@ def _native_mcp_tools(test_case: Any, reset_observation: Any) -> list[ToolDef]:
 def _terminal_tail(
     messages: list[Any],
 ) -> tuple[ParallelToolCall, str | None] | None:
+    # [FUNCTION DOC]
+    # HELPER: if the messages end the conversation via an end-turn tool, returns (last end-turn batch, content of
+    # the directly preceding visible non-dummy assistant text or None); otherwise None.
     if should_end_conversation(messages) != "end_turn_tool":
         return None
     terminal_index = next(
@@ -716,6 +840,16 @@ async def run_configured_agent(
     agent_session_factory: Any,
     trace: _ExecutionTrace | None = None,
 ) -> Any:
+    # [FUNCTION DOC]
+    # Drives the native configured agent against the OpenEnv episode. Builds the forwarding proxy and the
+    # native agent (with history replayed locally), then loops: finishes with "agent_limit" at the turn limit;
+    # decodes a turn from the current user message, submitting non-terminal tool batches (counting agent turns,
+    # plus direct responses); if the turn ended with an end-turn tool, submits it as a terminal turn; else
+    # submits the last visible assistant text (finishing with agent_limit/agent_error if there is none). Returns
+    # on done; raises RuntimeError if the server rejects the message; finishes with agent_error if there is no
+    # user reply or agent_limit at the limit; otherwise continues with the user's reply. An _EpisodeEnded during
+    # decoding returns its result; other exceptions are re-raised after capturing the trace.
+    # Returns: the terminal client result. Side effects: network calls, trace mutation.
     """Drive the native configured agent while OpenEnv owns private state.
 
     Args:
@@ -750,6 +884,8 @@ async def run_configured_agent(
     proxy.bind(agent)
 
     def record(result: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: captures the result and agent conversation into the trace and returns the result.
         trace.capture_result(result)
         trace.capture_agent(agent)
         return result
@@ -850,6 +986,9 @@ async def run_configured_agent(
 
 
 def _load_policy(spec: str) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: imports "MODULE:CALLABLE" and returns the callable. Raises ValueError without the colon,
+    # TypeError if the target is not callable, and import/attribute errors as raised.
     module_name, separator, attr = spec.partition(":")
     if not separator:
         raise ValueError("--policy must use MODULE:CALLABLE syntax")
@@ -865,6 +1004,8 @@ async def _invoke_policy(
     reset_result: Any,
     repetition_id: str,
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: calls policy(env, reset_result, repetition_id), awaiting the result if needed, and returns it.
     """Invoke the public policy contract without trusted evaluator inputs."""
     result = policy(env, reset_result, repetition_id)
     if inspect.isawaitable(result):
@@ -873,6 +1014,9 @@ async def _invoke_policy(
 
 
 def _load_requested_uids(path: str | None, canonical: list[str]) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the canonical UIDs when path is None; otherwise loads a YAML list of UIDs and raises
+    # ValueError if it is not a list of strings, has duplicates or contains UIDs not in the canonical list.
     if path is None:
         return canonical
     import yaml
@@ -889,6 +1033,8 @@ def _load_requested_uids(path: str | None, canonical: list[str]) -> list[str]:
 
 
 def _repetition_id(uid: str, repetition: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns "<uid>::repeat::<repetition>".
     return f"{uid}::repeat::{repetition}"
 
 
@@ -896,6 +1042,9 @@ def _expected_repetition_ids(
     uids: Sequence[str],
     repetitions: Sequence[int],
 ) -> dict[str, tuple[str, int]]:
+    # [FUNCTION DOC]
+    # HELPER: returns a mapping from repetition id to (uid, repetition) for the cross product. Raises
+    # CoverageError for duplicate UIDs or repetition indexes.
     if len(uids) != len(set(uids)):
         raise CoverageError("manifest contains duplicate UIDs")
     if len(repetitions) != len(set(repetitions)):
@@ -908,6 +1057,8 @@ def _expected_repetition_ids(
 
 
 def _iter_exception_chain(exc: Exception) -> Iterable[Exception]:
+    # [FUNCTION DOC]
+    # HELPER: yields the exception and its __cause__ chain (Exceptions only, stopping on cycles).
     seen: set[int] = set()
     current: BaseException | None = exc
     while isinstance(current, Exception) and id(current) not in seen:
@@ -917,6 +1068,8 @@ def _iter_exception_chain(exc: Exception) -> Iterable[Exception]:
 
 
 def _is_botdesigner_exception(exc: Exception) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if any exception in the cause chain has the BotDesignerActivityError type name.
     return any(
         type(current).__name__ == _BOTDESIGNER_ACTIVITY_ERROR
         for current in _iter_exception_chain(exc)
@@ -924,6 +1077,9 @@ def _is_botdesigner_exception(exc: Exception) -> bool:
 
 
 def _contains_error_type(value: Any, error_type: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: recursively searches mappings and sequences for error_type, either as the value of a
+    # type/error_type/exception_type key or as a plain value. Returns a bool.
     if isinstance(value, dict):
         for key, child in value.items():
             if key in {"type", "error_type", "exception_type"} and child == error_type:
@@ -937,6 +1093,9 @@ def _contains_error_type(value: Any, error_type: str) -> bool:
 
 
 def _is_botdesigner_result(result: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the result's observation error, test summary or metadata mentions the
+    # BotDesignerActivityError type.
     observation = getattr(result, "observation", None)
     if observation is None:
         return False
@@ -951,6 +1110,9 @@ def _is_botdesigner_result(result: Any) -> bool:
 
 
 def _native_messages(outcome: _EpisodeOutcome) -> list[MessageT]:
+    # [FUNCTION DOC]
+    # HELPER: returns deep copies of the terminal observation's messages validated as native messages, or of the
+    # trace's messages when the observation has none.
     result = outcome.result
     observation = getattr(result, "observation", None)
     raw_messages = getattr(observation, "messages", None) if observation else None
@@ -965,6 +1127,9 @@ def _native_messages(outcome: _EpisodeOutcome) -> list[MessageT]:
 
 
 def _native_usage(outcome: _EpisodeOutcome) -> list[Usage]:
+    # [FUNCTION DOC]
+    # HELPER: returns deep copies of trace usage if any; otherwise valid usage entries from the result's or the
+    # observation's metadata "usage" list; else [].
     if outcome.trace.usage:
         return [usage.model_copy(deep=True) for usage in outcome.trace.usage]
     result = outcome.result
@@ -986,6 +1151,8 @@ def _native_usage(outcome: _EpisodeOutcome) -> list[Usage]:
 
 
 def _message_step_counts(messages: Sequence[MessageT]) -> dict[str, int]:
+    # [FUNCTION DOC]
+    # HELPER: returns counts of native messages, assistant texts, user texts, tool batches and tool responses.
     assistant_messages = 0
     user_messages = 0
     tool_batches = 0
@@ -1012,6 +1179,9 @@ def _message_step_counts(messages: Sequence[MessageT]) -> dict[str, int]:
 def _expected_execution_provenance(
     provenance: dict[str, Any],
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: derives the server execution provenance expected from a run provenance mapping (validated through
+    # ThinkingBoxExecutionProvenance). Raises CoverageError if config or fields are invalid.
     config = provenance.get("config")
     if not isinstance(config, dict):
         raise CoverageError("run provenance has invalid config fingerprints")
@@ -1040,6 +1210,10 @@ def _require_execution_provenance(
     outcome: _EpisodeOutcome,
     provenance: dict[str, Any],
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: captures the outcome's result into the trace and requires the server-reported execution
+    # provenance to have been valid, consistent and equal to the expected one; raises _OperationalResultError
+    # otherwise. Returns a copy of the expected provenance.
     if outcome.result is not None:
         outcome.trace.capture_result(outcome.result)
     expected = _expected_execution_provenance(provenance)
@@ -1055,6 +1229,11 @@ def _require_execution_provenance(
 
 
 def _terminal_passed(result: Any, uid: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: validates a terminal client result for the UID and returns whether it passed. Raises
+    # _OperationalResultError if there is no result/observation, not done, UID mismatch, kind not terminal,
+    # system error, reward type not pass/fail, not graded or graded as system error, inconsistent pass status,
+    # or reward not exactly 1.0/0.0.
     if result is None:
         raise _OperationalResultError("ThinkingBox returned no episode result")
     observation = getattr(result, "observation", None)
@@ -1128,6 +1307,13 @@ def _canonical_decode_result(
     test_case: Any,
     outcome: _EpisodeOutcome,
 ) -> DecodeResult:
+    # [FUNCTION DOC]
+    # HELPER: converts an episode outcome into a canonical DecodeResult. Re-raises non-BotDesigner exceptions;
+    # requires matching execution provenance. BotDesigner activity errors (exception or reported in the
+    # result) become a failed agent_error result tagged with benchmark_failure_type; otherwise pass/fail comes
+    # from _terminal_passed and the finish reason must be native (_OperationalResultError otherwise). Builds
+    # metadata (schema version, repetition and id, attempt, steps taken, step counts, execution and run
+    # provenance) and returns the DecodeResult with binary reward, test tags, usage and no private fields.
     if outcome.error is not None and not _is_botdesigner_exception(outcome.error):
         raise outcome.error
     execution_provenance = _require_execution_provenance(outcome, provenance)
@@ -1197,6 +1383,10 @@ def _canonical_decode_result(
 
 
 def _canonical_payload(result: DecodeResult) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns the canonical JSON-ready mapping for a DecodeResult (uid, messages, minimal test result,
+    # tags, usage, metadata, is_system_error False, finish reason) after asserting no forbidden fields.
+    # Raises ValueError without a TestResult, CoverageError on forbidden fields.
     if result.test_result is None:
         raise ValueError("canonical result requires a native TestResult")
     payload = {
@@ -1222,6 +1412,9 @@ def _canonical_payload(result: DecodeResult) -> dict[str, Any]:
 
 
 def _encode_canonical(result: DecodeResult) -> str:
+    # [FUNCTION DOC]
+    # HELPER: encodes the canonical payload as key-sorted JSON, round-trips it through DecodeResult and validates
+    # it as a record of its own repetition id and provenance (CoverageError on problems). Returns the JSON text.
     payload = _canonical_payload(result)
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     decoded = DecodeResult.model_validate_json(encoded)
@@ -1239,11 +1432,15 @@ def _encode_canonical(result: DecodeResult) -> str:
 
 
 def _write_encoded_canonical(stream: Any, encoded: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: writes one JSONL line and flushes.
     stream.write(encoded + "\n")
     stream.flush()
 
 
 def _write_canonical(stream: Any, result: DecodeResult) -> None:
+    # [FUNCTION DOC]
+    # HELPER: encodes and writes a canonical result line.
     _write_encoded_canonical(stream, _encode_canonical(result))
 
 
@@ -1254,6 +1451,10 @@ def _assert_no_forbidden_fields(
     location: tuple[str | int, ...] = (),
     in_tool_arguments: bool = False,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: recursively raises CoverageError if any mapping key (case-insensitive) is a forbidden private
+    # field name, except inside messages[i].tool_calls[j].arguments (agent-authored content). Errors include the
+    # dotted path.
     if isinstance(value, dict):
         for key, child in value.items():
             key_name = str(key)
@@ -1294,6 +1495,11 @@ def _validate_provenance_shape(
     provenance: dict[str, Any],
     repetition_id: str,
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: raises CoverageError unless the run provenance has exactly the expected keys, current schema
+    # version, valid config provenance (exact keys, string hash and judge type, bool flag, models restricted to
+    # safe fields), valid framework and policy provenance, a complete run mapping with sane types and ranges,
+    # string identity fields and a positive task count.
     required = {
         "schema_version",
         "thinkingbox_revision",
@@ -1441,6 +1647,14 @@ def _validate_canonical_record(
     expected: dict[str, tuple[str, int]],
     expected_provenance: dict[str, Any] | None,
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: strict validation of one canonical record (raw mapping plus parsed DecodeResult): no forbidden
+    # fields, exact top-level fields, non-system-error, native finish reason, minimal and consistent test
+    # result, tags and usage present, exact metadata shape, valid benchmark failure metadata, repetition id
+    # expected and matching UID/index, schema, attempt, steps and step counts consistent with messages, valid
+    # provenance shape, execution provenance consistent with run provenance, equality with expected provenance
+    # when given, and raw payload identical to the re-derived canonical payload. Returns the repetition id;
+    # raises CoverageError otherwise.
     _assert_no_forbidden_fields(raw, "payload")
     required_fields = {
         "uid",
@@ -1615,6 +1829,9 @@ def _read_canonical_results(
     expected: dict[str, tuple[str, int]],
     expected_provenance: dict[str, Any] | None,
 ) -> list[DecodeResult]:
+    # [FUNCTION DOC]
+    # HELPER: reads one or more JSONL files, parsing and strictly validating each line (CoverageError for
+    # missing files, blank or malformed lines, duplicates across files). Returns the list of DecodeResults.
     source_paths = [paths] if isinstance(paths, Path) else list(paths)
     results: list[DecodeResult] = []
     seen: set[str] = set()
@@ -1654,6 +1871,8 @@ def _read_canonical_results(
 
 
 def _require_terminal_newline(path: Path, record_type: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: raises CoverageError if a non-empty file does not end with a newline (a truncated last record).
     if path.stat().st_size == 0:
         return
     with path.open("rb") as stream:
@@ -1670,6 +1889,9 @@ def _load_resume_state(
     expected: dict[str, tuple[str, int]],
     provenance: dict[str, Any],
 ) -> set[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the set of repetition ids already validly present in the output file (empty if it does not
+    # exist); raises CoverageError on invalid content or missing trailing newline.
     if not output.exists():
         return set()
     results = _read_canonical_results(
@@ -1687,6 +1909,10 @@ def _error_attempts(
     expected: dict[str, tuple[str, int]],
     provenance: dict[str, Any],
 ) -> dict[str, int]:
+    # [FUNCTION DOC]
+    # HELPER: reads the errors sidecar and returns the max attempt number per repetition id (empty if absent).
+    # Raises CoverageError for blank/malformed/non-object lines, unexpected repetitions, mismatched identity or
+    # classification, invalid attempt, stale provenance, duplicate attempts or missing trailing newline.
     attempts: dict[str, int] = defaultdict(int)
     seen_attempts: set[tuple[str, int]] = set()
     if not errors_output.exists():
@@ -1741,6 +1967,10 @@ def _error_attempts(
 
 
 def _canonical_release_identity() -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: requires the pinned ThinkingBox runtime and the canonical data (UID order equal to
+    # CANONICAL_TEST_UIDS and pinned release/commit/bundle/manifest path); raises CoverageError otherwise.
+    # Returns the identity mapping (runtime and data fingerprints, task count). May download data.
     try:
         runtime = require_canonical_thinkingbox_runtime()
     except RuntimeError as exc:
@@ -1788,6 +2018,14 @@ def validate_coverage(
     expected_base_provenance: dict[str, Any] | None = None,
     profile: str | None = None,
 ) -> CoverageReport:
+    # [FUNCTION DOC]
+    # Validates exact UID x repetition coverage of canonical result files. With a profile ("canary" requires
+    # repetitions (0,), "full" requires 0..19) also requires the canonical release and manifest and canonical
+    # content in expected provenance. Reads and validates all records. When no exact per-run provenance is
+    # given, additionally checks each record's base provenance (if expected), shard assignment, limit, repeat
+    # and repetition start against the plan, rejects limited shards under a profile, and requires all records
+    # to share one common provenance and shard count. Raises CoverageError for missing or extra results.
+    # Returns a CoverageReport.
     """Validate exact UID-by-repetition coverage before native aggregation.
 
     Args:
@@ -1946,6 +2184,9 @@ def validate_coverage(
 
 
 def _native_aggregation(report: CoverageReport) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: runs ThinkingBox's native per-test and overall aggregation on the report's results. Returns a
+    # JSON-ready mapping with "per_test" table rows and "metrics".
     from pydantic_core import to_jsonable_python
     from thinkingbox.cli.agg_main import (
         aggregate_results,
@@ -1963,6 +2204,9 @@ def _native_aggregation(report: CoverageReport) -> dict[str, Any]:
 
 
 def _exception_details(exc: Exception) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns redacted exception details: type name, cause chain type names, with messages and
+    # traceback replaced by "details redacted".
     chain = [
         {
             "type": type(current).__name__,
@@ -1987,6 +2231,11 @@ def _operational_error_record(
     exc: Exception,
     outcome: _EpisodeOutcome | None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: builds a redacted errors-sidecar record: schema version, uid, repetition and id, attempt, UTC
+    # timestamp, classification operational_system_error (retryable, quarantined), provenance, redacted error
+    # details, an audit of the terminal observation (from the exception's attached result or the outcome) and a
+    # trace summary.
     result = (
         exc.result
         if isinstance(exc, _OperationalResultError) and exc.result is not None
@@ -2032,17 +2281,23 @@ def _operational_error_record(
 
 
 def _write_error(stream: Any, record: dict[str, Any]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: writes a key-sorted JSON line to the error stream and flushes.
     stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
     stream.flush()
 
 
 def _default_errors_output(output: Path) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns "errors.jsonl" beside a "results.jsonl" output, else "<stem>.errors.jsonl" beside it.
     if output.name == "results.jsonl":
         return output.with_name("errors.jsonl")
     return output.with_name(f"{output.stem}.errors.jsonl")
 
 
 def _write_aggregation(path: str, aggregation: dict[str, Any]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: writes indented key-sorted JSON to stdout when path is "-", else to the file (creating parent dirs).
     encoded = json.dumps(aggregation, indent=2, sort_keys=True) + "\n"
     if path == "-":
         sys.stdout.write(encoded)
@@ -2053,6 +2308,12 @@ def _write_aggregation(path: str, aggregation: dict[str, Any]) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # [FUNCTION DOC]
+    # Returns the argparse parser: optional positional test list; --config (required), --env-config,
+    # --base-url, --message-timeout, --dataset, --env-dataset, --agent (default think), --policy, --output,
+    # --coverage-input (repeatable), --errors-output, --repeat, --repetition-start, --attempts-per-repetition,
+    # --shard-index, --shard-count, --limit, --resume, --coverage-profile (canary/full), --aggregate-output,
+    # --validate-only.
     """Build the command-line parser for execution and coverage validation.
 
     Returns:
@@ -2141,6 +2402,11 @@ async def _run_episode(
     env_config: str,
     env_dataset: str | None,
 ) -> _EpisodeOutcome:
+    # [FUNCTION DOC]
+    # HELPER: runs one episode in its own client connection: resets with the UID and server-visible dataset,
+    # agent and config; returns immediately if reset was terminal; otherwise runs the configured native agent
+    # or the custom policy (RuntimeError if the policy returns None). Never raises: any exception is captured in
+    # the returned _EpisodeOutcome together with the last known result and trace.
     trace = _ExecutionTrace()
     episode_result: Any | None = None
     try:
@@ -2187,6 +2453,19 @@ async def _run_episode(
 
 
 async def _run(args: argparse.Namespace) -> None:
+    # [FUNCTION DOC]
+    # Main async flow. Validates CLI arguments (ValueError on invalid combinations), loads the config and agent
+    # factory, optional policy, data bundle and canonical UIDs (checking canonical order for the pinned release),
+    # the requested UIDs, then applies sharding and limit (not in coverage-input mode). Builds provenance and the
+    # expected repetition plan; enforces canonical identity and unsharded full manifests for coverage profiles.
+    # Coverage-input mode: validates the given shard files and optionally aggregates. Otherwise resolves the
+    # output and errors files (must differ). Validate-only mode: checks the errors sidecar and the output, then
+    # optionally aggregates. Run mode: optionally resumes (skipping completed repetitions and continuing attempt
+    # numbers), and for each UID x repetition tries up to attempts-per-repetition times: hydrates the task
+    # locally, runs the episode, builds and encodes the canonical record, appending it on success or writing a
+    # redacted error record on any exception. Raises RuntimeError if any repetition stays unresolved; otherwise
+    # validates full coverage of the output and optionally writes the aggregation.
+    # Side effects: network episodes, file writes (append on resume, truncate otherwise).
     if args.repeat < 1:
         raise ValueError("--repeat must be at least 1")
     if args.repetition_start < 0:
@@ -2422,6 +2701,8 @@ async def _run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses command-line arguments and runs the async evaluator with asyncio.run.
     """Parse command-line arguments and execute the evaluator."""
     asyncio.run(_run(build_parser().parse_args()))
 

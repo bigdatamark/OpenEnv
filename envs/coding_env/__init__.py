@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Coding environment package (sandboxed Python code execution). Re-exports the CodingEnv client and
+# CodeAction, CodeObservation, CodeState models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

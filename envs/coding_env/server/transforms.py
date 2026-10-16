@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Reward transforms for coding observations: a safety penalty for dangerous code patterns and a quality
+# score for concise, syntactically valid code, combined by create_safe_coding_transform.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -17,9 +20,14 @@ from ..models import CodeObservation
 
 
 class CodeSafetyTransform(Transform):
+    # [CLASS DOC]
+    # Transform setting reward to penalty (default -1.0) when metadata last_code matches a dangerous regex
+    # (import os/subprocess, eval(, exec(, __import__, open().
     """Evaluates code safety and assigns penalties for dangerous patterns."""
 
     def __init__(self, penalty: float = -1.0):
+        # [FUNCTION DOC]
+        # Stores the penalty and the dangerous pattern list.
         self.penalty = penalty
         self.dangerous_patterns = [
             r"import\s+os",
@@ -31,6 +39,10 @@ class CodeSafetyTransform(Transform):
         ]
 
     def __call__(self, observation: Observation) -> Observation:
+        # [FUNCTION DOC]
+        # For CodeObservations with last_code: on the first matching pattern sets reward to the penalty and
+        # metadata safety_violation to the pattern; otherwise sets reward to 0.0 if unset. Mutates and returns the
+        # observation; other observations are returned unchanged.
         if not isinstance(observation, CodeObservation):
             return observation
 
@@ -49,6 +61,9 @@ class CodeSafetyTransform(Transform):
 
 
 class CodeQualityTransform(Transform):
+    # [CLASS DOC]
+    # Transform adding a quality score: +concise_bonus (0.1) if stripped code length <= threshold (100) and
+    # +syntax_penalty (-0.2) if the code does not parse.
     """Evaluates and rewards code quality metrics."""
 
     def __init__(
@@ -57,11 +72,16 @@ class CodeQualityTransform(Transform):
         max_length_threshold: int = 100,
         syntax_penalty: float = -0.2,
     ):
+        # [FUNCTION DOC]
+        # Stores bonus, length threshold and syntax penalty.
         self.concise_bonus = concise_bonus
         self.max_length_threshold = max_length_threshold
         self.syntax_penalty = syntax_penalty
 
     def __call__(self, observation: Observation) -> Observation:
+        # [FUNCTION DOC]
+        # Adds the quality score to the reward (or sets it if None) for CodeObservations; score is 0 without
+        # last_code. Mutates and returns the observation.
         if not isinstance(observation, CodeObservation):
             return observation
 
@@ -90,5 +110,7 @@ class CodeQualityTransform(Transform):
 
 
 def create_safe_coding_transform() -> CompositeTransform:
+    # [FUNCTION DOC]
+    # Returns a CompositeTransform applying CodeSafetyTransform then CodeQualityTransform.
     """Create a transform focused on safe coding practices and quality."""
     return CompositeTransform([CodeSafetyTransform(), CodeQualityTransform()])

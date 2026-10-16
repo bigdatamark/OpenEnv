@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI server entry for Reasoning Gym. At import time parses MAX_CONCURRENT_ENVS (default 8;
+# raises ValueError if not an integer) and creates "app" with a per-session factory. Raises
+# ImportError if openenv's server module cannot be imported.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -55,6 +59,8 @@ except ValueError:
 
 
 def create_reasoning_gym_environment() -> ReasoningGymEnvironment:
+    # [FUNCTION DOC]
+    # Factory returning a fresh ReasoningGymEnvironment for each session.
     """Factory: fresh environment per WebSocket session.
 
     Required for `max_concurrent_envs > 1` so each session gets its own dataset
@@ -74,6 +80,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: parses --host (default 0.0.0.0) and --port (default 8000) and runs uvicorn.
     """
     Entry point for direct execution via uv run or python -m.
 

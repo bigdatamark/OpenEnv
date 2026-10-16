@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Implements "openenv fork": duplicates a Hugging Face Space into the user's account (or a given
+# repo id) through the Hub duplicate_space API, optionally setting variables, secrets, privacy and
+# hardware.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Fork (duplicate) a Hugging Face Space using the Hub API."""
@@ -17,6 +21,9 @@ app = typer.Typer(
 
 
 def _parse_key_value(s: str) -> tuple[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: splits "KEY=VALUE" on the first "=" and returns the trimmed (key, value).
+    # Raises: typer.BadParameter if there is no "=" or the key is empty.
     """Parse KEY=VALUE string. Raises BadParameter if no '='."""
     if "=" not in s:
         raise typer.BadParameter(
@@ -31,6 +38,10 @@ def _parse_key_value(s: str) -> tuple[str, str]:
 
 
 def _ensure_hf_authenticated() -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the Hugging Face username from whoami; if that fails or yields no name, runs the
+    # interactive login and retries. Raises: typer.BadParameter if authentication still fails.
+    # Side effects: console output, possibly interactive login.
     """Ensure user is authenticated with Hugging Face. Returns username."""
     try:
         username = _extract_hf_username(whoami())
@@ -101,6 +112,14 @@ def fork(
         ),
     ] = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: validates the source id has exactly one "/", ensures authentication, builds
+    # duplicate_space arguments (privacy, parsed variables and secrets, hardware defaulting to
+    # cpu-basic, and target repo id validated the same way) and duplicates the Space. Prints the new
+    # Space URL derived from the result's repo_id, or from a /spaces/ URL string.
+    # Raises: typer.BadParameter for invalid ids or KEY=VALUE options; typer.Exit(1) if duplication fails.
+    # KNOWN ISSUE: the docstring mentions requesting storage and sleep time, which the command does not
+    # support.
     """
     Fork (duplicate) a Hugging Face Space to your account using the Hub API.
 

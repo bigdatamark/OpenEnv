@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Subclasses of Harbor's installed-agent wrappers that work around upstream install/run
+# bugs so agents can reach the capture proxy (gemini-cli, OpenHands, swe-agent, openclaw,
+# cline, kimi, pi). Registered with Harbor by import path. Harbor bases are imported
+# defensively: a missing one is replaced by a stub that fails only when instantiated.
+# Most overrides run shell commands inside the sandbox via Harbor's exec helpers.
 """Local subclasses that fix agent INSTALL failures, registered via `AgentConfig.import_path`.
 
 Same escape hatch as `pi_agent.py`, different reason. These agents' seams are fine; they simply never
@@ -20,6 +26,10 @@ from typing import Any
 
 
 def _harbor(module: str, name: str) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: imports and returns attribute name from Harbor module. On any failure logs a
+    # warning and returns a placeholder base class whose constructor raises RuntimeError
+    # naming what is missing.
     """Import one Harbor internal, or return a stub that fails only when that agent is used.
 
     Every subclass below is fitted to a specific upstream wrapper, so this module unavoidably reaches
@@ -39,9 +49,13 @@ def _harbor(module: str, name: str) -> Any:
         )
 
         class _MissingHarborBase:
+            # [CLASS DOC]
+            # HELPER: stand-in base class for an unavailable Harbor wrapper.
             _reason = reason
 
             def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                # [FUNCTION DOC]
+                # Always raises RuntimeError explaining the Harbor wrapper is unavailable.
                 raise RuntimeError(
                     f"this harness cannot run: {type(self)._reason}. Harbor's wrapper moved or was "
                     "renamed; update the subclass in openenv/harbor/install_fixes.py."
@@ -62,6 +76,8 @@ BaseEnvironment = _harbor("harbor.environments.base", "BaseEnvironment")
 
 
 class InterceptGeminiCli(GeminiCli):
+    # [CLASS DOC]
+    # gemini-cli wrapper that ensures bash (and curl) are installed before Harbor's install.
     """gemini-cli, with `bash` guaranteed before nvm runs.
 
     `nvm_node_install_snippet()` pipes the installer into **bash**:
@@ -87,6 +103,9 @@ class InterceptGeminiCli(GeminiCli):
     """
 
     async def install(self, environment: BaseEnvironment) -> None:
+        # [FUNCTION DOC]
+        # Runs "apt-get update && apt-get install -y curl bash" as root (noninteractive), then
+        # Harbor's own install. Errors propagate.
         await self.exec_as_root(
             environment,
             command="apt-get update && apt-get install -y curl bash",
@@ -96,6 +115,9 @@ class InterceptGeminiCli(GeminiCli):
 
 
 class InterceptOpenHands(OpenHands):
+    # [CLASS DOC]
+    # OpenHands wrapper pinned to version 0.49.0 on Python 3.12, repairing an undeclared
+    # dependency (Deprecated) and shimming poetry so its runtime server can start.
     """OpenHands pinned to the last V0 release, which still has `openhands.core.main`.
 
     Harbor's wrapper installs `openhands-ai` unpinned and then verifies with:
@@ -126,11 +148,17 @@ class InterceptOpenHands(OpenHands):
     VENV = "/opt/openhands-venv"
 
     def __init__(self, *args: Any, **kwargs: Any):
+        # [FUNCTION DOC]
+        # Defaults the version and python_version kwargs to the pinned values, then delegates.
         kwargs.setdefault("version", self.DEFAULT_V0_VERSION)
         kwargs.setdefault("python_version", self.DEFAULT_PYTHON)
         super().__init__(*args, **kwargs)
 
     async def install(self, environment: BaseEnvironment) -> None:
+        # [FUNCTION DOC]
+        # Runs Harbor's install then installs the poetry shim. If that fails (logged), pip-installs
+        # the missing deps into /opt/openhands-venv (ensurepip first), installs the shim and
+        # re-runs the openhands.core.main --version check; failures there propagate.
         """Install via Harbor, and repair the missing deps if its verify step trips over them.
 
         Harbor's install ends with `python -m openhands.core.main --version`, so an undeclared
@@ -166,6 +194,10 @@ class InterceptOpenHands(OpenHands):
         )
 
     async def _install_poetry_shim(self, environment: BaseEnvironment) -> None:
+        # [FUNCTION DOC]
+        # HELPER: as root writes an executable "poetry" shell script into the venv bin,
+        # /usr/local/bin and /usr/bin that drops a leading "run" and execs the venv's python
+        # (or other venv binary) with the remaining arguments. Overwrites any existing poetry.
         """Make `poetry run python ...` work in a venv that poetry never created.
 
         OpenHands' LocalRuntime starts its action-execution server with:
@@ -210,6 +242,9 @@ class InterceptOpenHands(OpenHands):
 
 
 class InterceptSweAgent(SweAgent):
+    # [CLASS DOC]
+    # swe-agent wrapper that provides a git repo at /testbed so Harbor takes its working
+    # preexisting-repo code path.
     """swe-agent, given a git repo to work in so Harbor's working code path is taken.
 
     Harbor builds the repo argument as:
@@ -232,6 +267,10 @@ class InterceptSweAgent(SweAgent):
     """
 
     async def setup(self, environment: BaseEnvironment) -> None:
+        # [FUNCTION DOC]
+        # After Harbor's setup, as root: ensures /workdir exists and is a git repo with an
+        # initial commit (creating one with a placeholder file if needed), and symlinks /testbed
+        # to /workdir if /testbed does not exist.
         await super().setup(environment)
         await self.exec_as_root(
             environment,
@@ -266,6 +305,14 @@ if p.is_file():
 
 
 def _export_openclaw_sqlite_transcript(log_dir="/logs/agent"):
+    # [FUNCTION DOC]
+    # Source is shipped into the sandbox and run there. If openclaw.session.jsonl is absent,
+    # finds the last complete JSON object at the end of openclaw.txt; if its
+    # meta.agentMeta.sessionFile is an "agent:" session key, runs "openclaw sessions
+    # export-trajectory" (60s timeout), checks the exported session id matches, reads
+    # session-branch.json entries and writes them atomically as JSON lines to
+    # openclaw.session.jsonl. Returns early when nothing applies. Raises ValueError on
+    # mismatched/empty export; subprocess/IO errors propagate.
     """Run inside the sandbox; export native SQLite records using OpenClaw's CLI.
 
     OpenClaw 2026.9.4 returns a session key in agentMeta.sessionFile. Harbor
@@ -335,6 +382,10 @@ def _export_openclaw_sqlite_transcript(log_dir="/logs/agent"):
 
 
 class InterceptOpenClaw(OpenClaw):
+    # [CLASS DOC]
+    # openclaw wrapper: pins version 2026.9.4, rewrites nvm Node 22 to 24.16.0, uploads its
+    # config into the sandbox (no bind mounts on E2B), trims trailing stderr from its JSON
+    # log so Harbor can parse it, and exports native SQLite transcripts.
     """openclaw, with its config actually present inside the sandbox.
 
     Harbor writes the merged config to the HOST trial dir and then copies it from a CONTAINER path:
@@ -358,6 +409,8 @@ class InterceptOpenClaw(OpenClaw):
     NODE_VERSION = "24.16.0"
 
     def __init__(self, *args: Any, **kwargs: Any):
+        # [FUNCTION DOC]
+        # Defaults the version kwarg to the pinned release, then delegates.
         kwargs.setdefault("version", self.DEFAULT_VERSION)
         super().__init__(*args, **kwargs)
 
@@ -365,6 +418,9 @@ class InterceptOpenClaw(OpenClaw):
         self, environment, command, env=None, cwd=None, timeout_sec=None
     ):
         # Harbor hardcodes Node 22; the observed package requires Node >=24.16.
+        # [FUNCTION DOC]
+        # Rewrites "nvm install 22"/"nvm use 22" in the command to the pinned Node version, then
+        # delegates to Harbor's exec_as_agent and returns its result.
         import re
 
         command = re.sub(
@@ -377,6 +433,10 @@ class InterceptOpenClaw(OpenClaw):
         )
 
     async def setup(self, environment: BaseEnvironment) -> None:
+        # [FUNCTION DOC]
+        # After Harbor's setup, writes Harbor's full openclaw config JSON to the host logs dir,
+        # creates the container logs dir (chmod 777) as root, and uploads the config file to the
+        # container path Harbor later copies from.
         await super().setup(environment)
 
         payload = json.dumps(self._build_full_openclaw_config(), indent=2) + "\n"
@@ -395,6 +455,10 @@ class InterceptOpenClaw(OpenClaw):
     async def _copy_openclaw_session_file_to_agent_logs(
         self, environment: BaseEnvironment, env: dict[str, str]
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: in the sandbox truncates openclaw.txt after its last line equal to "}" (failure
+        # only logged), then runs Harbor's own copy, then runs the SQLite transcript export script
+        # (Node via nvm, 90s timeout; failure only logged).
         """Strip openclaw's trailing stderr line so Harbor can parse its own capture file.
 
         UPSTREAM HARBOR BUG. Delete this override once Harbor's parser tolerates trailing text.
@@ -456,6 +520,9 @@ class InterceptOpenClaw(OpenClaw):
 
 
 class InterceptCline(ClineCli):
+    # [CLASS DOC]
+    # cline-cli wrapper that points cline at the capture proxy through its settings store
+    # and auth command, using intercept_config (base_url, api_key, model).
     """cline-cli, given a base URL through the only channel it has: its settings store.
 
     Harbor forwards exactly `{PROVIDER, API_KEY, MODELID}` and runs
@@ -478,6 +545,9 @@ class InterceptCline(ClineCli):
     def __init__(
         self, *args: Any, intercept_config: dict[str, str] | None = None, **kwargs: Any
     ):
+        # [FUNCTION DOC]
+        # Stores intercept_config (empty dict default); copies version into cline_version when
+        # only version is given; delegates the rest.
         self._intercept_config = intercept_config or {}
         # Harbor uses a separate cline_version knob; honor the shared exact-version pin.
         if kwargs.get("version") and not kwargs.get("cline_version"):
@@ -485,6 +555,12 @@ class InterceptCline(ClineCli):
         super().__init__(*args, **kwargs)
 
     def create_run_agent_commands(self, instruction: str):
+        # [FUNCTION DOC]
+        # Gets Harbor's command list; if base_url, api_key and model are all configured and there
+        # are commands, inserts after the first command a python step merging OpenAI-compatible
+        # settings (base URL + /v1, key, model, provider) into ~/.cline/data/globalState.json,
+        # and then a "cline auth --provider openai-compatible" command with credentials passed via
+        # env. Returns the (possibly modified) list.
         commands = list(super().create_run_agent_commands(instruction))
         base_url = self._intercept_config.get("base_url")
         api_key = self._intercept_config.get("api_key")
@@ -531,6 +607,10 @@ class InterceptCline(ClineCli):
 
 
 def _isolated_process_group(command: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: wraps a shell command so it runs via a python3 launcher in a new session
+    # (process group), exiting with the child's code (128 - signal for signal deaths).
+    # Returns the quoted command string.
     import shlex
 
     launcher = (
@@ -542,6 +622,9 @@ def _isolated_process_group(command: str) -> str:
 
 
 class InterceptKimi(KimiCli):
+    # [CLASS DOC]
+    # kimi-cli wrapper that isolates kimi's "kill 0" teardown in its own process group and
+    # tolerates the known exec-stream teardown errors so the trial can still be graded.
     """kimi-cli, surviving the stream reset its own teardown causes.
 
     Harbor runs kimi as (kimi_cli.py:379-394):
@@ -595,6 +678,9 @@ class InterceptKimi(KimiCli):
     ):
         # The wire terminal event triggers `kill 0`. Give that process tree its own session,
         # preserving the sandbox exec transport and Harbor's expected exit-143 handling.
+        # [FUNCTION DOC]
+        # If the command is kimi's wire invocation containing "kill 0", wraps it with
+        # _isolated_process_group; then delegates to Harbor's exec_as_agent.
         if "kimi --" in command and "--wire" in command and "kill 0" in command:
             command = _isolated_process_group(command)
         return await super().exec_as_agent(
@@ -602,6 +688,10 @@ class InterceptKimi(KimiCli):
         )
 
     async def run(self, instruction, environment, context) -> None:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Runs Harbor's run, swallowing only exceptions whose class name and message match a
+        # known teardown pair (RemoteProtocolError/StreamReset, ConnectError/Error reading
+        # content); everything else is re-raised.
         try:
             await super().run(instruction, environment, context)
         except Exception as exc:  # noqa: BLE001 - re-raised below unless it is the known teardown
@@ -650,6 +740,9 @@ MODELS_JSON = "~/.pi/agent/models.json"
 
 
 def build_models_json(base_url: str, api_key: str, model: str) -> str:
+    # [FUNCTION DOC]
+    # Returns pretty JSON for pi's models.json defining provider "intercept" with base URL
+    # <base_url>/v1, api "openai-completions", the API key and a single model id.
     return json.dumps(
         {
             "providers": {
@@ -666,6 +759,8 @@ def build_models_json(base_url: str, api_key: str, model: str) -> str:
 
 
 class InterceptPi(Pi):
+    # [CLASS DOC]
+    # pi wrapper that writes a custom-provider config pointing at the capture proxy before running.
     """`Pi` that writes a custom-provider config into the sandbox before running.
 
     Config arrives through `AgentConfig.kwargs` as `intercept_config`, mirroring how opencode
@@ -675,10 +770,16 @@ class InterceptPi(Pi):
     def __init__(
         self, *args: Any, intercept_config: dict[str, str] | None = None, **kwargs: Any
     ):
+        # [FUNCTION DOC]
+        # Stores intercept_config (empty dict default) and delegates.
         self._intercept_config = intercept_config or {}
         super().__init__(*args, **kwargs)
 
     async def setup(self, environment: BaseEnvironment) -> None:
+        # [FUNCTION DOC]
+        # After Harbor's setup, requires base_url, api_key and model in intercept_config
+        # (ValueError otherwise) and writes the models.json payload to ~/.pi/agent/models.json in
+        # the sandbox as the agent user.
         await super().setup(environment)
 
         base_url = self._intercept_config.get("base_url")

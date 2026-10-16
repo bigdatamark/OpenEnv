@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests that MCP JSON-RPC over the /ws WebSocket ("mcp" envelopes) works in production mode
+# without reset: tools/list, tools/call, error handling (unknown tool, unknown method, missing
+# name), JSON-RPC compliance (version, id echo, result/error exclusivity), and that MCP also works
+# in simulation mode. Adds src and envs to sys.path at import time (side effect).
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -45,6 +51,9 @@ from openenv.core.env_server.types import Action, Observation, State
 
 
 class MCPTestEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # HELPER: MCPEnvironment supporting concurrent sessions with tools get_info and calculate; reset
+    # and non-MCP steps return empty observations.
     """
     Test environment with MCP tools for production mode testing.
 
@@ -55,16 +64,22 @@ class MCPTestEnvironment(MCPEnvironment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Builds the FastMCP server with the two tools, wraps it, and initializes state.
         """Initialize with a FastMCP server containing test tools."""
         mcp_server = FastMCP("test-production-env")
 
         @mcp_server.tool
         def get_info() -> str:
+            # [FUNCTION DOC]
+            # HELPER: Returns a fixed environment description string.
             """Get environment information."""
             return "Production environment v1.0"
 
         @mcp_server.tool
         def calculate(operation: str, a: int, b: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Returns a+b for "add", a*b for "multiply"; raises ValueError for other operations.
             """Perform a calculation."""
             if operation == "add":
                 return a + b
@@ -77,23 +92,31 @@ class MCPTestEnvironment(MCPEnvironment):
         self._state = State(episode_id="prod", step_count=0)
 
     def reset(self, **kwargs) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Resets state and returns an empty observation.
         """Reset the environment."""
         self._state = State(episode_id="prod", step_count=0)
         return Observation(done=False, reward=None)
 
     def _step_impl(self, action: Action, **kwargs) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Increments step_count and returns an empty observation.
         """Handle non-MCP actions."""
         self._state.step_count += 1
         return Observation(done=False, reward=None)
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # HELPER: Returns the current State.
         """Return current state."""
         return self._state
 
 
 @pytest.fixture
 def production_mcp_app() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture creating a FastAPI app with HTTPEnvServer routes registered in production mode.
     """
     Create a FastAPI app in production mode with MCP-enabled environment.
 
@@ -112,6 +135,8 @@ def production_mcp_app() -> FastAPI:
 
 @pytest.fixture
 def simulation_mcp_app() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture creating the same app in simulation mode.
     """
     Create a FastAPI app in simulation mode with MCP-enabled environment.
 
@@ -133,9 +158,13 @@ def simulation_mcp_app() -> FastAPI:
 
 
 class TestProductionModeMCPToolsList:
+    # [CLASS DOC]
+    # Tests tools/list in production.
     """Test that production mode exposes MCP tools/list functionality."""
 
     def test_production_mode_mcp_tools_list_via_websocket(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # tools/list returns a JSON-RPC 2.0 result with get_info and calculate including descriptions.
         """
         Test that tools/list works in production mode via WebSocket.
 
@@ -191,6 +220,8 @@ class TestProductionModeMCPToolsList:
             )
 
     def test_production_mode_tools_list_without_reset(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # tools/list succeeds without a prior reset.
         """
         Test that tools/list works WITHOUT calling reset() first.
 
@@ -224,9 +255,13 @@ class TestProductionModeMCPToolsList:
 
 
 class TestProductionModeMCPToolsCall:
+    # [CLASS DOC]
+    # Tests tools/call in production.
     """Test that production mode exposes MCP tools/call functionality."""
 
     def test_production_mode_mcp_tools_call_via_websocket(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # tools/call for get_info returns a result with the request id.
         """
         Test that tools/call works in production mode via WebSocket.
 
@@ -265,6 +300,8 @@ class TestProductionModeMCPToolsCall:
             assert result is not None, "Tool should return a result"
 
     def test_production_mode_tools_call_with_arguments(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # tools/call with arguments succeeds.
         """
         Test tools/call with arguments in production mode.
 
@@ -306,6 +343,8 @@ class TestProductionModeMCPToolsCall:
             assert result is not None
 
     def test_production_mode_tools_call_without_reset(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # tools/call succeeds without a prior reset.
         """
         Test that tools/call works WITHOUT calling reset() first.
 
@@ -340,9 +379,13 @@ class TestProductionModeMCPToolsCall:
 
 
 class TestProductionModeMCPErrorHandling:
+    # [CLASS DOC]
+    # Tests MCP errors in production.
     """Test MCP error handling in production mode."""
 
     def test_production_mode_tool_not_found_error(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # An unknown tool yields a JSON-RPC error with code and message.
         """
         Test that calling a non-existent tool returns proper error.
 
@@ -379,6 +422,8 @@ class TestProductionModeMCPErrorHandling:
             assert "message" in error
 
     def test_production_mode_invalid_method_error(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # An unknown method yields error -32601.
         """
         Test that invalid MCP method returns proper error.
 
@@ -408,6 +453,9 @@ class TestProductionModeMCPErrorHandling:
             assert response["data"]["error"]["code"] == -32601
 
     def test_production_mode_missing_tool_name_in_call(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # tools/call without a name yields error -32602 mentioning name.
+        # KNOWN ISSUE: the docstring says -32600 but the test asserts -32602.
         """
         Test that tools/call without name parameter returns error.
 
@@ -443,9 +491,13 @@ class TestProductionModeMCPErrorHandling:
 
 
 class TestProductionModeMCPJSONRPCCompliance:
+    # [CLASS DOC]
+    # Tests JSON-RPC compliance.
     """Test JSON-RPC protocol compliance for MCP in production mode."""
 
     def test_jsonrpc_version_is_2_0(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # Responses use jsonrpc "2.0".
         """
         Test that all MCP responses use JSON-RPC 2.0.
 
@@ -470,6 +522,8 @@ class TestProductionModeMCPJSONRPCCompliance:
             assert response["data"]["jsonrpc"] == "2.0"
 
     def test_jsonrpc_request_id_is_echoed(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # The response id equals the request id.
         """
         Test that response echoes the request ID.
 
@@ -497,6 +551,8 @@ class TestProductionModeMCPJSONRPCCompliance:
             assert response["data"]["id"] == unique_id
 
     def test_jsonrpc_result_and_error_are_mutually_exclusive(self, production_mcp_app):
+        # [FUNCTION DOC]
+        # Success responses have result but no error; error responses have error but no result.
         """
         Test that JSON-RPC responses have either result OR error, not both.
 
@@ -544,6 +600,8 @@ class TestProductionModeMCPJSONRPCCompliance:
 
 
 class TestMCPWorksInBothModes:
+    # [CLASS DOC]
+    # Tests MCP availability in simulation mode.
     """
     Test that MCP functionality works in both production and simulation modes.
 
@@ -551,6 +609,8 @@ class TestMCPWorksInBothModes:
     """
 
     def test_tools_list_works_in_simulation_mode(self, simulation_mcp_app):
+        # [FUNCTION DOC]
+        # tools/list works in simulation mode.
         """
         Test that tools/list also works in simulation mode.
 
@@ -577,6 +637,8 @@ class TestMCPWorksInBothModes:
             assert "tools" in response["data"]["result"]
 
     def test_tools_call_works_in_simulation_mode(self, simulation_mcp_app):
+        # [FUNCTION DOC]
+        # tools/call works in simulation mode.
         """
         Test that tools/call also works in simulation mode.
 

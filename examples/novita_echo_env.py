@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Hello-world example running the Echo environment in a Novita sandbox via NovitaSandboxProvider and exercising its MCP
+# tools through EchoEnv. Requires NOVITA_API_KEY. Side effects: sys.path change, builds a template and starts/stops a
+# remote sandbox, logging.
 """Hello-world example running the Echo environment on Novita.
 
 Boots the echo-env server inside a Novita sandbox via ``NovitaSandboxProvider``,
@@ -36,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _interact(base_url: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Connects an EchoEnv client (without a provider), resets, lists tools and calls echo_message and echo_with_length, logging results.
     """Exercise the Echo MCP tools over a sandbox-backed session.
 
     Args:
@@ -58,6 +64,9 @@ async def _interact(base_url: str) -> None:
 
 
 async def main() -> int:
+    # [FUNCTION DOC]
+    # Configures logging, requires NOVITA_API_KEY (SystemExit otherwise), builds the image spec, starts the sandbox in a
+    # thread, waits up to 300 s, runs the interaction, and always stops the sandbox. Returns 0.
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if not os.environ.get("NOVITA_API_KEY"):

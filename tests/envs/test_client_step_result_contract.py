@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Contract tests that typed clients (chess, SUMO, sophistry, grid world,
+# calendar) read reward/done/metadata from the serialized envelope rather than
+# the nested observation. Each client's _parse_result is called unbound with
+# None as self on real serializer output.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Typed clients must read reward and done from where the server puts them.
@@ -23,6 +28,8 @@ from openenv.core.env_server.serialization import serialize_observation
 
 
 def test_serializer_keeps_reward_and_done_on_the_envelope():
+    # [FUNCTION DOC]
+    # serialize_observation puts reward/done on the envelope only.
     """Pin the wire contract the clients are being checked against."""
     from chess_env.models import ChessObservation
 
@@ -35,12 +42,19 @@ def test_serializer_keeps_reward_and_done_on_the_envelope():
 
 
 class TestChessClient:
+    # [CLASS DOC]
+    # ChessEnv parsing.
     def parse(self, observation):
+        # [FUNCTION DOC]
+        # HELPER: runs ChessEnv._parse_result on the serialized observation; returns
+        # the StepResult.
         from chess_env.client import ChessEnv
 
         return ChessEnv._parse_result(None, serialize_observation(observation))
 
     def test_step_result_carries_reward_and_done(self):
+        # [FUNCTION DOC]
+        # StepResult has the reward and done.
         from chess_env.models import ChessObservation
 
         result = self.parse(
@@ -51,6 +65,8 @@ class TestChessClient:
         assert result.done is True
 
     def test_observation_agrees_with_the_step_result(self):
+        # [FUNCTION DOC]
+        # Observation reward/done equal the StepResult's.
         from chess_env.models import ChessObservation
 
         result = self.parse(ChessObservation(done=True, reward=-1.0))
@@ -59,6 +75,8 @@ class TestChessClient:
         assert result.observation.done == result.done
 
     def test_other_observation_fields_still_arrive(self):
+        # [FUNCTION DOC]
+        # fen, is_check and result are preserved.
         from chess_env.models import ChessObservation
 
         result = self.parse(
@@ -73,7 +91,11 @@ class TestChessClient:
 
 
 class TestSumoClient:
+    # [CLASS DOC]
+    # SumoRLEnv parsing.
     def test_observation_agrees_with_the_step_result(self):
+        # [FUNCTION DOC]
+        # Reward/done appear on both StepResult and observation.
         from sumo_rl_env.client import SumoRLEnv
         from sumo_rl_env.models import SumoObservation
 
@@ -88,7 +110,11 @@ class TestSumoClient:
 
 
 class TestSophistryClient:
+    # [CLASS DOC]
+    # SophistryBenchSprintEnv parsing.
     def test_observation_agrees_with_the_step_result(self):
+        # [FUNCTION DOC]
+        # Reward/done appear on both StepResult and observation.
         from sophistry_bench_sprint_env.client import SophistryBenchSprintEnv
         from sophistry_bench_sprint_env.models import AdvocacyObservation
 
@@ -103,7 +129,11 @@ class TestSophistryClient:
 
 
 class TestGridWorldClient:
+    # [CLASS DOC]
+    # GridWorldEnv parsing.
     def test_step_result_carries_reward_and_done(self):
+        # [FUNCTION DOC]
+        # Reward/done and position are parsed.
         from grid_world_env.client import GridWorldEnv
         from grid_world_env.models import GridWorldObservation
 
@@ -117,6 +147,8 @@ class TestGridWorldClient:
         assert (result.observation.x, result.observation.y) == (4, 4)
 
     def test_observation_and_metadata_agree_with_the_step_result(self):
+        # [FUNCTION DOC]
+        # Metadata and observation reward/done are parsed.
         from grid_world_env.client import GridWorldEnv
         from grid_world_env.models import GridWorldObservation
 
@@ -133,7 +165,11 @@ class TestGridWorldClient:
 
 
 class TestCalendarClient:
+    # [CLASS DOC]
+    # CalendarEnv parsing.
     def test_step_result_keeps_metadata(self):
+        # [FUNCTION DOC]
+        # _parse_step_result keeps reward and top-level metadata.
         from calendar_env.client import CalendarEnv
 
         payload = {

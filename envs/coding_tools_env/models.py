@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the coding tools environment: tool results, todo items, multi-edit specs and the
+# per-session state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,6 +18,8 @@ from pydantic import BaseModel, Field
 
 
 class CommandResult(BaseModel):
+    # [CLASS DOC]
+    # Normalized result of one tool call: tool name, ok flag, output text, optional error and metadata dict.
     """Normalized result for one tool execution."""
 
     tool: str
@@ -25,6 +30,8 @@ class CommandResult(BaseModel):
 
 
 class TodoItem(BaseModel):
+    # [CLASS DOC]
+    # Todo entry managed by the todo_write tool: id, content, status and priority strings.
     """Todo item tracked by todo_write."""
 
     id: str
@@ -34,6 +41,9 @@ class TodoItem(BaseModel):
 
 
 class CodingToolsState(State):
+    # [CLASS DOC]
+    # Session state: sandbox id, setup command results, verify commands and their results, todos, tool call
+    # history, submitted flag, last reward, a note when a reward override was ignored, and last error.
     """Per-session state for coding_tools_env."""
 
     sandbox_id: str | None = None
@@ -49,6 +59,8 @@ class CodingToolsState(State):
 
 
 class EditSpec(BaseModel):
+    # [CLASS DOC]
+    # One string replacement for multi_edit: old_string, new_string and replace_all flag.
     """One edit operation for multi_edit."""
 
     old_string: str

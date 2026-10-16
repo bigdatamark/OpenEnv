@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Run management for rollouts started from the Harbor UI: each rollout runs in a daemon
+# worker thread (its own asyncio loop) independent of the browser request; live runs are
+# tracked in memory, recently finished ones kept in memory, and finished records
+# optionally persisted as one JSON file per run. Supports per-visitor ownership filtering,
+# global and per-owner concurrency caps, and reference-counted caching of visitor endpoints
+# in the capture proxy. Never stores API keys.
 """Rollouts started from the UI: running ones held in memory, finished ones saved to disk.
 
 The first UI tied a rollout to the browser request that started it. Closing the tab lost the result,
@@ -25,6 +32,10 @@ LIVE = ("starting", "running")
 
 
 def summarize(record: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a compact summary of a run record: the metadata fields plus ok, reward, rewards,
+    # turn/root counts, total tool calls and generated tokens over turns, wall time, rollout
+    # type, capture level, ATIF status and exception type (ok is None when no result).
     """The fields a run list and a comparison read, without the token arrays."""
     r = record.get("result") or {}
     turns = r.get("turns") or []
@@ -65,6 +76,9 @@ _META = (
 
 
 class RunStore:
+    # [CLASS DOC]
+    # On-disk store of finished runs (one <id>.json per run) with a lazily built, lock-protected
+    # in-memory index of summaries.
     """Finished rollouts as one JSON file each, with an in-memory index of their summaries.
 
     Args:
@@ -73,11 +87,16 @@ class RunStore:
     """
 
     def __init__(self, root: Path) -> None:
+        # [FUNCTION DOC]
+        # Stores the root directory; the index is built on first use.
         self.root = root
         self._index: dict[str, dict[str, Any]] | None = None
         self._lock = threading.Lock()
 
     def _load(self) -> dict[str, dict[str, Any]]:
+        # [FUNCTION DOC]
+        # HELPER: builds (once) and returns the index from non-hidden *.json files in root,
+        # skipping unreadable or id-less files. Caller should hold the lock when mutating.
         if self._index is None:
             index: dict[str, dict[str, Any]] = {}
             for path in sorted(self.root.glob("*.json")) if self.root.is_dir() else []:
@@ -93,6 +112,9 @@ class RunStore:
         return self._index
 
     def save(self, record: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Writes the record atomically to <root>/<id>.json (creating root; non-JSON values
+        # stringified) and updates the index. Raises OSError on write failure; KeyError without id.
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / f"{record['id']}.json"
         tmp = path.with_suffix(".tmp")
@@ -104,6 +126,9 @@ class RunStore:
             self._load()[record["id"]] = summarize(record)
 
     def get(self, run_id: str) -> dict[str, Any] | None:
+        # [FUNCTION DOC]
+        # Returns the parsed record for run_id, or None for ids containing "/" or "..", starting
+        # with ".", empty, missing or unreadable files.
         if not run_id or "/" in run_id or ".." in run_id or run_id.startswith("."):
             return None
         try:
@@ -112,6 +137,8 @@ class RunStore:
             return None
 
     def list(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns all summaries sorted by created time, newest first.
         with self._lock:
             return sorted(
                 self._load().values(), key=lambda s: s.get("created") or 0, reverse=True
@@ -120,6 +147,10 @@ class RunStore:
 
 @dataclass
 class LiveRun:
+    # [CLASS DOC]
+    # Mutable dataclass for an in-flight rollout: identity/metadata, owner digest, quota key
+    # (memory only), timestamps, status (starting/running/done/failed), capture session id,
+    # result dict and error.
     """A rollout in flight: what it is, and the capture session its live view follows."""
 
     id: str
@@ -143,6 +174,8 @@ class LiveRun:
     error: str | None = None
 
     def record(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a dict of the persisted metadata fields, wall_s (to finish or now) and result.
         return {
             **{k: getattr(self, k) for k in _META},
             "wall_s": (self.finished or time.time()) - self.created,
@@ -151,6 +184,8 @@ class LiveRun:
 
 
 class RunManager:
+    # [CLASS DOC]
+    # Starts UI rollouts and tracks live, recently finished and stored runs.
     """Starts UI rollouts, tracks the running ones, and hands finished ones to the store.
 
     Args:
@@ -164,6 +199,9 @@ class RunManager:
     def __init__(
         self, store: RunStore | None = None, max_live: int | None = None
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the optional store and the live cap (default 4), and initializes live, finished,
+        # engine refcount maps and a lock.
         self.store = store
         self.max_live = max_live or 4
         self._live: dict[str, LiveRun] = {}
@@ -188,6 +226,15 @@ class RunManager:
         private_urls: bool = True,
         quota: str = "",
     ) -> str:
+        # [FUNCTION DOC]
+        # Resolves the task directory (errors propagate), creates a LiveRun with a timestamped
+        # random id, model (engine or service default) and endpoint label ("server default" or
+        # the engine kind). Under the lock, raises RuntimeError if max_live runs are live or the
+        # quota key already has per_owner live runs; otherwise registers it. Increments the
+        # visitor-engine refcount and starts a daemon thread that runs _rollout via asyncio.run;
+        # the worker records the result (done if ok else failed) or a failure message, releases
+        # the engine, atomically moves the run from live to finished (keeping the last 50, or 200
+        # without a store), and saves it to the store (OSError ignored). Returns the run id immediately.
         """Start a rollout in a worker thread and return its run id at once.
 
         `owner` is the digest `ui_settings.owner_of` makes of the visitor's browser id; listings and
@@ -239,10 +286,14 @@ class RunManager:
         def created(session_id: str) -> None:
             # The live view follows exactly this session. Finding "the newest session" in the registry
             # instead would show one visitor another's run as soon as two ran at once.
+            # [FUNCTION DOC]
+            # HELPER: session-created callback setting the run's session id and status "running".
             run.session_id = session_id
             run.status = "running"
 
         def worker() -> None:
+            # [FUNCTION DOC]
+            # HELPER: thread body running the rollout and finalizing the run as described above.
             import asyncio
 
             outcome: dict[str, Any] = {
@@ -304,6 +355,8 @@ class RunManager:
         return run.id
 
     def _hold_engine(self, engine: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: increments the refcount of a visitor endpoint's upstream cache key (no-op for the server default).
         upstream = _visitor_upstream(engine)
         if upstream is not None:
             with self._lock:
@@ -311,6 +364,9 @@ class RunManager:
                 self._engines[key] = self._engines.get(key, 0) + 1
 
     def _release_engine(self, engine: dict[str, Any], service: Any) -> None:
+        # [FUNCTION DOC]
+        # HELPER: decrements that refcount; when it reaches zero removes it and makes the proxy
+        # forget the cached client, all under the lock.
         """Forget a visitor's endpoint in the proxy once no running rollout uses it.
 
         The proxy resolves the engine on every model call, so forgetting it while another rollout on
@@ -331,11 +387,16 @@ class RunManager:
             _forget_visitor_engine(upstream, service)
 
     def live(self, run_id: str, owner: str | None = None) -> LiveRun | None:
+        # [FUNCTION DOC]
+        # Returns the live run if present and visible to owner (None = no filter), else None.
         with self._lock:
             run = self._live.get(run_id)
         return run if run is not None and _mine(run.owner, owner) else None
 
     def get(self, run_id: str, owner: str | None = None) -> dict[str, Any] | None:
+        # [FUNCTION DOC]
+        # Returns the full record from live runs, in-memory finished runs, or the store, filtered
+        # by owner; None if absent or not visible.
         """A run's full record: live, finished in this process, or saved earlier.
 
         With `owner`, only a run that visitor started. `None` means no filter, which is the
@@ -351,6 +412,9 @@ class RunManager:
         )
 
     def list(self, owner: str | None = None) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns summaries of live, in-memory finished and stored runs (deduplicated by id),
+        # filtered by owner, newest first.
         """Every run this server knows about, newest first, as summaries; with `owner`, that
         visitor's only."""
         with self._lock:
@@ -368,6 +432,9 @@ class RunManager:
 
 
 def _mine(recorded: Any, owner: str | None) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: visibility test: True when owner is None (no filter), else only when owner is
+    # non-empty and equals the recorded owner.
     return owner is None or (bool(owner) and recorded == owner)
 
 
@@ -375,6 +442,9 @@ _KEEP_DONE = 50
 
 
 def _visitor_upstream(engine: dict[str, Any]) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: returns a capture Upstream for a visitor-supplied endpoint (url, model, api key,
+    # provider), or None for an empty URL or the server default.
     """The `Upstream` a visitor's endpoint maps to, or `None` for the server's own."""
     url = str(engine.get("url") or "").strip()
     if not url or engine.get("server_default"):
@@ -390,6 +460,8 @@ def _visitor_upstream(engine: dict[str, Any]) -> Any:
 
 
 def _forget_visitor_engine(upstream: Any, service: Any) -> None:
+    # [FUNCTION DOC]
+    # HELPER: removes the upstream's cached client from the capture app's upstream pool.
     """Drop the proxy's cached client for a visitor's endpoint.
 
     The pool keeps one client per engine and credential so concurrent rollouts share a probe. For a
@@ -408,6 +480,13 @@ async def _rollout(
     on_session_created: Any,
     private_urls: bool = True,
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: async. For a visitor endpoint re-checks the URL (ValueError if now disallowed)
+    # and resolves it through the proxy pool (probing it); otherwise uses the pool default with
+    # the service's capture level and model. Runs rollout.run_rollout with the harness profile
+    # from the engine, the service's registry and public URL, trials dir from
+    # OPENENV_HARBOR_TRIALS_DIR (default /tmp/openenv-harbor-trials), the configured reward
+    # key, require_reward False, purpose (default eval) and the session callback. Returns the result.
     """Resolve the endpoint this rollout uses, then run it.
 
     The server's own endpoint is the default and needs nothing from the browser: its key stays in the
@@ -458,6 +537,9 @@ _MANAGER_LOCK = threading.Lock()
 
 
 def manager() -> RunManager:
+    # [FUNCTION DOC]
+    # Returns the process-wide RunManager, creating it on first call from UI settings (store in
+    # the runs dir when history is on, max_runs cap). Thread-safe.
     """The process-wide run manager, created on first use with the configured history directory."""
     global _MANAGER
     with _MANAGER_LOCK:

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# SETA-style coding environment exposing MCP tools (bash, read, write, edit, multi_edit, glob, grep, ls,
+# todo_write, submit_solution) backed by one E2B sandbox per episode. Reward comes from verify commands
+# run at submission: the pass fraction, or a finite number written by a verify command to REWARD_FILE.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,11 +34,18 @@ _CLEAR_REWARD_FILE = f"rm -f {REWARD_FILE} && test ! -e {REWARD_FILE}"
 
 
 class CodingToolsEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCPEnvironment holding the sandbox and CodingToolsState. Tools record every call in tool_history; once
+    # submit_solution sets a reward, the next step observations are done with that reward. Supports
+    # concurrent sessions.
     """Tool-centric coding environment with one sandbox per episode."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates an empty state and a FastMCP server with the tool functions below, then initializes the MCP base.
+        # Tools that need the sandbox return "Error: environment not reset. Call reset() first." if none exists.
         self._sandbox: Optional[E2BSandbox] = None
         self._state = CodingToolsState(episode_id=str(uuid4()), step_count=0)
 
@@ -42,6 +53,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def bash(command: str, timeout: float | None = 30) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: runs a shell command (timeout default 30 s). Returns output, or "ERROR: <error>" plus output.
             """Execute bash commands using the computer instance."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -52,6 +65,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def read(file_path: str, offset: int | None = None, limit: int | None = None) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: reads a file with optional character offset/limit. Returns content or "ERROR: ...".
             """Read file contents using computer instance."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -61,6 +76,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def write(file_path: str, content: str) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: writes content to a file. Returns "write ok" or "ERROR: ...".
             """Write content to a file using computer instance."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -75,6 +92,9 @@ class CodingToolsEnvironment(MCPEnvironment):
             new_string: str,
             replace_all: bool = False,
         ) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: replaces the first (or every, with replace_all) occurrence of old_string in a file. Returns
+            # "edit ok", or an error if the file cannot be read, old_string is missing, or the write fails.
             """Perform exact string replacement in a file."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -98,6 +118,10 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def multi_edit(file_path: str, edits: list[dict[str, Any]]) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: applies EditSpec dicts sequentially to the file text in memory and writes once. Stops with an
+            # error (nothing written) at the first old_string not found. Returns "applied N edits" or "ERROR: ...".
+            # Raises: pydantic ValidationError for malformed edit dicts.
             """Perform multiple edits on a single file."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -135,6 +159,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def glob(pattern: str, path: str | None = None) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: returns newline-separated paths matching a glob pattern.
             """Find files matching a glob pattern."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -144,6 +170,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def grep(pattern: str, path: str | None = None, include: str | None = None) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: regex search in files (optional root path and file-name include pattern); returns matches.
             """Search for patterns in files."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -153,6 +181,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def ls(path: str = ".", ignore: list[str] | None = None) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: lists a directory, skipping ignored names.
             """List files and directories."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -162,6 +192,10 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def todo_write(todos: list[dict[str, Any]]) -> str:
+            # [FUNCTION DOC]
+            # MCP tool: validates todo dicts (at most one in_progress; status pending/in_progress/completed; priority
+            # high/medium/low) and replaces the state's todos. Returns "stored N todos" or an error. Works without a sandbox.
+            # Raises: pydantic ValidationError for malformed todo dicts.
             """Manage todo list for planning and progress tracking."""
             validated = [TodoItem.model_validate(todo) for todo in todos]
             in_progress = [item for item in validated if item.status == "in_progress"]
@@ -184,6 +218,9 @@ class CodingToolsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def submit_solution() -> str:
+            # [FUNCTION DOC]
+            # MCP tool: marks the episode submitted; with no verify commands sets reward 0.0; otherwise runs
+            # verification. Returns a summary "Verification: P/T passed; reward=R".
             """Submit solution and run test suite via verify commands."""
             if not self._sandbox:
                 return "Error: environment not reset. Call reset() first."
@@ -222,6 +259,13 @@ class CodingToolsEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Kills any existing sandbox, creates a new state (given or random episode id), and creates an E2B sandbox
+        # using E2B_API_KEY. Runs setup commands (kwargs setup or setup_scripts; 60 s timeout each) and stores
+        # verify commands (verify or verify_scripts). Returns an Observation with metadata status "ready",
+        # sandbox id, verify commands and setup results; or a done observation with status "error" when the key is
+        # missing, sandbox creation fails, or a setup command fails.
+        # Side effects: remote sandbox creation/destruction, network.
         if self._sandbox:
             self._sandbox.kill()
             self._sandbox = None
@@ -308,6 +352,8 @@ class CodingToolsEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **_: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Fallback for non-MCP actions: returns a not-done observation with an "Unknown action type" error.
         return Observation(
             done=False,
             reward=None,
@@ -325,6 +371,9 @@ class CodingToolsEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Increments step_count, delegates to the MCP base step, and if a solution was submitted with a reward,
+        # marks the observation done with that reward.
         self._state.step_count += 1
         obs = super().step(action, timeout_s=timeout_s, **kwargs)
         if self._state.submitted and self._state.last_reward is not None:
@@ -338,6 +387,8 @@ class CodingToolsEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async variant of step with the same post-processing.
         self._state.step_count += 1
         obs = await super().step_async(action, timeout_s=timeout_s, **kwargs)
         if self._state.submitted and self._state.last_reward is not None:
@@ -347,9 +398,13 @@ class CodingToolsEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> CodingToolsState:
+        # [FUNCTION DOC]
+        # Property: returns the CodingToolsState.
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Kills the sandbox if one exists.
         if self._sandbox:
             self._sandbox.kill()
             self._sandbox = None
@@ -362,6 +417,8 @@ class CodingToolsEnvironment(MCPEnvironment):
         error: str | None,
         metadata: dict[str, Any] | None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Appends a CommandResult to tool_history and sets last_error (None on success).
         result = CommandResult(
             tool=tool,
             ok=ok,
@@ -373,6 +430,11 @@ class CodingToolsEnvironment(MCPEnvironment):
         self._state.last_error = error
 
     def _run_verify_commands(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Ensures the verifier log dir, removes any pre-existing reward file, runs each verify command
+        # (120 s timeout) recording results, then uses the reward file override if valid, else passed/total (0.0
+        # when no commands). Sets last_reward and reward_override_ignored. Returns {"passed", "total", "reward"}
+        # (reward None if no sandbox).
         if not self._sandbox:
             return {"passed": 0, "total": 0, "reward": None}
         self._sandbox.run_shell("mkdir -p /home/user/logs/verifier")
@@ -404,6 +466,8 @@ class CodingToolsEnvironment(MCPEnvironment):
 
 
 def _coerce_commands(value: Any) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Normalizes None, a string, or an iterable into a list of non-blank command strings.
     if value is None:
         return []
     if isinstance(value, str):
@@ -414,6 +478,9 @@ def _coerce_commands(value: Any) -> list[str]:
 def _read_reward_override(
     sandbox: E2BSandbox, cleared: bool
 ) -> tuple[float | None, str | None]:
+    # [FUNCTION DOC]
+    # HELPER: Returns (None, reason) if the reward file could not be cleared beforehand; (None, None) if the file
+    # cannot be read; otherwise the parsed override.
     if not cleared:
         return None, "reward file could not be removed before verification"
     result = sandbox.read_file(REWARD_FILE)
@@ -423,6 +490,9 @@ def _read_reward_override(
 
 
 def _parse_reward_override(raw: str) -> tuple[float | None, str | None]:
+    # [FUNCTION DOC]
+    # HELPER: Parses the reward file text: (value, None) for any finite float, (None, None) for empty text, and
+    # (None, reason) for non-numeric or non-finite values.
     """Parse the reward file written by a verify command.
 
     The value comes from the task author rather than the agent, so any finite

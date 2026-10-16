@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Package entry for the REPL environment (Recursive Language Model style Python REPL). Re-exports the
+# remote and local clients, models, prompt builders and parsing utilities, rubrics and the local RLM
+# runner. Importing it imports all of those submodules.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

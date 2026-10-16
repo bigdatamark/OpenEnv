@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Wrapper around smolagents LocalPythonExecutor that registers helper tools (format_exc,
+# safe_json_dumps) and converts execution results to CodeExecResult. DEFAULT_SAFE_IMPORTS allows only json.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -35,6 +38,8 @@ DEFAULT_SAFE_IMPORTS = ["json"]
 
 
 class PyExecutor:
+    # [CLASS DOC]
+    # Persistent sandboxed Python executor; variables persist between run calls.
     """Wrapper around smolagents LocalPythonExecutor.
 
     The wrapper registers a few non-privileged helper tools to the
@@ -44,6 +49,9 @@ class PyExecutor:
     """
 
     def __init__(self, additional_imports: list[str] | None = None):
+        # [FUNCTION DOC]
+        # Creates the LocalPythonExecutor with the given authorized imports (default DEFAULT_SAFE_IMPORTS) and
+        # sends the helper tools (failure logged at debug and ignored).
         if additional_imports is None:
             additional_imports = DEFAULT_SAFE_IMPORTS.copy()
 
@@ -75,6 +83,11 @@ class PyExecutor:
             )
 
     def run(self, code: str) -> CodeExecResult:
+        # [FUNCTION DOC]
+        # Executes code. stdout = captured logs plus the final output value (JSON or repr) joined by newlines;
+        # stderr = any error/exception attributes; exit_code from exit_code, else success flag, else 1 if stderr.
+        # Returns: CodeExecResult. Raises: nothing; any executor exception yields exit_code 1 with the traceback as stderr.
+        # Side effects: logging.
         """Execute Python code and return a CodeExecResult.
 
         This method is intentionally defensive: it attempts to extract

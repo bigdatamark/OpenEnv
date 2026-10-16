@@ -1,3 +1,23 @@
+# [MODULE DOC]
+# Exposes an Environment (given as a factory) over FastAPI. HTTPEnvServer
+# manages per-connection sessions (one environment instance each, capped by a
+# concurrency config, each with its own single-thread executor unless the env
+# class requires one shared thread, plus an optional MCP session held open in an
+# async exit stack) and registers routes:
+# - Always: GET /health, /metadata, /schema, /list_environments; Task API
+#   routes under /{env_name}/ (splits, tasks, num_tasks, task, task_range);
+#   POST /mcp (JSON-RPC, stateless or targeting an HTTP-created session);
+#   WebSocket /mcp (JSON-RPC per connection); WebSocket /ws (reset/step/state/
+#   close/mcp messages per session, or attach to an existing session via the
+#   session_id query parameter).
+# - Simulation mode only: POST /reset, POST /step, GET /state (each uses a
+#   fresh, immediately closed environment instance - stateless).
+# - Production mode with a harness environment: WebSocket /harness streaming
+#   conversational turns (RFC 005).
+# An optional background reaper destroys idle, unattached sessions when a
+# session timeout is configured. Module-level create_app / create_fastapi_app
+# build the FastAPI application (with the Gradio web interface when
+# ENABLE_WEB_INTERFACE is true/1/yes; mode from OPENENV_MODE when not given).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -93,6 +113,13 @@ from .types import (
 
 
 def _make_json_serializable(obj: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively converts a value to JSON-compatible data: primitives and
+    # None unchanged, lists/tuples to lists, dicts by value, pydantic models via
+    # model_dump (not recursed further), objects with __dict__ to dicts of their
+    # attributes, anything else to str.
+    # KNOWN ISSUE: model_dump is called in python mode, so values such as datetimes
+    # or bytes inside pydantic models are returned unconverted.
     """
     Convert an object to a JSON-serializable form.
 
@@ -124,6 +151,8 @@ def _make_json_serializable(obj: Any) -> Any:
 
 
 async def _maybe_await(value: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Awaits value if it is awaitable, otherwise returns it.
     """Await values returned by async task APIs while preserving sync APIs."""
     if inspect.isawaitable(value):
         return await value
@@ -138,6 +167,14 @@ from .exceptions import (
 
 
 class HTTPEnvServer:
+    # [CLASS DOC]
+    # Session manager and route registrar for one environment type. Holds the env
+    # factory, action/observation/reset-observation/state classes, environment
+    # name, concurrency config and limit, session maps (env or None placeholder
+    # while creating, executor, MCP exit stack, SessionInfo), the set of sessions
+    # attached to a WebSocket and sessions with a pending close, an asyncio lock, a
+    # shared 32-worker thread pool for stateless calls, an optional shared
+    # single-thread executor, the idle timeout and reaper task.
     """
     HTTP server wrapper for Environment instances.
 
@@ -182,6 +219,14 @@ class HTTPEnvServer:
         *,
         reset_observation_cls: Optional[Type[Observation]] = None,
     ):
+        # [FUNCTION DOC]
+        # Validates env is callable (TypeError) and that max_concurrent_envs and
+        # concurrency_config are not both given (ValueError). Builds the concurrency
+        # config (default limit 1, no session timeout), validates concurrency safety
+        # (may instantiate the env; ConcurrencyConfigurationError), stores classes and
+        # name (default derived from the factory), initializes session state, creates
+        # the thread pool and, if the env class sets REQUIRES_SINGLE_THREAD_EXECUTOR,
+        # a shared single-thread executor.
         """
         Initialize HTTP server wrapper.
 
@@ -282,12 +327,20 @@ class HTTPEnvServer:
         self._reaper_task: Optional[asyncio.Task[None]] = None
 
     def _default_env_name(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the factory class name, or the factory's __name__, or
+        # "environment".
         factory = self._env_factory
         if inspect.isclass(factory):
             return factory.__name__
         return getattr(factory, "__name__", "environment")
 
     def _validate_concurrency_safety(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: When the limit is above 1, determines the env class (unwrapping
+        # functools.partial; instantiating and closing an env for non-class factories)
+        # and raises ConcurrencyConfigurationError unless it sets
+        # SUPPORTS_CONCURRENT_SESSIONS.
         """
         Validate that the environment supports the configured concurrency level.
 
@@ -319,6 +372,9 @@ class HTTPEnvServer:
             )
 
     def _detect_single_thread_requirement(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Returns the class attribute REQUIRES_SINGLE_THREAD_EXECUTOR of a class
+        # factory (partials unwrapped); False for non-class factories.
         import functools
 
         factory = self._env_factory
@@ -329,6 +385,9 @@ class HTTPEnvServer:
         return False
 
     def get_capacity_status(self) -> ServerCapacityStatus:
+        # [FUNCTION DOC]
+        # Returns a ServerCapacityStatus built from the current session count
+        # (including placeholders) and the limit.
         """
         Get the current capacity status of the server.
 
@@ -343,6 +402,9 @@ class HTTPEnvServer:
     async def _run_sync_in_thread_pool(
         self, func: Callable[..., Observation], *args, **kwargs
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Runs func(*args, **kwargs) in the shared thread pool and returns its
+        # result.
         """Run a synchronous function in the thread pool executor."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self._executor, lambda: func(*args, **kwargs))
@@ -353,6 +415,9 @@ class HTTPEnvServer:
         kwargs: Dict[str, Any],
         skip_params: Optional[set[str]] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the subset of kwargs accepted by sig (all of them if it has a
+        # **kwargs parameter), excluding names in skip_params.
         """Filter kwargs to only include parameters accepted by the function signature."""
         if skip_params is None:
             skip_params = set()
@@ -371,6 +436,14 @@ class HTTPEnvServer:
         return valid_kwargs
 
     async def _create_session(self) -> tuple[str, Environment]:
+        # [FUNCTION DOC]
+        # Reserves a slot under the lock (SessionCapacityError when full), assigns a
+        # UUID and an executor (shared or new single-thread), creates the env via the
+        # factory in that executor outside the lock (EnvironmentFactoryError on
+        # failure, slot released), enters the env's mcp_session context if it has one
+        # (on failure releases everything, closes the env and re-raises), then records
+        # the env, exit stack and SessionInfo.
+        # Returns: (session_id, env).
         """
         Create a new WebSocket session with its own environment instance.
 
@@ -453,6 +526,9 @@ class HTTPEnvServer:
         return session_id, env
 
     async def _destroy_session(self, session_id: str) -> None:
+        # [FUNCTION DOC]
+        # Removes all bookkeeping for session_id under the lock, then releases its
+        # resources (MCP stack, env close, executor shutdown). Unknown ids are a no-op.
         """
         Destroy a WebSocket session and cleanup resources.
 
@@ -476,6 +552,10 @@ class HTTPEnvServer:
         executor: Optional[ThreadPoolExecutor],
         stack: Optional[AsyncExitStack] = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Best-effort: closes the MCP exit stack, closes the env in its
+        # executor (falling back to a direct call; errors swallowed), and shuts down a
+        # non-shared executor without waiting.
         """Close an environment and shut down its executor (best-effort)."""
         # Close the MCP session stack first — this gracefully exits the
         # mcp_session() context (and the underlying FastMCP Client session)
@@ -511,6 +591,9 @@ class HTTPEnvServer:
     def _update_session_activity(
         self, session_id: str, increment_step: bool = False
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: If the session has info, sets last activity to now and optionally
+        # increments its step count.
         """
         Update session activity timestamp and optionally increment step count.
 
@@ -526,6 +609,11 @@ class HTTPEnvServer:
                 self._session_info[session_id].step_count += 1
 
     async def _reap_idle_sessions(self) -> None:
+        # [FUNCTION DOC]
+        # Background loop (no-op without a timeout): every max(timeout/4, 5) seconds,
+        # finds sessions idle longer than the timeout and not attached to a WebSocket,
+        # re-checks each under the lock, and destroys it. Errors are logged and the
+        # loop continues; exits on cancellation.
         """Background task that periodically destroys sessions idle beyond the timeout."""
         timeout = self._session_idle_timeout_s
         if timeout is None:
@@ -567,17 +655,24 @@ class HTTPEnvServer:
                 )
 
     def _start_reaper(self) -> None:
+        # [FUNCTION DOC]
+        # Starts the reaper task on the running loop if a timeout is configured and it
+        # is not already running.
         """Start the idle-session reaper if a timeout is configured."""
         if self._session_idle_timeout_s is not None and self._reaper_task is None:
             self._reaper_task = asyncio.create_task(self._reap_idle_sessions())
 
     def _stop_reaper(self) -> None:
+        # [FUNCTION DOC]
+        # Cancels the reaper task if any.
         """Cancel the reaper background task."""
         if self._reaper_task is not None:
             self._reaper_task.cancel()
             self._reaper_task = None
 
     def get_session_info(self, session_id: str) -> Optional[SessionInfo]:
+        # [FUNCTION DOC]
+        # Returns the SessionInfo for session_id or None.
         """
         Get information about a specific session.
 
@@ -593,6 +688,9 @@ class HTTPEnvServer:
     async def _run_in_session_executor(
         self, session_id: str, func: Callable[..., Observation], *args, **kwargs
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Runs func in the session's executor (falling back to the shared pool
+        # if the session has none) and returns the result.
         """Run a synchronous function in the session's thread pool executor."""
         executor = self._session_executors.get(session_id, self._executor)
         loop = asyncio.get_event_loop()
@@ -605,6 +703,11 @@ class HTTPEnvServer:
         managed_session_id: Optional[str],
         operation: Callable[[], Awaitable[_MCPResult]],
     ) -> _MCPResult:
+        # [FUNCTION DOC]
+        # HELPER: Runs an async MCP client operation: directly when a managed session
+        # is active and the client is connected; otherwise inside a fresh mcp_session
+        # context if the env provides one, else inside the client's own async context.
+        # Returns the operation's result.
         """Run an MCP client operation with the appropriate transport lifecycle."""
         if managed_session_id and mcp_client.is_connected():
             return await operation()
@@ -619,16 +722,23 @@ class HTTPEnvServer:
 
     @property
     def active_sessions(self) -> int:
+        # [FUNCTION DOC]
+        # Number of sessions, including ones still being created.
         """Return the number of active WebSocket sessions."""
         return len(self._sessions)
 
     @property
     def max_concurrent_envs(self) -> int:
+        # [FUNCTION DOC]
+        # The configured session limit.
         """Return the maximum number of concurrent environments."""
         return self._max_concurrent_envs
 
     @property
     def is_concurrency_safe(self) -> bool:
+        # [FUNCTION DOC]
+        # Returns SUPPORTS_CONCURRENT_SESSIONS of the factory class; for non-class
+        # factories instantiates and closes an env to read it.
         """Return whether the environment is marked as concurrency safe."""
         import inspect
 
@@ -643,10 +753,15 @@ class HTTPEnvServer:
 
     @property
     def concurrency_config(self) -> ConcurrencyConfig:
+        # [FUNCTION DOC]
+        # The ConcurrencyConfig in use.
         """Return the concurrency configuration."""
         return self._concurrency_config
 
     def _factory_produces_harness_env(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Returns whether the factory is (or produces) a HarnessEnvironment;
+        # non-class factories are instantiated and closed to check.
         """Return whether the env factory produces a HarnessEnvironment."""
         import inspect
 
@@ -663,6 +778,9 @@ class HTTPEnvServer:
             _temp_env.close()
 
     def _register_harness_route(self, app: FastAPI) -> None:
+        # [FUNCTION DOC]
+        # Registers the WebSocket /harness route (production mode). See the nested
+        # endpoint for the protocol.
         """
         Register the production `/harness` WebSocket route (RFC 005).
 
@@ -685,24 +803,44 @@ class HTTPEnvServer:
 
         @app.websocket("/harness")
         async def harness_websocket_endpoint(websocket: WebSocket):
+            # [FUNCTION DOC]
+            # Accepts the socket, creates a session (marked attached so it is not reaped),
+            # enters the env's MCP session, resets the env asynchronously (starting the
+            # harness) and sends {"type": "session_started", "data": {session_id, harness
+            # name}}. Then loops: each text frame must be JSON matching the harness client
+            # message model (otherwise a recoverable protocol_error frame is sent and the
+            # loop continues); a valid message runs one turn, streaming each harness event
+            # as JSON, bounded by the adapter's session_timeout_s. Timeout, a dead harness,
+            # any turn exception, or a stream ending without TURN_COMPLETE sends a terminal
+            # ERROR event (without exception details) and ends the session. Capacity and
+            # factory errors send a WS error frame; other errors send a generic
+            # "harness session failed". Finally detaches and destroys the session (finishing
+            # cleanup even if cancelled, then re-raising) and closes the socket.
             await websocket.accept()
 
             session_id = None
             session_env = None
 
             async def send_error(message: str, code: WSErrorCode) -> None:
+                # [FUNCTION DOC]
+                # HELPER: Sends a WSErrorResponse with message and code.
                 error_response = WSErrorResponse(
                     data={"message": message, "code": code}
                 )
                 await websocket.send_text(error_response.model_dump_json())
 
             async def send_protocol_error(message: str, code: WSErrorCode) -> None:
+                # [FUNCTION DOC]
+                # HELPER: Sends a recoverable harness protocol error frame with message and
+                # code.
                 error_response = HarnessProtocolError(
                     data={"message": message, "code": code}
                 )
                 await websocket.send_text(error_response.model_dump_json())
 
             async def send_harness_error(message: str) -> None:
+                # [FUNCTION DOC]
+                # HELPER: Sends a non-recoverable harness ERROR event with message.
                 """Emit a terminal ERROR event in the harness event stream."""
                 error_event = HarnessEvent(
                     type=HarnessEventType.ERROR,
@@ -760,6 +898,10 @@ class HTTPEnvServer:
                         self._update_session_activity(session_id, increment_step=True)
 
                         async def stream_turn(content: str) -> bool:
+                            # [FUNCTION DOC]
+                            # HELPER: Raises HarnessNotRunningError if the adapter process is not alive;
+                            # otherwise forwards each streamed event for content to the client, refreshing
+                            # session activity. Returns True if the last event was TURN_COMPLETE.
                             """Stream one turn; True if it ended with TURN_COMPLETE."""
                             saw_terminal = False
                             adapter = session_env.adapter
@@ -855,6 +997,12 @@ class HTTPEnvServer:
     def register_routes(
         self, app: FastAPI, mode: ServerMode | str = ServerMode.SIMULATION
     ) -> None:
+        # [FUNCTION DOC]
+        # Registers all routes on app for the given mode (ServerMode or
+        # case-insensitive string; ValueError if invalid). Adds app startup/shutdown
+        # hooks once per app to start/stop the idle reaper (shutdown also waits for the
+        # shared single-thread executor). See the module doc for the route list; nested
+        # functions implement each route.
         """
         Register HTTP routes on a FastAPI application.
 
@@ -883,9 +1031,14 @@ class HTTPEnvServer:
         server_ref = self
 
         async def _start_session_reaper() -> None:
+            # [FUNCTION DOC]
+            # Startup hook: starts the idle-session reaper.
             server_ref._start_reaper()
 
         async def _stop_session_reaper() -> None:
+            # [FUNCTION DOC]
+            # Shutdown hook: stops the reaper and shuts down the shared single-thread
+            # executor (waiting).
             server_ref._stop_reaper()
             if server_ref._shared_session_executor is not None:
                 server_ref._shared_session_executor.shutdown(wait=True)
@@ -899,6 +1052,11 @@ class HTTPEnvServer:
         async def reset_handler(
             request: ResetRequest = Body(default_factory=ResetRequest),
         ) -> ResetResponse:
+            # [FUNCTION DOC]
+            # Creates a fresh env, calls reset (async override if present, else sync in
+            # the thread pool) with the request's explicitly set fields filtered to
+            # accepted parameters, returns a ResetResponse from the serialized observation,
+            # and always closes the env. Stateless: the env does not persist.
             """Reset endpoint - returns initial observation."""
             _env = self._env_factory()
 
@@ -925,6 +1083,11 @@ class HTTPEnvServer:
 
         # Helper function to handle step endpoint
         async def step_handler(request: StepRequest) -> StepResponse:
+            # [FUNCTION DOC]
+            # Deserializes request.action into the action class (HTTP 422 with validation
+            # errors on failure), creates a fresh env, calls step (async or sync in the
+            # thread pool) with other accepted request fields, returns a StepResponse, and
+            # always closes the env. Stateless: the step runs on a new, un-reset env.
             """Step endpoint - executes action and returns observation."""
             action_data = request.action
 
@@ -967,6 +1130,31 @@ class HTTPEnvServer:
             session_env: Optional[Environment] = None,
             session_id: Optional[str] = None,
         ) -> JsonRpcResponse:
+            # [FUNCTION DOC]
+            # Handles one JSON-RPC request; never raises for request-level problems,
+            # returning JsonRpcResponse errors instead. params must be an object
+            # (INVALID_PARAMS).
+            # "openenv/session/create": returns the current session id when called from a
+            # WebSocket session; otherwise creates a session (capacity/factory errors ->
+            # SERVER_ERROR with details) and returns its id.
+            # "openenv/session/close": requires params.session_id; refuses to close the
+            # caller's own WebSocket session; for a session attached to a WebSocket, marks
+            # it pending-close and returns closing=true; for an unknown id returns
+            # INVALID_PARAMS; for a still-initializing session restores it and returns
+            # INVALID_REQUEST; otherwise removes and cleans it up and returns closed=true.
+            # Other methods run against the WebSocket session env, the env of
+            # params.session_id (errors if unknown or initializing), or a temporary env
+            # (closed afterwards). tools/list: uses the env's MCP client (via
+            # _run_mcp_client_operation), else its MCP server's registered tools (name,
+            # description, inputSchema), else - for envs whose action class is an MCP
+            # action type - a ListToolsAction step; else INTERNAL_ERROR. tools/call:
+            # requires params.name (INVALID_PARAMS); calls through the MCP client, the
+            # server tool's function directly (unknown tool -> INVALID_PARAMS), or a
+            # CallToolAction step, returning the JSON-serialized result. Unknown methods ->
+            # METHOD_NOT_FOUND. Any exception -> INTERNAL_ERROR with its message. Session
+            # activity is updated (step count for tools/call).
+            # KNOWN ISSUE: synchronous MCP server tool functions are called directly on the
+            # event loop thread, blocking it.
             """
             Handle MCP JSON-RPC requests.
 
@@ -1125,6 +1313,9 @@ class HTTPEnvServer:
                 mcp_session_factory = getattr(_env, "mcp_session", None)
 
                 async def call_mcp_style_step(action: Action) -> Observation:
+                    # [FUNCTION DOC]
+                    # HELPER: Steps the env with an MCP-style action: async override directly,
+                    # else the sync step in the managed session's executor or the shared pool.
                     is_async = overrides_method(_env.step_async, Environment.step_async)
                     if is_async:
                         return await _env.step_async(action)
@@ -1308,6 +1499,9 @@ class HTTPEnvServer:
                     _env.close()
 
         def _check_env_name(env_name: str) -> None:
+            # [FUNCTION DOC]
+            # HELPER: Raises HTTP 404 unless env_name matches the server's name
+            # case-insensitively.
             if env_name.lower() != self.env_name.lower():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -1315,6 +1509,10 @@ class HTTPEnvServer:
                 )
 
         def _normalize_split(split: Any) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # HELPER: Converts a split to a dict: pydantic models via model_dump, dicts
+            # serialized, strings to {"name", "type"} where type is the name if it is
+            # train/validation/test else "validation", other values stringified.
             if hasattr(split, "model_dump"):
                 return cast(Dict[str, Any], split.model_dump())
             if isinstance(split, dict):
@@ -1327,6 +1525,10 @@ class HTTPEnvServer:
             return {"name": str(split), "type": "validation"}
 
         async def _call_task_method(method_name: str, *args: Any) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Creates a fresh env, calls the named task method with args (awaiting
+            # if needed) and always closes the env. Missing method or NotImplementedError ->
+            # HTTP 501; IndexError -> HTTP 400.
             _env = self._env_factory()
             try:
                 method = getattr(_env, method_name, None)
@@ -1348,10 +1550,14 @@ class HTTPEnvServer:
 
         @app.get("/list_environments", tags=["Task API"])
         async def list_environments() -> list[str]:
+            # [FUNCTION DOC]
+            # GET /list_environments: returns a single-item list with the env name.
             return [self.env_name]
 
         @app.get("/{env_name}/splits", tags=["Task API"])
         async def list_splits(env_name: str) -> list[Dict[str, Any]]:
+            # [FUNCTION DOC]
+            # GET /{env_name}/splits: returns the env's splits normalized to dicts.
             _check_env_name(env_name)
             splits = await _call_task_method("list_splits")
             return [_normalize_split(split) for split in splits]
@@ -1361,6 +1567,9 @@ class HTTPEnvServer:
             env_name: str,
             request: ListTasksRequest,
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /{env_name}/tasks: returns {"tasks": serialized list_tasks(split),
+            # "env_name"}.
             _check_env_name(env_name)
             tasks = await _call_task_method("list_tasks", request.split)
             return {
@@ -1373,6 +1582,8 @@ class HTTPEnvServer:
             env_name: str,
             request: NumTasksRequest,
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /{env_name}/num_tasks: returns {"num_tasks": num_tasks(split)}.
             _check_env_name(env_name)
             count = await _call_task_method("num_tasks", request.split)
             return {"num_tasks": count}
@@ -1382,6 +1593,8 @@ class HTTPEnvServer:
             env_name: str,
             request: GetTaskRequest,
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /{env_name}/task: returns {"task": serialized get_task(split, index)}.
             _check_env_name(env_name)
             task = await _call_task_method("get_task", request.split, request.index)
             return {"task": _make_json_serializable(task)}
@@ -1391,6 +1604,9 @@ class HTTPEnvServer:
             env_name: str,
             request: GetTaskRangeRequest,
         ) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /{env_name}/task_range: returns {"tasks": serialized
+            # get_task_range(split, start, stop)}.
             _check_env_name(env_name)
             tasks = await _call_task_method(
                 "get_task_range", request.split, request.start, request.stop
@@ -1400,6 +1616,12 @@ class HTTPEnvServer:
         # Register MCP WebSocket endpoint (available in both production and simulation modes)
         @app.websocket("/mcp")
         async def mcp_websocket_endpoint(websocket: WebSocket):
+            # [FUNCTION DOC]
+            # WebSocket /mcp: creates a dedicated session, holds its MCP session open, and
+            # answers each text frame as a JSON-RPC request via mcp_handler (parse errors
+            # -> PARSE_ERROR, invalid request -> INVALID_REQUEST, handler exceptions ->
+            # INTERNAL_ERROR). Capacity, factory or other setup errors are sent as
+            # SERVER_ERROR responses. Always destroys the session and closes the socket.
             """
             WebSocket endpoint for MCP JSON-RPC requests.
 
@@ -1538,6 +1760,8 @@ You can optionally provide a seed for reproducibility and an episode_id for trac
             async def reset(
                 request: ResetRequest = Body(default_factory=ResetRequest),
             ) -> ResetResponse:
+                # [FUNCTION DOC]
+                # POST /reset (simulation mode): delegates to reset_handler.
                 return await reset_handler(request)
 
             @app.post(
@@ -1593,9 +1817,14 @@ The response includes:
                 },
             )
             async def step(request: StepRequest) -> StepResponse:
+                # [FUNCTION DOC]
+                # POST /step (simulation mode): delegates to step_handler.
                 return await step_handler(request)
 
         def get_state_handler() -> State:
+            # [FUNCTION DOC]
+            # GET /state handler: returns the state of a fresh env (then closed), so it
+            # reflects a new instance rather than any session.
             _env = self._env_factory()
             try:
                 return _env.state
@@ -1603,6 +1832,8 @@ The response includes:
                 _env.close()
 
         def get_metadata_handler() -> EnvironmentMetadata:
+            # [FUNCTION DOC]
+            # GET /metadata handler: returns get_metadata() of a fresh env (then closed).
             _env = self._env_factory()
             try:
                 return _env.get_metadata()
@@ -1697,6 +1928,9 @@ all schema information needed to interact with the environment.
             },
         )
         async def get_schemas() -> SchemaResponse:
+            # [FUNCTION DOC]
+            # GET /schema: returns JSON schemas of the action, observation, reset
+            # observation and state classes.
             """Return all schemas in one response."""
             return SchemaResponse(
                 action=self.action_cls.model_json_schema(),
@@ -1708,6 +1942,10 @@ all schema information needed to interact with the environment.
         # Register MCP endpoint for production mode (direct MCP access)
         @app.post("/mcp")
         async def mcp_endpoint(request_raw: Request) -> Dict[str, Any]:
+            # [FUNCTION DOC]
+            # POST /mcp: parses the body as a JSON-RPC request (PARSE_ERROR for invalid
+            # JSON or other parse failures, INVALID_REQUEST for validation errors) and
+            # returns mcp_handler's response as a dict (always HTTP 200).
             """MCP JSON-RPC endpoint for production mode.
 
             Bypasses step() overhead and provides direct access to MCP tools.
@@ -1738,6 +1976,21 @@ all schema information needed to interact with the environment.
         # Register WebSocket endpoint for persistent sessions
         @app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
+            # [FUNCTION DOC]
+            # WebSocket /ws: with a session_id query parameter, attaches to an existing
+            # ready HTTP-created session (errors if unknown, initializing or already
+            # attached) without owning it; otherwise creates and owns a new session and
+            # holds its MCP session open. Loops over JSON text frames by "type": "reset"
+            # (accepted kwargs from data; async or in the session executor) and "step"
+            # (deserialize action, async or executor; increments step count) reply with a
+            # WSObservationResponse; "state" replies with the state as a dict; "close" ends
+            # the loop; "mcp" runs the embedded JSON-RPC request via mcp_handler and
+            # replies with WSMCPResponse; unknown types get an UNKNOWN_TYPE error. Invalid
+            # JSON -> INVALID_JSON error; validation errors -> VALIDATION_ERROR with
+            # details; other exceptions -> EXECUTION_ERROR (loop continues). Setup failures
+            # send CAPACITY_REACHED, FACTORY_ERROR or SESSION_ERROR. Finally: an attached
+            # session is detached and destroyed only if a close was requested meanwhile;
+            # an owned session is destroyed; the socket is closed.
             """
             WebSocket endpoint for persistent environment sessions.
 
@@ -2004,6 +2257,11 @@ def create_app(
     mode: Optional[ServerMode | str] = None,
     reset_observation_cls: Optional[Type[Observation]] = None,
 ) -> FastAPI:
+    # [FUNCTION DOC]
+    # Builds the FastAPI app for an environment. If ENABLE_WEB_INTERFACE is
+    # "true"/"1"/"yes" (case-insensitive) returns create_web_interface_app with all
+    # options (Gradio UI at /web); otherwise create_fastapi_app (Gradio-related
+    # options ignored). Raises whatever HTTPEnvServer raises.
     """
     Create a FastAPI application with or without web interface.
 
@@ -2109,6 +2367,12 @@ def create_fastapi_app(
     mode: Optional[ServerMode | str] = None,
     reset_observation_cls: Optional[Type[Observation]] = None,
 ) -> FastAPI:
+    # [FUNCTION DOC]
+    # Creates a documented FastAPI app (title, description, tags, docs URLs),
+    # constructs an HTTPEnvServer with the given options, resolves mode from
+    # OPENENV_MODE (default "simulation") when None, registers routes and returns
+    # the app. Raises ImportError if FastAPI is missing (cannot happen in practice
+    # since it is imported at module level).
     """
     Create a FastAPI application with comprehensive documentation.
 

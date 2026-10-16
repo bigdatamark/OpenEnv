@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Unit tests for package-based environment discovery (openenv.auto._discovery):
+# EnvironmentInfo, name/hub helpers, class-name inference, building infos from
+# installed packages and manifests, EnvironmentDiscovery lookup and caching,
+# and cache-file security (per-user location, ownership/permission checks).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -38,6 +43,10 @@ from openenv.auto._discovery import (
 
 @pytest.fixture(autouse=True)
 def _isolate_discovery_cache(tmp_path, monkeypatch):
+    # [FUNCTION DOC]
+    # Autouse fixture: monkeypatches the module's _default_cache_file to return a
+    # path under tmp_path so tests never touch the real user cache. Tests that
+    # imported _default_cache_file directly still call the real function.
     """Keep every test off the real per-user discovery cache.
 
     The cache used to live in the shared temp directory, so tests that
@@ -55,9 +64,13 @@ def _isolate_discovery_cache(tmp_path, monkeypatch):
 
 
 class TestEnvironmentInfo:
+    # [CLASS DOC]
+    # EnvironmentInfo construction.
     """Test EnvironmentInfo dataclass and methods."""
 
     def test_environment_info_creation(self):
+        # [FUNCTION DOC]
+        # Fields are stored as given.
         """Test creating EnvironmentInfo instance."""
         env_info = EnvironmentInfo(
             env_key="echo",
@@ -80,61 +93,85 @@ class TestEnvironmentInfo:
 
 
 class TestHelperFunctions:
+    # [CLASS DOC]
+    # Helper function tests.
     """Test helper functions."""
 
     def test_normalize_env_name_simple(self):
+        # [FUNCTION DOC]
+        # Bare names get "_env".
         """Test normalizing simple names."""
         assert _normalize_env_name("echo") == "echo_env"
         assert _normalize_env_name("coding") == "coding_env"
 
     def test_normalize_env_name_with_suffix(self):
+        # [FUNCTION DOC]
+        # "-env" becomes "_env".
         """Test normalizing names with -env suffix."""
         assert _normalize_env_name("echo-env") == "echo_env"
         assert _normalize_env_name("coding-env") == "coding_env"
 
     def test_normalize_env_name_with_underscore(self):
+        # [FUNCTION DOC]
+        # "_env" names unchanged.
         """Test normalizing names with _env suffix."""
         assert _normalize_env_name("echo_env") == "echo_env"
         assert _normalize_env_name("coding_env") == "coding_env"
 
     def test_is_hub_url_with_slash(self):
+        # [FUNCTION DOC]
+        # org/repo is a Hub reference.
         """Test Hub URL detection with org/repo pattern."""
         assert _is_hub_url("meta-pytorch/coding-env")
         assert _is_hub_url("myorg/myenv")
 
     def test_is_hub_url_with_domain(self):
+        # [FUNCTION DOC]
+        # huggingface.co URLs are Hub references.
         """Test Hub URL detection with full URL."""
         assert _is_hub_url("https://huggingface.co/meta-pytorch/coding-env")
         assert _is_hub_url("huggingface.co/spaces/myenv")
 
     def test_is_hub_url_local(self):
+        # [FUNCTION DOC]
+        # Local names are not.
         """Test that local names are not detected as Hub URLs."""
         assert not _is_hub_url("echo")
         assert not _is_hub_url("coding-env")
         assert not _is_hub_url("echo_env")
 
     def test_infer_class_name_client(self):
+        # [FUNCTION DOC]
+        # Client class is CamelCase base name plus "Env".
         """Test inferring client class names."""
         assert _infer_class_name("echo_env", "client") == "EchoEnv"
         assert _infer_class_name("coding_env", "client") == "CodingEnv"
         assert _infer_class_name("browser_gym_env", "client") == "BrowserGymEnv"
 
     def test_infer_class_name_action(self):
+        # [FUNCTION DOC]
+        # Action class is CamelCase base plus "Action".
         """Test inferring action class names."""
         assert _infer_class_name("echo_env", "action") == "EchoAction"
         assert _infer_class_name("coding_env", "action") == "CodingAction"
 
     def test_infer_class_name_observation(self):
+        # [FUNCTION DOC]
+        # Observation class is CamelCase base plus "Observation".
         """Test inferring observation class names."""
         assert _infer_class_name("echo_env", "observation") == "EchoObservation"
         assert _infer_class_name("coding_env", "observation") == "CodingObservation"
 
 
 class TestCreateEnvInfoFromPackage:
+    # [CLASS DOC]
+    # _create_env_info_from_package tests with the manifest loader patched.
     """Test creating EnvironmentInfo from package data."""
 
     @patch("openenv.auto._discovery._load_manifest_from_package")
     def test_create_env_info_with_manifest(self, mock_load_manifest):
+        # [FUNCTION DOC]
+        # Manifest values and inferred class names populate the info.
         """Test creating env info when manifest exists."""
         # Mock manifest data
         mock_load_manifest.return_value = {
@@ -158,6 +195,8 @@ class TestCreateEnvInfoFromPackage:
 
     @patch("openenv.auto._discovery._load_manifest_from_package")
     def test_create_env_info_with_custom_class_names(self, mock_load_manifest):
+        # [FUNCTION DOC]
+        # Manifest action/observation names override inference.
         """Test creating env info with custom class names from manifest."""
         # Mock manifest with custom class names
         mock_load_manifest.return_value = {
@@ -177,6 +216,8 @@ class TestCreateEnvInfoFromPackage:
 
     @patch("openenv.auto._discovery._load_manifest_from_package")
     def test_create_env_info_without_manifest(self, mock_load_manifest):
+        # [FUNCTION DOC]
+        # Without a manifest, conventions are used.
         """Test creating env info when no manifest exists (uses conventions)."""
         mock_load_manifest.return_value = None
 
@@ -192,11 +233,16 @@ class TestCreateEnvInfoFromPackage:
 
 
 class TestEnvironmentDiscovery:
+    # [CLASS DOC]
+    # EnvironmentDiscovery behaviour.
     """Test EnvironmentDiscovery class."""
 
     @patch("importlib.metadata.distributions")
     @patch("openenv.auto._discovery._create_env_info_from_package")
     def test_discover_installed_packages(self, mock_create_info, mock_distributions):
+        # [FUNCTION DOC]
+        # With importlib.metadata.distributions patched, openenv-* packages are
+        # discovered but the legacy openenv-core wheel is skipped.
         """Test discovering installed packages."""
         # Mock distribution objects
         mock_dist1 = Mock()
@@ -215,6 +261,8 @@ class TestEnvironmentDiscovery:
 
         # Mock env info creation
         def create_info_side_effect(package_name, module_name, version):
+            # [FUNCTION DOC]
+            # Builds an EnvironmentInfo from package/module/version by naming convention.
             return EnvironmentInfo(
                 env_key=module_name.replace("_env", ""),
                 name=f"{module_name}",
@@ -239,6 +287,8 @@ class TestEnvironmentDiscovery:
         assert "coding" in envs
 
     def test_get_environment(self):
+        # [FUNCTION DOC]
+        # get_environment returns the info for a known key.
         """Test getting a specific environment."""
         discovery = EnvironmentDiscovery()
 
@@ -264,6 +314,8 @@ class TestEnvironmentDiscovery:
             assert env.env_key == "echo"
 
     def test_get_environment_not_found(self):
+        # [FUNCTION DOC]
+        # Unknown keys return None.
         """Test getting a non-existent environment."""
         discovery = EnvironmentDiscovery()
 
@@ -274,6 +326,8 @@ class TestEnvironmentDiscovery:
             assert env is None
 
     def test_get_environment_by_name_flexible(self):
+        # [FUNCTION DOC]
+        # Name variants resolve to the same environment.
         """Test getting environment with flexible name matching."""
         discovery = EnvironmentDiscovery()
 
@@ -299,6 +353,8 @@ class TestEnvironmentDiscovery:
             assert discovery.get_environment_by_name("echo_env") is not None
 
     def test_cache_management(self):
+        # [FUNCTION DOC]
+        # _save_cache writes the cache file, _load_cache reads it, clear_cache deletes it.
         """Test cache loading and saving."""
         discovery = EnvironmentDiscovery()
 
@@ -333,6 +389,8 @@ class TestEnvironmentDiscovery:
 
 
 class TestCacheSecurity:
+    # [CLASS DOC]
+    # Cache must not be plantable or redirectable by other local users.
     """The discovery cache must not be plantable/redirectable by another local user.
 
     A world-writable shared path let a local attacker pre-create the cache and
@@ -341,6 +399,8 @@ class TestCacheSecurity:
     """
 
     def test_cache_file_is_per_user_not_shared_tmp(self):
+        # [FUNCTION DOC]
+        # Default cache path is not under the system temp dir and sits in an "openenv" dir.
         path = _default_cache_file()
         assert tempfile.gettempdir() not in str(path)
         assert path.parent.name == "openenv"
@@ -348,6 +408,8 @@ class TestCacheSecurity:
     def test_relative_xdg_cache_home_cannot_redirect_into_working_tree(
         self, tmp_path, monkeypatch
     ):
+        # [FUNCTION DOC]
+        # A relative XDG_CACHE_HOME is ignored in favour of ~/.cache/openenv.
         """A relative XDG path must not trust a cache planted in the checkout."""
         checkout = tmp_path / "untrusted-checkout"
         planted = checkout / "cache" / "openenv" / "discovery_cache.json"
@@ -367,6 +429,9 @@ class TestCacheSecurity:
     def test_relative_home_cannot_restore_a_relative_cache_path(
         self, tmp_path, monkeypatch, xdg_cache_home
     ):
+        # [FUNCTION DOC]
+        # With invalid XDG and a relative HOME, _default_cache_file raises
+        # RuntimeError "absolute home directory".
         """Invalid XDG and home paths must fail closed, not trust the checkout."""
         checkout = tmp_path / "untrusted-checkout"
         checkout.mkdir()
@@ -378,6 +443,8 @@ class TestCacheSecurity:
             _default_cache_file()
 
     def test_world_writable_cache_is_not_trusted(self, tmp_path):
+        # [FUNCTION DOC]
+        # A 0666 file is untrusted on POSIX.
         f = tmp_path / "cache.json"
         f.write_text("{}")
         os.chmod(f, 0o666)
@@ -385,12 +452,16 @@ class TestCacheSecurity:
         assert _is_trusted_cache_file(f) is (os.name != "posix")
 
     def test_owner_only_cache_is_trusted(self, tmp_path):
+        # [FUNCTION DOC]
+        # A 0600 file is trusted.
         f = tmp_path / "cache.json"
         f.write_text("{}")
         os.chmod(f, 0o600)
         assert _is_trusted_cache_file(f) is True
 
     def test_load_cache_ignores_world_writable_file(self, tmp_path):
+        # [FUNCTION DOC]
+        # On POSIX, a world-writable planted cache is not loaded (returns None).
         planted = tmp_path / "cache.json"
         planted.write_text(
             json.dumps(
@@ -417,6 +488,8 @@ class TestCacheSecurity:
             assert discovery._load_cache() is None
 
     def test_saved_cache_is_owner_only(self, tmp_path):
+        # [FUNCTION DOC]
+        # _save_cache creates parent dirs and a 0600 file that loads back.
         discovery = EnvironmentDiscovery()
         discovery._cache_file = tmp_path / "sub" / "cache.json"
         env = EnvironmentInfo(
@@ -439,9 +512,13 @@ class TestCacheSecurity:
 
     @pytest.fixture(autouse=True)
     def _tmp(self, tmp_path):
+        # [FUNCTION DOC]
+        # Autouse fixture: stores tmp_path on self.tmp.
         self.tmp = tmp_path
 
     def test_symlinked_cache_is_refused(self, tmp_path):
+        # [FUNCTION DOC]
+        # On POSIX, a cache path that is a symlink to an owner-only file is refused.
         """The trust check must apply to the object actually read.
 
         Checking the path and then opening it separately leaves a window: an
@@ -482,6 +559,10 @@ class TestCacheSecurity:
         assert discovery._load_cache() is None
 
     def test_save_does_not_rely_on_a_follow_up_chmod(self, tmp_path):
+        # [FUNCTION DOC]
+        # On POSIX, with umask 0 and os.chmod replaced by a failing stub (restored in
+        # finally), saving still yields a 0600 file. Side effects: temporarily mutates
+        # process umask and os.chmod.
         """The cache must be created owner-only, not widened then narrowed.
 
         ``open()`` honours the umask, so creating the file and calling
@@ -512,6 +593,8 @@ class TestCacheSecurity:
         real_chmod = os.chmod
 
         def _no_chmod(*args, **kwargs):
+            # [FUNCTION DOC]
+            # Stub that raises AssertionError if chmod is called.
             raise AssertionError("cache permissions must not depend on chmod")
 
         os.chmod = _no_chmod
@@ -525,6 +608,8 @@ class TestCacheSecurity:
         assert stat.S_IMODE(discovery._cache_file.stat().st_mode) == 0o600
 
     def test_a_fifo_cache_does_not_block_discovery(self):
+        # [FUNCTION DOC]
+        # On POSIX, _open_trusted_cache on a FIFO returns None within 5 s in a daemon thread.
         """A planted FIFO must be refused, not waited on.
 
         Opening a FIFO read-only blocks until a writer appears, and that
@@ -543,6 +628,8 @@ class TestCacheSecurity:
         outcome = {}
 
         def attempt():
+            # [FUNCTION DOC]
+            # Stores the result of _open_trusted_cache(fifo) in the outcome mapping.
             outcome["fd"] = _open_trusted_cache(fifo)
 
         worker = threading.Thread(target=attempt, daemon=True)
@@ -553,6 +640,8 @@ class TestCacheSecurity:
         assert outcome["fd"] is None
 
     def test_saving_over_a_world_writable_file_does_not_keep_its_mode(self):
+        # [FUNCTION DOC]
+        # On POSIX, saving over an existing 0666 file leaves it 0600.
         """`O_CREAT` only applies the mode when it creates the file.
 
         Writing through an existing inode therefore leaves whatever mode that
@@ -574,9 +663,13 @@ class TestCacheSecurity:
 
 
 class TestGlobalDiscovery:
+    # [CLASS DOC]
+    # Global singleton management.
     """Test global discovery instance management."""
 
     def test_get_discovery_singleton(self):
+        # [FUNCTION DOC]
+        # get_discovery returns the same instance twice.
         """Test that get_discovery returns singleton."""
         reset_discovery()
 
@@ -586,6 +679,8 @@ class TestGlobalDiscovery:
         assert discovery1 is discovery2
 
     def test_reset_discovery(self):
+        # [FUNCTION DOC]
+        # reset_discovery causes a new instance.
         """Test resetting global discovery instance."""
         discovery1 = get_discovery()
 
@@ -597,6 +692,8 @@ class TestGlobalDiscovery:
         assert discovery1 is not discovery2
 
     def test_reset_discovery_does_not_unlink_disk_cache(self, tmp_path, monkeypatch):
+        # [FUNCTION DOC]
+        # reset_discovery leaves the on-disk cache file intact.
         """Singleton reset must not delete the persistent per-user cache.
 
         Regression for Bugbot on #1167: `reset_discovery()` used to call
@@ -618,9 +715,13 @@ class TestGlobalDiscovery:
 
 
 class TestListEnvironments:
+    # [CLASS DOC]
+    # list_environments printed output.
     """Test list_environments output."""
 
     def test_list_environments_with_envs(self, capsys):
+        # [FUNCTION DOC]
+        # Prints a header, env key and total count.
         """Test listing when environments are found."""
         discovery = EnvironmentDiscovery()
 
@@ -648,6 +749,8 @@ class TestListEnvironments:
         assert "Total: 1 environments" in captured.out
 
     def test_list_environments_empty(self, capsys):
+        # [FUNCTION DOC]
+        # Prints a not-found message and pip install hint.
         """Test listing when no environments are found."""
         discovery = EnvironmentDiscovery()
 

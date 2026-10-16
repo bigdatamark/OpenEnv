@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for the production-mode /harness WebSocket route of HTTPEnvServer and server mode wiring:
+# route registration only for harness environments in production, the session_started/turn event
+# protocol, protocol errors, credential-safe errors, session lifecycle and capacity, interaction
+# with the idle-session reaper and HTTP session close, and bounded turns (dead harness, timeout,
+# missing TURN_COMPLETE). Uses a scripted FakeAdapter and FastAPI TestClient.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the production /harness WebSocket route and mode wiring."""
@@ -24,11 +31,18 @@ from openenv.core.harness import (
 
 
 class FakeAdapter(AgenticHarnessAdapter):
+    # [CLASS DOC]
+    # HELPER: Scripted AgenticHarnessAdapter recording lifecycle calls (start, stop, inject_tools,
+    # send:<message>) with knobs fail_on_send, hang_on_send and omit_turn_complete. Every instance is
+    # appended to the class-level created list. A normal turn yields TOOL_CALL then TURN_COMPLETE with
+    # response "handled: <message>".
     """Scripted adapter recording lifecycle calls; no real subprocess."""
 
     created: list["FakeAdapter"] = []
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # HELPER: Initializes with config name "fake-harness", default knobs, and registers the instance.
         super().__init__(HarnessConfig(name="fake-harness", command=["fake"]))
         self.calls: list[str] = []
         self.alive = False
@@ -38,17 +52,26 @@ class FakeAdapter(AgenticHarnessAdapter):
         FakeAdapter.created.append(self)
 
     async def start(self, working_directory: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Records "start" and marks alive.
         self.calls.append("start")
         self.alive = True
 
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Records "stop" and marks not alive.
         self.calls.append("stop")
         self.alive = False
 
     async def inject_tools(self, tools, bridge_url: Optional[str] = None) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Records "inject_tools".
         self.calls.append("inject_tools")
 
     async def send_message_streaming(self, message: str) -> AsyncIterator[HarnessEvent]:
+        # [FUNCTION DOC]
+        # HELPER: Records the send; hangs for an hour if hang_on_send; raises RuntimeError if fail_on_send;
+        # yields only a TEXT_OUTPUT if omit_turn_complete; otherwise yields TOOL_CALL and TURN_COMPLETE.
         self.calls.append(f"send:{message}")
         if self.hang_on_send:
             await asyncio.sleep(3600)
@@ -66,10 +89,14 @@ class FakeAdapter(AgenticHarnessAdapter):
         )
 
     async def is_alive(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Returns the alive flag.
         return self.alive
 
 
 def harness_env_factory() -> HarnessEnvironment:
+    # [FUNCTION DOC]
+    # HELPER: Returns a HarnessEnvironment with a new FakeAdapter and no MCP server (so no bridge).
     # mcp=None: no domain tools, so no bridge server is started in tests
     return HarnessEnvironment(adapter=FakeAdapter(), mcp=None)
 
@@ -77,6 +104,9 @@ def harness_env_factory() -> HarnessEnvironment:
 def make_app(
     mode: ServerMode, env_factory=harness_env_factory, max_concurrent_envs: int = 1
 ) -> tuple[FastAPI, HTTPEnvServer]:
+    # [FUNCTION DOC]
+    # HELPER: Creates a FastAPI app and an HTTPEnvServer for the given factory with HarnessAction and
+    # Observation, registers routes in the given mode, and returns (app, server).
     # HarnessEnvironment is SUPPORTS_CONCURRENT_SESSIONS=False (one env = one
     # trajectory), so the server only permits max_concurrent_envs=1.
     app = FastAPI()
@@ -92,39 +122,59 @@ def make_app(
 
 @pytest.fixture(autouse=True)
 def clear_created_adapters():
+    # [FUNCTION DOC]
+    # Autouse fixture clearing FakeAdapter.created before and after each test.
     FakeAdapter.created = []
     yield
     FakeAdapter.created = []
 
 
 class TestRouteRegistration:
+    # [CLASS DOC]
+    # Tests when the /harness route is registered.
     def test_registered_in_production_with_harness_factory(self):
+        # [FUNCTION DOC]
+        # The route exists in production mode for a harness factory.
         app, _ = make_app(ServerMode.PRODUCTION)
         assert any(getattr(r, "path", None) == "/harness" for r in app.routes)
 
     def test_absent_in_simulation(self):
+        # [FUNCTION DOC]
+        # The route is absent in simulation mode.
         app, _ = make_app(ServerMode.SIMULATION)
         assert not any(getattr(r, "path", None) == "/harness" for r in app.routes)
 
     def test_absent_for_non_harness_env(self):
+        # [FUNCTION DOC]
+        # The route is absent for a non-harness environment in production mode.
         from openenv.core.env_server.interfaces import Environment
         from openenv.core.env_server.types import State
 
         class PlainEnv(Environment):
+            # [CLASS DOC]
+            # HELPER: Minimal Environment returning empty observations and state.
             def reset(self, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty Observation.
                 return Observation()
 
             def step(self, action, timeout_s=None, **kwargs):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty Observation.
                 return Observation()
 
             @property
             def state(self):
+                # [FUNCTION DOC]
+                # HELPER: Returns an empty State.
                 return State()
 
         app, _ = make_app(ServerMode.PRODUCTION, env_factory=PlainEnv)
         assert not any(getattr(r, "path", None) == "/harness" for r in app.routes)
 
     def test_production_still_excludes_orchestration_routes(self):
+        # [FUNCTION DOC]
+        # Production mode exposes no /reset, /step or /state, but /health works.
         app, _ = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
         assert client.post("/reset", json={}).status_code in (404, 405)
@@ -133,6 +183,8 @@ class TestRouteRegistration:
         assert client.get("/health").status_code == 200
 
     def test_detection_probe_is_side_effect_free(self):
+        # [FUNCTION DOC]
+        # Registering routes may instantiate an env to detect harness support but never starts the adapter.
         make_app(ServerMode.PRODUCTION)
         # The factory-detection probe instantiates one env; it must not
         # start the harness.
@@ -141,24 +193,40 @@ class TestRouteRegistration:
 
 
 class TestHarnessWebSocket:
+    # [CLASS DOC]
+    # Tests the /harness WebSocket protocol.
     @pytest.mark.parametrize("phase", ["factory", "startup", "turn"])
     def test_internal_errors_do_not_expose_credentials(self, phase):
+        # [FUNCTION DOC]
+        # Parametrized failure phase (factory, startup, turn) with secret-bearing exception messages: the
+        # client gets an error frame without the secret (FACTORY_ERROR, SESSION_ERROR or non-recoverable
+        # turn error) and no session remains active.
         secret = "FAKE_HARNESS_SECRET_FOR_TEST"
         failing = False
 
         class SensitiveAdapter(FakeAdapter):
+            # [CLASS DOC]
+            # HELPER: FakeAdapter that raises a secret-bearing RuntimeError at start or during a turn once
+            # failing is set, depending on phase.
             async def start(self, working_directory):
+                # [FUNCTION DOC]
+                # HELPER: Raises in the startup phase when failing; otherwise starts normally.
                 if failing and phase == "startup":
                     raise RuntimeError(f"Authorization: Bearer {secret}")
                 await super().start(working_directory)
 
             async def send_message_streaming(self, message):
+                # [FUNCTION DOC]
+                # HELPER: Raises in the turn phase when failing; otherwise relays the parent's events.
                 if failing and phase == "turn":
                     raise RuntimeError(f"Authorization: Bearer {secret}")
                 async for event in super().send_message_streaming(message):
                     yield event
 
         def factory():
+            # [FUNCTION DOC]
+            # HELPER: Raises a secret-bearing RuntimeError in the factory phase when failing; otherwise builds
+            # a HarnessEnvironment with a SensitiveAdapter.
             if failing and phase == "factory":
                 raise RuntimeError(f"Authorization: Bearer {secret}")
             return HarnessEnvironment(adapter=SensitiveAdapter(), mcp=None)
@@ -183,6 +251,9 @@ class TestHarnessWebSocket:
         assert server.active_sessions == 0
 
     def test_session_started_then_streamed_turns(self):
+        # [FUNCTION DOC]
+        # The connection first receives session_started with harness name and session id; a message
+        # streams tool_call then turn_complete.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -200,6 +271,8 @@ class TestHarnessWebSocket:
             assert second["data"]["response"] == "handled: hi"
 
     def test_two_turns_reuse_one_adapter(self):
+        # [FUNCTION DOC]
+        # Two turns on one connection use a single started adapter.
         app, _ = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -231,6 +304,9 @@ class TestHarnessWebSocket:
         ],
     )
     def test_malformed_frame_keeps_connection_usable(self, frame, code):
+        # [FUNCTION DOC]
+        # Parametrized malformed frames produce a protocol_error with INVALID_JSON or VALIDATION_ERROR,
+        # do not reach the adapter, and the connection still serves a valid message afterwards.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -255,6 +331,8 @@ class TestHarnessWebSocket:
         assert server.active_sessions == 0
 
     def test_adapter_crash_streams_error_event_then_closes(self):
+        # [FUNCTION DOC]
+        # An adapter exception yields a non-recoverable "harness turn failed" error and frees the session.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -272,6 +350,8 @@ class TestHarnessWebSocket:
         assert server.active_sessions == 0
 
     def test_disconnect_stops_adapter_and_frees_session(self):
+        # [FUNCTION DOC]
+        # Disconnecting stops the adapter and frees the session.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -285,8 +365,15 @@ class TestHarnessWebSocket:
         assert session_adapter.alive is False
 
     def test_silent_turn_survives_idle_session_reaper(self):
+        # [FUNCTION DOC]
+        # A turn silent for longer than the session timeout is not reaped while in progress; the session is
+        # freed after disconnect.
         class SilentAdapter(FakeAdapter):
+            # [CLASS DOC]
+            # HELPER: Adapter whose turn sleeps 5.2s before yielding TURN_COMPLETE with its alive flag.
             async def send_message_streaming(self, message):
+                # [FUNCTION DOC]
+                # HELPER: Sleeps 5.2s then yields TURN_COMPLETE with the message and alive status.
                 # The real reaper has a five-second minimum polling interval.
                 # Do not emit events while it checks this otherwise idle session.
                 await asyncio.sleep(5.2)
@@ -317,6 +404,9 @@ class TestHarnessWebSocket:
             assert not server._session_websocket_attachments
 
     def test_http_close_defers_harness_cleanup_until_disconnect(self):
+        # [FUNCTION DOC]
+        # An MCP openenv/session/close request for an attached session reports closing (not closed), keeps
+        # the harness running until the WebSocket disconnects, then cleans up.
         app, server = make_app(ServerMode.PRODUCTION)
         with TestClient(app) as client:
             with client.websocket_connect("/harness") as websocket:
@@ -351,6 +441,8 @@ class TestHarnessWebSocket:
             assert not server._session_pending_closes
 
     def test_capacity_limit_rejects_second_connection(self):
+        # [FUNCTION DOC]
+        # With capacity 1, a second connection receives a CAPACITY_REACHED error.
         app, _ = make_app(ServerMode.PRODUCTION, max_concurrent_envs=1)
         client = TestClient(app)
 
@@ -363,7 +455,11 @@ class TestHarnessWebSocket:
 
 
 class TestModeWiring:
+    # [CLASS DOC]
+    # Tests mode selection in create_fastapi_app.
     def test_create_fastapi_app_mode_production(self):
+        # [FUNCTION DOC]
+        # mode="production" hides /reset and registers /harness.
         app = create_fastapi_app(
             harness_env_factory, HarnessAction, Observation, mode="production"
         )
@@ -372,12 +468,16 @@ class TestModeWiring:
         assert any(getattr(r, "path", None) == "/harness" for r in app.routes)
 
     def test_openenv_mode_env_var_honored(self, monkeypatch):
+        # [FUNCTION DOC]
+        # OPENENV_MODE=production selects production mode.
         monkeypatch.setenv("OPENENV_MODE", "production")
         app = create_fastapi_app(harness_env_factory, HarnessAction, Observation)
         client = TestClient(app)
         assert client.post("/reset", json={}).status_code in (404, 405)
 
     def test_default_stays_simulation(self, monkeypatch):
+        # [FUNCTION DOC]
+        # Without OPENENV_MODE the app is in simulation mode with /reset and no /harness.
         monkeypatch.delenv("OPENENV_MODE", raising=False)
         app = create_fastapi_app(harness_env_factory, HarnessAction, Observation)
         assert not any(getattr(r, "path", None) == "/harness" for r in app.routes)
@@ -385,6 +485,8 @@ class TestModeWiring:
         assert "/reset" in route_paths
 
     def test_explicit_mode_overrides_env_var(self, monkeypatch):
+        # [FUNCTION DOC]
+        # An explicit mode argument overrides OPENENV_MODE.
         monkeypatch.setenv("OPENENV_MODE", "production")
         app = create_fastapi_app(
             harness_env_factory, HarnessAction, Observation, mode="simulation"
@@ -394,10 +496,15 @@ class TestModeWiring:
 
 
 class TestTurnBoundaries:
+    # [CLASS DOC]
+    # Tests that every production turn terminates.
     """A production turn must end: on its own, on timeout, or with an error."""
 
     @pytest.mark.parametrize("completed_turns", [0, 1])
     def test_dead_harness_is_reported_before_sending(self, completed_turns):
+        # [FUNCTION DOC]
+        # Parametrized number of prior turns: a dead harness yields a non-recoverable "harness process is
+        # not running" error without sending, and the adapter is stopped and the session freed.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -425,6 +532,8 @@ class TestTurnBoundaries:
         assert not server._session_websocket_attachments
 
     def test_hung_turn_is_bounded_by_session_timeout(self):
+        # [FUNCTION DOC]
+        # A hung turn yields an error mentioning the timeout and frees the session.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 
@@ -443,6 +552,8 @@ class TestTurnBoundaries:
         assert server.active_sessions == 0
 
     def test_stream_without_turn_complete_is_reported(self):
+        # [FUNCTION DOC]
+        # A stream ending without TURN_COMPLETE yields an error mentioning TURN_COMPLETE.
         app, server = make_app(ServerMode.PRODUCTION)
         client = TestClient(app)
 

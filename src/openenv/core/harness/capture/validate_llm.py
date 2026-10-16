@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Live probing of an inference endpoint before use: decides its capture level (tokens /
+# logprobs / text) by sending real completions, negotiating away rejected parameters via
+# compat.diagnose, probes tool-calling support and whether logprobs are processed or raw,
+# and supports native Anthropic endpoints. Produces an LLMReport; require_llm raises when
+# the endpoint is unusable. Uses blocking urllib HTTP calls; reads the
+# OPENENV_ALLOW_RAW_LOGPROBS environment variable.
 """Work out what an inference endpoint can actually return, before anything is spent on it.
 
 This runs BEFORE a server binds a port, and grading honestly here is the entire point.
@@ -67,6 +74,11 @@ ENGINE_HINT = (
 
 @dataclass
 class LLMReport:
+    # [CLASS DOC]
+    # Probe result: ok (trainable), llm_url, model, findings, prompt/completion id counts,
+    # served_models, capture_level ("" if nothing came back), reachable, param_fixes
+    # (rendered), tool_support, logprobs_mode. trainable is capture_level == "tokens";
+    # rollout_type is "train" or "eval".
     """Outcome of the probe. `ok` means trainable; `reachable` means usable at all."""
 
     ok: bool
@@ -93,13 +105,20 @@ class LLMReport:
 
     @property
     def trainable(self) -> bool:
+        # [FUNCTION DOC]
+        # Returns True when capture_level is "tokens".
         return self.capture_level == "tokens"
 
     @property
     def rollout_type(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "train" if trainable, else "eval".
         return "train" if self.trainable else "eval"
 
     def summary(self) -> str:
+        # [FUNCTION DOC]
+        # Returns a one-line verdict: engine OK with id counts; EVAL ONLY with detail when
+        # reachable but not trainable; otherwise "engine NOT reachable" with the findings.
         if self.ok:
             return (
                 f"engine OK: {self.n_completion_ids} completion ids, "
@@ -124,6 +143,8 @@ _SENTINEL_LOGPROB = 100.0
 
 
 def _raw_logprobs_allowed() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if OPENENV_ALLOW_RAW_LOGPROBS is "1", "true" or "yes" (case-insensitive).
     """Whether an operator has explicitly accepted raw logprobs on the training path.
 
     An escape hatch exists because the probe infers from behaviour: the two vLLM flags are
@@ -144,6 +165,9 @@ def _post(
     api_key: str | None = None,
     auth_header: str = "Authorization",
 ) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: POSTs JSON body to url with content type, a probe User-Agent and auth headers;
+    # returns the parsed JSON. Raises urllib errors (HTTPError, URLError) and JSON errors.
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -163,6 +187,8 @@ def list_models(
     api_key: str | None = None,
     auth_header: str = "Authorization",
 ) -> list[str]:
+    # [FUNCTION DOC]
+    # Returns model ids from GET <normalised base>/v1/models, or [] on any error.
     """Served model ids, or [] if the endpoint is unreachable or does not publish a list."""
     try:
         request = urllib.request.Request(
@@ -189,6 +215,11 @@ _EXPECTED_BELOW_TOKENS = frozenset(
 
 
 def _grade(payload: dict) -> tuple[str, list[str]]:
+    # [FUNCTION DOC]
+    # HELPER: Grades a (normalised) response payload. If check_upstream_response is ok,
+    # returns ("tokens", all findings). Otherwise returns "logprobs" if any logprob entry has a
+    # logprob value, else "text", with findings excluding the codes that merely restate a
+    # below-tokens level.
     """The capture level a response payload supports, and the findings behind that verdict.
 
     Grades the payload the same way the capture path will see it. `InferenceClient.completion`
@@ -246,6 +277,14 @@ def probe_tool_support(
     auth_header: str = "Authorization",
     fixes: list | None = None,
 ) -> tuple[str, list]:
+    # [FUNCTION DOC]
+    # Probes whether the endpoint accepts a tool manifest by sending a chat request with a
+    # "bash" tool (max_tokens 512, temperature 1.0) after applying known fixes; on HTTP 400
+    # asks diagnose() for further fixes (up to MAX_FIXES) and retries.
+    # Returns: (status, extra fixes) where status is "ok" (tool call returned),
+    # "no-tool-call" (prose answer), "unknown" (truncated by length, or a non-HTTP error), or
+    # "rejected" (an HTTP error with no applicable fix).
+    # Side effects: network calls.
     """Can this endpoint take a tool manifest, and what does it demand in exchange?
 
     A separate probe from the capture one, and deliberately NON-FATAL, because the two questions have
@@ -334,6 +373,13 @@ def probe_logprobs_mode(
     auth_header: str = "Authorization",
     fixes: list | None = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # Determines whether logprobs are processed (temperature-scaled) or raw by requesting the
+    # top-5 first-token logprobs at temperatures 1.0 and 2.0 and comparing the top-2 gap ratio:
+    # closer to 1.0 means "raw", closer to 0.5 means "processed".
+    # Returns "unknown" if a known fix touches temperature, a request fails, fewer than two
+    # logprobs come back, the runner-up is a sentinel (|logprob| > 100), or the first gap is
+    # under 0.5.
     """Whether an endpoint's logprobs are the sampling distribution's or the raw pre-temperature ones.
 
     This closes the one hole no other check here can see. vLLM's `logprobs_mode` defaults to
@@ -456,6 +502,12 @@ def probe_logprobs_mode(
 
 
 def _validate_anthropic(llm_url, model, *, timeout, api_key, check_tools):
+    # [FUNCTION DOC]
+    # HELPER: Probes a native Anthropic Messages endpoint with one short request (optionally
+    # forcing a report_ok tool call). Returns an LLMReport with capture_level "text" and
+    # reachable True when the response is a non-empty message; tool_support "ok" or
+    # "no-tool-call" when checked. Missing model, HTTP errors and other failures are recorded
+    # as findings (never raised).
     """Probe native Messages without inferring token IDs from hosted text."""
     base = normalise_engine_base(llm_url)
     report = LLMReport(ok=False, llm_url=base, model=model)
@@ -529,6 +581,21 @@ def validate_llm(
     check_logprobs_mode: bool = True,
     check_tools: bool = True,
 ) -> LLMReport:
+    # [FUNCTION DOC]
+    # Probes an endpoint and returns an LLMReport.
+    # Behavior: validates provider (ValueError if unknown); delegates anthropic to
+    # _validate_anthropic. Lists models; if a list exists and neither the model nor (for "hf")
+    # the model without its ":provider" suffix is in it, returns a not-ok report. Sends a
+    # capture probe (temperature 0, logprobs, top_logprobs 0, return_token_ids) and on HTTP 400
+    # (or a 403 refusing logprobs) applies diagnosed fixes up to MAX_FIXES and retries; any
+    # other failure returns an unreachable report. Normalises and grades the payload; if
+    # check_tools, probes tool support (adds FATAL/WARN findings and its fixes); adds
+    # behaviour-change warnings; at tokens level, if check_logprobs_mode, probes logprobs
+    # mode and demotes "raw" to level "logprobs" with a FATAL finding unless raw logprobs are
+    # allowed by env (then WARN).
+    # Returns: LLMReport with ok = (level == "tokens"), reachable True, counts and fixes.
+    # KNOWN ISSUE: a "rejected" tool probe adds a FATAL finding string but does not affect ok
+    # or capture_level.
     """Send one real completion and report what the endpoint can return.
 
     Deliberately a live probe rather than a flag inspection: launch flags are not readable over the
@@ -745,6 +812,10 @@ def require_llm(
     auth_header: str = "Authorization",
     require_tokens: bool = False,
 ) -> LLMReport:
+    # [FUNCTION DOC]
+    # Runs validate_llm (default provider) and returns the report.
+    # Raises: RuntimeError (with ENGINE_HINT) if unreachable, or if require_tokens and the
+    # endpoint is not trainable.
     """`validate_llm`, but raises when the endpoint cannot be used at all.
 
     Args:

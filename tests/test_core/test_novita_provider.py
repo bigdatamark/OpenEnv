@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Unit tests for NovitaSandboxProvider using a duck-typed fake adapter (no novita-sandbox
+# install needed): image/template resolution, port and kwarg validation, server command
+# resolution and background launch with PID capture, lifecycle guards and cleanup,
+# host/URL safety, readiness and log redaction, Dockerfile-to-template builds (flattening
+# multi-stage files, stripping BuildKit mounts and --platform), and the real
+# _DefaultNovitaAdapter against a fake novita_sandbox SDK module.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Unit tests for NovitaSandboxProvider.
@@ -30,7 +37,13 @@ _SANDBOX_HOST = "8000-sbx123.us-phx-1.sandbox.novita.ai"
 
 
 class _FakeAdapter:
+    # [CLASS DOC]
+    # HELPER: In-memory Novita adapter recording created sandboxes, template builds and exec
+    # calls (command, timeout, background, user), with switches for create/kill/build
+    # failures, PID not yet written, a dead process, a canned log and manifest presence.
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initialises logs, the returned host, template id and failure switches.
         self.created: list[dict] = []
         self.exec_commands: list[str] = []
         self.exec_timeouts: list[float] = []
@@ -58,6 +71,8 @@ class _FakeAdapter:
         metadata,
         secure,
     ):
+        # [FUNCTION DOC]
+        # Raises if fail_create; otherwise records all kwargs plus a new opaque sandbox and returns it.
         if self.fail_create:
             raise RuntimeError("create failed")
         sandbox = object()
@@ -84,6 +99,8 @@ class _FakeAdapter:
         memory_mb,
         on_build_logs,
     ):
+        # [FUNCTION DOC]
+        # Raises if fail_build; otherwise records the build request and returns template_id.
         if self.fail_build:
             raise RuntimeError("build failed")
         self.template_builds.append(
@@ -99,6 +116,9 @@ class _FakeAdapter:
         return self.template_id
 
     def exec(self, sandbox, command, *, timeout=10, background=False, user=None):
+        # [FUNCTION DOC]
+        # Records the call and answers manifest existence/cat, find, liveness (STARTING when the
+        # PID is not ready, else DEAD/RUNNING) and log commands; otherwise "".
         self.exec_commands.append(command)
         self.exec_timeouts.append(timeout)
         self.exec_background.append(background)
@@ -118,9 +138,13 @@ class _FakeAdapter:
         return ""
 
     def host(self, sandbox, port):
+        # [FUNCTION DOC]
+        # Returns the configured host value.
         return self.host_value
 
     def kill(self, sandbox):
+        # [FUNCTION DOC]
+        # Counts the call; raises if fail_kill.
         self.killed += 1
         if self.fail_kill:
             raise RuntimeError("kill failed")
@@ -128,16 +152,22 @@ class _FakeAdapter:
 
 @pytest.fixture()
 def adapter():
+    # [FUNCTION DOC]
+    # Fixture returning a fresh _FakeAdapter.
     return _FakeAdapter()
 
 
 @pytest.fixture()
 def provider(adapter):
+    # [FUNCTION DOC]
+    # Fixture: NovitaSandboxProvider on the fake adapter.
     return NovitaSandboxProvider(_adapter=adapter)
 
 
 @pytest.fixture(autouse=True)
 def _fast_provider_sleep():
+    # [FUNCTION DOC]
+    # Autouse fixture patching time.sleep in the provider module.
     """Avoid real sleeps in NovitaSandboxProvider (wait_for_ready)."""
     with patch("openenv.core.containers.runtime.novita_provider.time.sleep"):
         yield
@@ -147,10 +177,16 @@ def _fast_provider_sleep():
 # Tests: construction
 # ---------------------------------------------------------------------------
 class TestConstruction:
+    # [CLASS DOC]
+    # Tests construction.
     def test_is_container_provider(self, provider):
+        # [FUNCTION DOC]
+        # The provider is a ContainerProvider.
         assert isinstance(provider, ContainerProvider)
 
     def test_adapter_not_built_when_injected(self):
+        # [FUNCTION DOC]
+        # An injected adapter avoids touching the SDK.
         """Injecting an adapter must not touch the SDK."""
         NovitaSandboxProvider(_adapter=_FakeAdapter())
 
@@ -159,12 +195,18 @@ class TestConstruction:
 # Tests: start_container — image resolution
 # ---------------------------------------------------------------------------
 class TestStartContainer:
+    # [CLASS DOC]
+    # Tests image resolution in start_container.
     def test_registry_image(self, provider, adapter):
+        # [FUNCTION DOC]
+        # A registry image is passed through and the URL is https://<host>.
         url = provider.start_container("ghcr.io/org/echo-env:latest")
         assert url == f"https://{_SANDBOX_HOST}"
         assert adapter.created[0]["image"] == "ghcr.io/org/echo-env:latest"
 
     def test_constructor_image_used_when_start_omits_image(self, adapter):
+        # [FUNCTION DOC]
+        # Constructor image and env vars are used when start gets none.
         """A provider-owned image lets the outer client call start_container()."""
         provider = NovitaSandboxProvider(
             image="ghcr.io/org/env:latest",
@@ -177,15 +219,21 @@ class TestStartContainer:
         assert created["env_vars"] == {"DEBUG": "1"}
 
     def test_start_image_overrides_constructor_image(self, provider, adapter):
+        # [FUNCTION DOC]
+        # An explicit start image wins.
         provider = NovitaSandboxProvider(image="constructor:latest", _adapter=adapter)
         provider.start_container("explicit:latest")
         assert adapter.created[0]["image"] == "explicit:latest"
 
     def test_requires_image_from_constructor_or_start(self, provider):
+        # [FUNCTION DOC]
+        # No image raises ValueError.
         with pytest.raises(ValueError, match="requires an image"):
             provider.start_container()
 
     def test_base_url_has_https_scheme(self, provider):
+        # [FUNCTION DOC]
+        # The bare host gets an https scheme.
         """get_host returns a bare host; the provider adds the scheme."""
         url = provider.start_container("img:latest")
         assert url.startswith("https://")
@@ -195,17 +243,27 @@ class TestStartContainer:
 # Tests: port validation
 # ---------------------------------------------------------------------------
 class TestPortValidation:
+    # [CLASS DOC]
+    # Tests port validation.
     def test_port_none_accepted(self, provider):
+        # [FUNCTION DOC]
+        # port None is accepted.
         assert provider.start_container("img:latest", port=None)
 
     def test_port_8000_accepted(self, provider):
+        # [FUNCTION DOC]
+        # port 8000 is accepted.
         assert provider.start_container("img:latest", port=8000)
 
     def test_other_port_raises(self, provider):
+        # [FUNCTION DOC]
+        # Other ports raise ValueError.
         with pytest.raises(ValueError, match="only supports port 8000"):
             provider.start_container("img:latest", port=3000)
 
     def test_port_not_validated_before_sandbox_guard(self, adapter):
+        # [FUNCTION DOC]
+        # With an active sandbox, the active-sandbox error is raised before port validation.
         """An active-sandbox error wins over a port error (no orphan risk)."""
         provider = NovitaSandboxProvider(_adapter=adapter)
         provider.start_container("img:latest")
@@ -217,7 +275,11 @@ class TestPortValidation:
 # Tests: create kwargs forwarding
 # ---------------------------------------------------------------------------
 class TestCreateKwargs:
+    # [CLASS DOC]
+    # Tests what is forwarded to create_sandbox.
     def test_timeout_and_metadata_forwarded(self, adapter):
+        # [FUNCTION DOC]
+        # timeout and metadata are forwarded.
         provider = NovitaSandboxProvider(
             _adapter=adapter,
             timeout=120,
@@ -229,22 +291,32 @@ class TestCreateKwargs:
         assert created["metadata"] == {"idle_timeout": "900"}
 
     def test_default_timeout_is_one_hour(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Default timeout is 3600 s.
         provider.start_container("img:latest")
         assert adapter.created[0]["timeout"] == 3600
 
     def test_secure_omitted_when_none(self, provider, adapter):
+        # [FUNCTION DOC]
+        # secure defaults to None.
         provider.start_container("img:latest")
         assert adapter.created[0]["secure"] is None
 
     def test_env_vars_none_when_unset(self, provider, adapter):
+        # [FUNCTION DOC]
+        # env_vars default to None.
         provider.start_container("img:latest")
         assert adapter.created[0]["env_vars"] is None
 
     def test_unknown_start_option_raises(self, provider):
+        # [FUNCTION DOC]
+        # Unknown start kwargs raise ValueError.
         with pytest.raises(ValueError, match="Unsupported NovitaSandboxProvider"):
             provider.start_container("img:latest", bogus=1)
 
     def test_wait_timeout_accepted_and_ignored(self, provider, adapter):
+        # [FUNCTION DOC]
+        # wait_timeout is accepted but not forwarded.
         """AutoEnv.from_env() always forwards wait_timeout; rejecting it would
         make the whole AutoEnv path unusable. No provider ever sees its value
         (`_bootstrap_container` calls wait_for_ready without a timeout), so it
@@ -265,6 +337,8 @@ class TestCreateKwargs:
         }
 
     def test_typo_still_rejected_alongside_wait_timeout(self, provider):
+        # [FUNCTION DOC]
+        # A misspelled kwarg is still rejected when wait_timeout is present.
         """Dropping wait_timeout must not weaken the typo guard."""
         with pytest.raises(ValueError, match="Unsupported NovitaSandboxProvider"):
             provider.start_container("img:latest", wait_timeout=30.0, env_varz={})
@@ -274,7 +348,11 @@ class TestCreateKwargs:
 # Tests: server command resolution
 # ---------------------------------------------------------------------------
 class TestServerCmd:
+    # [CLASS DOC]
+    # Tests server command resolution.
     def test_auto_discovered_cmd(self, provider, adapter):
+        # [FUNCTION DOC]
+        # The manifest yields the uvicorn command in /app/env.
         provider.start_container("img:latest")
         commands = adapter.exec_commands
         assert any(
@@ -282,22 +360,30 @@ class TestServerCmd:
         )
 
     def test_explicit_cmd_used(self, adapter):
+        # [FUNCTION DOC]
+        # Constructor cmd is executed.
         provider = NovitaSandboxProvider(_adapter=adapter, cmd="python -m myserver")
         provider.start_container("img:latest")
         assert any("python -m myserver" in c for c in adapter.exec_commands)
 
     def test_kwargs_cmd_overrides_constructor(self, adapter):
+        # [FUNCTION DOC]
+        # Start-time cmd overrides the constructor cmd.
         provider = NovitaSandboxProvider(_adapter=adapter, cmd="default-cmd")
         provider.start_container("img:latest", cmd="override-cmd")
         assert any("override-cmd" in c for c in adapter.exec_commands)
 
     def test_no_yaml_raises(self, adapter):
+        # [FUNCTION DOC]
+        # No manifest raises ValueError.
         adapter.has_yaml = False
         provider = NovitaSandboxProvider(_adapter=adapter)
         with pytest.raises(ValueError, match="Could not find openenv.yaml"):
             provider.start_container("img:latest")
 
     def test_working_directory_prepended(self, adapter):
+        # [FUNCTION DOC]
+        # working_directory is prefixed with "cd <dir> &&".
         provider = NovitaSandboxProvider(
             _adapter=adapter, cmd="serve.sh", working_directory="/app/env"
         )
@@ -309,10 +395,16 @@ class TestServerCmd:
 # Tests: launch (SDK background command + PID capture)
 # ---------------------------------------------------------------------------
 class TestLaunch:
+    # [CLASS DOC]
+    # Tests the background launch command.
     def _launch_command(self, adapter):
+        # [FUNCTION DOC]
+        # HELPER: Returns the first exec command containing "echo $$" (the launch command).
         return next(c for c in adapter.exec_commands if "echo $$" in c)
 
     def test_background_launch_with_pid_capture(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Launch writes the PID file and log, runs in background with timeout 0 as root.
         provider.start_container("img:latest")
         launch = self._launch_command(adapter)
         assert "echo $$ > /tmp/openenv-server.pid" in launch
@@ -322,6 +414,8 @@ class TestLaunch:
         assert adapter.exec_users[-1] == "root"
 
     def test_liveness_probe_uses_server_user(self, provider, adapter):
+        # [FUNCTION DOC]
+        # The liveness probe during readiness runs as root.
         adapter.dead_process = True
         provider.start_container("img:latest")
         url = provider.base_url
@@ -334,6 +428,8 @@ class TestLaunch:
         assert adapter.exec_users[-1] == "root"
 
     def test_cmd_is_shlex_quoted(self, adapter):
+        # [FUNCTION DOC]
+        # The user cmd is shell-quoted inside the sh -c launcher so a semicolon cannot split it.
         provider = NovitaSandboxProvider(
             _adapter=adapter, cmd="sh -c 'echo hi; sleep 1'"
         )
@@ -352,12 +448,18 @@ class TestLaunch:
 # Tests: single-sandbox guard and failure cleanup
 # ---------------------------------------------------------------------------
 class TestLifecycleGuards:
+    # [CLASS DOC]
+    # Tests the single-sandbox guard and failure cleanup.
     def test_second_start_raises(self, provider):
+        # [FUNCTION DOC]
+        # A second start raises.
         provider.start_container("img:latest")
         with pytest.raises(RuntimeError, match="already has an active sandbox"):
             provider.start_container("img:latest")
 
     def test_create_failure_does_not_kill(self, adapter):
+        # [FUNCTION DOC]
+        # A create failure kills nothing.
         """A create failure created nothing, so nothing is killed."""
         adapter.fail_create = True
         provider = NovitaSandboxProvider(_adapter=adapter)
@@ -366,6 +468,8 @@ class TestLifecycleGuards:
         assert adapter.killed == 0
 
     def test_start_failure_after_create_cleans_up(self, adapter):
+        # [FUNCTION DOC]
+        # A failure after create kills the sandbox and clears it.
         """A failure after the sandbox exists kills it."""
         adapter.has_yaml = False  # discovery fails after create
         provider = NovitaSandboxProvider(_adapter=adapter)
@@ -375,6 +479,8 @@ class TestLifecycleGuards:
         assert provider._sandbox is None
 
     def test_cleanup_failure_does_not_mask_root_cause(self, adapter):
+        # [FUNCTION DOC]
+        # A failing kill does not replace the original error.
         """A failing kill must not replace the original error."""
         adapter.has_yaml = False
         adapter.fail_kill = True
@@ -387,27 +493,39 @@ class TestLifecycleGuards:
 # Tests: stop_container / close
 # ---------------------------------------------------------------------------
 class TestStopContainer:
+    # [CLASS DOC]
+    # Tests stop/close.
     def test_kill_called(self, provider, adapter):
+        # [FUNCTION DOC]
+        # stop kills the sandbox.
         provider.start_container("img:latest")
         provider.stop_container()
         assert adapter.killed == 1
 
     def test_stop_clears_state(self, provider):
+        # [FUNCTION DOC]
+        # stop clears sandbox and base URL.
         provider.start_container("img:latest")
         provider.stop_container()
         assert provider._sandbox is None
         assert provider._base_url is None
 
     def test_stop_noop_when_no_sandbox(self, provider, adapter):
+        # [FUNCTION DOC]
+        # stop without a sandbox kills nothing.
         provider.stop_container()
         assert adapter.killed == 0
 
     def test_close_stops_sandbox(self, provider, adapter):
+        # [FUNCTION DOC]
+        # close kills the sandbox.
         provider.start_container("img:latest")
         provider.close()
         assert adapter.killed == 1
 
     def test_context_manager_kills_sandbox(self, adapter):
+        # [FUNCTION DOC]
+        # Leaving the with block kills the sandbox.
         with NovitaSandboxProvider(image="img:latest", _adapter=adapter) as p:
             p.start_container()
         assert adapter.killed == 1
@@ -417,11 +535,17 @@ class TestStopContainer:
 # Tests: base_url property
 # ---------------------------------------------------------------------------
 class TestBaseUrl:
+    # [CLASS DOC]
+    # Tests the base_url property.
     def test_returns_start_url(self, provider):
+        # [FUNCTION DOC]
+        # Returns the start URL.
         url = provider.start_container("img:latest")
         assert provider.base_url == url
 
     def test_raises_without_sandbox(self, provider):
+        # [FUNCTION DOC]
+        # Raises RuntimeError without a sandbox.
         with pytest.raises(RuntimeError, match="no active base_url"):
             provider.base_url
 
@@ -430,13 +554,20 @@ class TestBaseUrl:
 # Tests: secure-URL enforcement (RFC 002 S1)
 # ---------------------------------------------------------------------------
 class TestSecureUrl:
+    # [CLASS DOC]
+    # Tests host/URL safety checks.
     def test_plaintext_host_rejected(self, adapter):
+        # [FUNCTION DOC]
+        # A host with port 80 and no scheme still yields an https URL.
+        # KNOWN ISSUE: the name says "rejected" but the test asserts the start succeeds.
         adapter.host_value = "8000-sbx.novita.ai:80"  # host with no scheme is fine...
         provider = NovitaSandboxProvider(_adapter=adapter)
         # ...the provider always prepends https, so this still passes.
         assert provider.start_container("img:latest").startswith("https://")
 
     def test_loopback_host_rejected(self, adapter):
+        # [FUNCTION DOC]
+        # A localhost host raises "loopback host".
         """NOVITA_DEBUG makes get_host return localhost; refuse to connect."""
         adapter.host_value = "localhost:8000"
         provider = NovitaSandboxProvider(_adapter=adapter)
@@ -447,12 +578,16 @@ class TestSecureUrl:
         "host", ["https://example.test:8000", "http://example.test:8000"]
     )
     def test_scheme_bearing_host_rejected(self, adapter, host):
+        # [FUNCTION DOC]
+        # Parametrized: a host that already has a scheme raises "invalid host".
         adapter.host_value = host
         provider = NovitaSandboxProvider(_adapter=adapter)
         with pytest.raises(RuntimeError, match="invalid host"):
             provider.start_container("img:latest")
 
     def test_loopback_failure_cleans_up(self, adapter):
+        # [FUNCTION DOC]
+        # A loopback rejection kills the sandbox.
         adapter.host_value = "127.0.0.1:8000"
         provider = NovitaSandboxProvider(_adapter=adapter)
         with pytest.raises(RuntimeError, match="loopback host"):
@@ -464,7 +599,11 @@ class TestSecureUrl:
 # Tests: wait_for_ready
 # ---------------------------------------------------------------------------
 class TestWaitForReady:
+    # [CLASS DOC]
+    # Tests readiness polling and crash logs.
     def test_health_polling(self, provider):
+        # [FUNCTION DOC]
+        # Polls <url>/health until 200.
         url = provider.start_container("img:latest")
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -474,6 +613,8 @@ class TestWaitForReady:
             assert f"{url}/health" == mock_get.call_args.args[0]
 
     def test_timeout_raises(self, provider):
+        # [FUNCTION DOC]
+        # Persistent connection errors raise TimeoutError.
         url = provider.start_container("img:latest")
 
         import requests
@@ -483,6 +624,8 @@ class TestWaitForReady:
                 provider.wait_for_ready(url, timeout_s=0.1)
 
     def test_dead_process_raises_without_surfacing_log(self, provider, adapter):
+        # [FUNCTION DOC]
+        # A dead process raises "server process died" without the log by default.
         """Crash is detected early, and the log is withheld by default (S4)."""
         adapter.dead_process = True
         url = provider.start_container("img:latest")
@@ -495,6 +638,8 @@ class TestWaitForReady:
         assert "server crashed" not in str(exc.value)
 
     def test_missing_pid_file_is_still_starting(self, provider, adapter):
+        # [FUNCTION DOC]
+        # A not-yet-written PID file is treated as starting, not dead.
         """The SDK background launch may write the PID after the first probe."""
         adapter.pid_ready = False
         url = provider.start_container("img:latest")
@@ -506,6 +651,8 @@ class TestWaitForReady:
             provider.wait_for_ready(url)
 
     def test_dead_process_log_surfaced_when_opted_in(self, adapter):
+        # [FUNCTION DOC]
+        # With surface_server_logs the log is included.
         adapter.dead_process = True
         provider = NovitaSandboxProvider(_adapter=adapter, surface_server_logs=True)
         url = provider.start_container("img:latest")
@@ -518,6 +665,8 @@ class TestWaitForReady:
         assert "server crashed" in str(exc.value)
 
     def test_secret_redacted_from_surfaced_log(self, adapter):
+        # [FUNCTION DOC]
+        # Secret env values in surfaced logs are replaced by "***".
         adapter.dead_process = True
         provider = NovitaSandboxProvider(
             _adapter=adapter,
@@ -540,14 +689,20 @@ class TestWaitForReady:
 # Tests: image_from_dockerfile -> template build
 # ---------------------------------------------------------------------------
 class TestImageFromDockerfile:
+    # [CLASS DOC]
+    # Tests image_from_dockerfile and template builds at start.
     @pytest.fixture(autouse=True)
     def _clean_registry(self):
+        # [FUNCTION DOC]
+        # Autouse fixture clearing the class-level Dockerfile registry around each test.
         NovitaSandboxProvider._dockerfile_registry.clear()
         yield
         NovitaSandboxProvider._dockerfile_registry.clear()
 
     @staticmethod
     def _write_dockerfile(tmp_path, body):
+        # [FUNCTION DOC]
+        # HELPER: Writes body to tmp/server/Dockerfile. Returns its path.
         """Write <tmp>/server/Dockerfile so context_dir defaults to <tmp>."""
         server = tmp_path / "server"
         server.mkdir(exist_ok=True)
@@ -556,15 +711,21 @@ class TestImageFromDockerfile:
         return dockerfile
 
     def test_returns_template_ref(self, tmp_path):
+        # [FUNCTION DOC]
+        # Returns "template:<resolved path>".
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\nRUN echo hi\n")
         result = NovitaSandboxProvider.image_from_dockerfile(str(df))
         assert result == f"template:{df.resolve()}"
 
     def test_file_not_found(self, tmp_path):
+        # [FUNCTION DOC]
+        # A missing file raises FileNotFoundError.
         with pytest.raises(FileNotFoundError):
             NovitaSandboxProvider.image_from_dockerfile(str(tmp_path / "nope"))
 
     def test_context_dir_not_found(self, tmp_path):
+        # [FUNCTION DOC]
+        # A missing context dir raises ValueError.
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         with pytest.raises(ValueError, match="context_dir"):
             NovitaSandboxProvider.image_from_dockerfile(
@@ -572,12 +733,16 @@ class TestImageFromDockerfile:
             )
 
     def test_does_not_build_eagerly(self, tmp_path):
+        # [FUNCTION DOC]
+        # Registration only stores metadata; no adapter needed.
         """No adapter is involved, so this works without credentials."""
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         NovitaSandboxProvider.image_from_dockerfile(str(df))
         assert str(df.resolve()) in NovitaSandboxProvider._dockerfile_registry
 
     def test_copy_source_missing_raises(self, tmp_path):
+        # [FUNCTION DOC]
+        # A missing COPY source raises ValueError.
         df = self._write_dockerfile(
             tmp_path, "FROM python:3.11\nCOPY nonexistent_dir /app\n"
         )
@@ -585,6 +750,8 @@ class TestImageFromDockerfile:
             NovitaSandboxProvider.image_from_dockerfile(str(df))
 
     def test_start_container_builds_and_uses_template(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # Start builds one template and creates from its id with no image.
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\nRUN echo hi\n")
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         provider = NovitaSandboxProvider(image=image, _adapter=adapter)
@@ -595,6 +762,8 @@ class TestImageFromDockerfile:
         assert adapter.created[0]["image"] is None
 
     def test_registration_after_construction_also_works(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # Registering after constructing the provider still works (class-level registry).
         """Constructor order must not matter.
 
         The registry is class-level, so a provider built BEFORE
@@ -611,6 +780,8 @@ class TestImageFromDockerfile:
         assert adapter.created[0]["template"] == adapter.template_id
 
     def test_start_container_accepts_template_ref_from_kwarg(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # A template ref passed to start is built.
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         provider = NovitaSandboxProvider(_adapter=adapter)
@@ -618,11 +789,15 @@ class TestImageFromDockerfile:
         assert len(adapter.template_builds) == 1
 
     def test_unregistered_template_ref_raises(self, adapter):
+        # [FUNCTION DOC]
+        # An unregistered template ref raises ValueError.
         provider = NovitaSandboxProvider(_adapter=adapter)
         with pytest.raises(ValueError, match="No registered Dockerfile metadata"):
             provider.start_container("template:/no/such/path")
 
     def test_build_failure_leaves_no_sandbox(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # A build failure creates and kills nothing.
         """The build runs before create, so a failure can't orphan a sandbox."""
         adapter.fail_build = True
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
@@ -634,6 +809,8 @@ class TestImageFromDockerfile:
         assert adapter.killed == 0
 
     def test_default_template_name_derived_from_env_dir(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # Default name is "openenv-<slug>-<first 8 hex of content sha256>".
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         provider = NovitaSandboxProvider(image=image, _adapter=adapter)
@@ -647,6 +824,8 @@ class TestImageFromDockerfile:
         )
 
     def test_template_name_hashes_content(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # Different contents give different default names.
         """Two different Dockerfiles must not collide on one template name."""
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         first = NovitaSandboxProvider._default_template_name(str(df))
@@ -655,6 +834,8 @@ class TestImageFromDockerfile:
         assert first != second
 
     def test_explicit_template_name_wins(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # template_name overrides the default.
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         provider = NovitaSandboxProvider(
@@ -664,6 +845,8 @@ class TestImageFromDockerfile:
         assert adapter.template_builds[0]["name"] == "my-env"
 
     def test_cpu_and_memory_forwarded_to_build(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # cpu_count and memory_mb reach the build.
         df = self._write_dockerfile(tmp_path, "FROM python:3.11\n")
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         provider = NovitaSandboxProvider(
@@ -675,6 +858,9 @@ class TestImageFromDockerfile:
         assert build["memory_mb"] == 2048
 
     def test_multistage_dockerfile_is_flattened(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # A same-base two-stage Dockerfile becomes one stage with ARG resolved and the venv copy
+        # turned into cp -a.
         """A two-stage OpenEnv Dockerfile builds as one flattened stage."""
         df = self._write_dockerfile(
             tmp_path,
@@ -701,6 +887,8 @@ class TestImageFromDockerfile:
         assert "COPY --from=" not in content
 
     def test_incompatible_multistage_raises_with_registry_hint(self, tmp_path):
+        # [FUNCTION DOC]
+        # Stages with different bases raise ValueError suggesting "openenv build".
         """Stages with different base images cannot be flattened."""
         df = self._write_dockerfile(
             tmp_path,
@@ -713,6 +901,8 @@ class TestImageFromDockerfile:
             NovitaSandboxProvider.image_from_dockerfile(str(df))
 
     def test_buildkit_mount_stripped(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # BuildKit --mount flags are removed.
         df = self._write_dockerfile(
             tmp_path,
             "FROM python:3.11\nRUN --mount=type=cache,target=/root/.cache/uv uv sync\n",
@@ -723,6 +913,8 @@ class TestImageFromDockerfile:
         assert "--mount=" not in adapter.template_builds[0]["content"]
 
     def test_platform_flag_stripped_from_from(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # --platform is removed from FROM.
         df = self._write_dockerfile(
             tmp_path, "FROM --platform=linux/amd64 python:3.10-slim\nRUN echo hi\n"
         )
@@ -734,6 +926,8 @@ class TestImageFromDockerfile:
         assert "FROM python:3.10-slim" in content
 
     def test_context_dir_used_as_file_context_path(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # The given context dir is passed to the build.
         server = tmp_path / "server"
         server.mkdir()
         df = server / "Dockerfile"
@@ -750,14 +944,20 @@ class TestImageFromDockerfile:
 # Tests: on_build_logs default
 # ---------------------------------------------------------------------------
 class TestBuildLogsDefault:
+    # [CLASS DOC]
+    # Tests the on_build_logs default.
     @pytest.fixture(autouse=True)
     def _clean_registry(self):
+        # [FUNCTION DOC]
+        # Autouse fixture clearing the Dockerfile registry around each test.
         NovitaSandboxProvider._dockerfile_registry.clear()
         yield
         NovitaSandboxProvider._dockerfile_registry.clear()
 
     @staticmethod
     def _write_dockerfile(tmp_path):
+        # [FUNCTION DOC]
+        # HELPER: Writes a fixed simple Dockerfile under tmp/server. Returns its path.
         server = tmp_path / "server"
         server.mkdir(exist_ok=True)
         dockerfile = server / "Dockerfile"
@@ -765,6 +965,8 @@ class TestBuildLogsDefault:
         return dockerfile
 
     def test_default_is_none(self):
+        # [FUNCTION DOC]
+        # The constructor default for on_build_logs is None.
         """Build logs are off by default so nothing unredacted is printed.
 
         The entries are not passed through `_redact` (RFC 002 S4), so surfacing
@@ -776,6 +978,8 @@ class TestBuildLogsDefault:
         assert sig.parameters["on_build_logs"].default is None
 
     def test_default_prints_nothing(self, tmp_path, adapter, capsys):
+        # [FUNCTION DOC]
+        # A default build prints nothing to stdout.
         df = self._write_dockerfile(tmp_path)
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         provider = NovitaSandboxProvider(image=image, _adapter=adapter)
@@ -783,6 +987,8 @@ class TestBuildLogsDefault:
         assert capsys.readouterr().out == ""
 
     def test_custom_callback_receives_entries(self, tmp_path, adapter):
+        # [FUNCTION DOC]
+        # A custom callback is forwarded to the build and receives entries.
         df = self._write_dockerfile(tmp_path)
         image = NovitaSandboxProvider.image_from_dockerfile(str(df))
         collected = []
@@ -803,13 +1009,19 @@ class TestBuildLogsDefault:
 # Tests: Dockerfile rewriting helpers
 # ---------------------------------------------------------------------------
 class TestDockerfileRewriting:
+    # [CLASS DOC]
+    # Tests the module's Dockerfile rewriting helpers.
     def test_strip_mount_flags_single(self):
+        # [FUNCTION DOC]
+        # One cache mount is removed.
         from openenv.core.containers.runtime.novita_provider import _strip_mount_flags
 
         out = _strip_mount_flags("RUN --mount=type=cache,target=/x uv sync\n")
         assert out.strip() == "RUN uv sync"
 
     def test_strip_mount_flags_multiline(self):
+        # [FUNCTION DOC]
+        # A mount on a continued RUN is removed.
         from openenv.core.containers.runtime.novita_provider import _strip_mount_flags
 
         content = (
@@ -829,12 +1041,16 @@ class TestDockerfileRewriting:
         ],
     )
     def test_strip_mount_flags_rejects_unsupported_types(self, mount):
+        # [FUNCTION DOC]
+        # Parametrized: secret/ssh/bind/untyped mounts raise ValueError.
         from openenv.core.containers.runtime.novita_provider import _strip_mount_flags
 
         with pytest.raises(ValueError, match="only supports explicit"):
             _strip_mount_flags(f"RUN --mount={mount} echo hi\n")
 
     def test_strip_mount_flags_rejects_unsupported_mount_on_later_line(self):
+        # [FUNCTION DOC]
+        # An unsupported mount on a continuation line raises.
         from openenv.core.containers.runtime.novita_provider import _strip_mount_flags
 
         content = (
@@ -846,12 +1062,16 @@ class TestDockerfileRewriting:
             _strip_mount_flags(content)
 
     def test_strip_mount_flags_preserves_non_run_lines(self):
+        # [FUNCTION DOC]
+        # Content without mounts is unchanged.
         from openenv.core.containers.runtime.novita_provider import _strip_mount_flags
 
         content = "FROM python:3.11\nCOPY . /app\nRUN echo hi\n"
         assert _strip_mount_flags(content) == content
 
     def test_resolve_arg_in_from(self):
+        # [FUNCTION DOC]
+        # ARG defaults are substituted into FROM.
         from openenv.core.containers.runtime.novita_provider import (
             _resolve_from_references,
         )
@@ -863,6 +1083,8 @@ class TestDockerfileRewriting:
         assert "${BASE_IMAGE}" not in out.split("\n")[1]
 
     def test_resolve_prefix_colliding_unbraced_args(self):
+        # [FUNCTION DOC]
+        # An ARG whose name prefixes another does not corrupt the longer reference.
         """Shorter ARG names must not corrupt longer sibling references.
 
         Declaring ``ARG BASE`` before ``ARG BASE_IMAGE`` used to rewrite
@@ -894,6 +1116,8 @@ class TestDockerfileRewriting:
         assert "python:3.12_IMAGE" not in out_braced
 
     def test_arg_after_first_from_not_in_scope(self):
+        # [FUNCTION DOC]
+        # A later ARG does not rewrite an earlier FROM.
         from openenv.core.containers.runtime.novita_provider import (
             _resolve_from_references,
         )
@@ -903,6 +1127,8 @@ class TestDockerfileRewriting:
         assert "FROM python:3.11" in out
 
     def test_flatten_drops_same_path_copy(self):
+        # [FUNCTION DOC]
+        # Same-path COPY --from is dropped when flattening.
         from openenv.core.containers.runtime.novita_provider import _flatten_multistage
 
         out = _flatten_multistage(
@@ -913,6 +1139,8 @@ class TestDockerfileRewriting:
         assert "COPY --from=" not in out
 
     def test_flatten_rejects_unknown_stage(self):
+        # [FUNCTION DOC]
+        # COPY --from an unknown stage raises ValueError.
         from openenv.core.containers.runtime.novita_provider import _flatten_multistage
 
         with pytest.raises(ValueError, match="does not reference the builder"):
@@ -930,6 +1158,8 @@ class TestDockerfileRewriting:
         ],
     )
     def test_flatten_rejects_unflattened_copy_from(self, copy_line):
+        # [FUNCTION DOC]
+        # Parametrized: COPY --from with --chown or multiple sources raises ValueError.
         from openenv.core.containers.runtime.novita_provider import _flatten_multistage
 
         with pytest.raises(ValueError, match="COPY --from"):
@@ -939,12 +1169,16 @@ class TestDockerfileRewriting:
             )
 
     def test_single_stage_passthrough(self):
+        # [FUNCTION DOC]
+        # Single-stage content is unchanged.
         from openenv.core.containers.runtime.novita_provider import _flatten_multistage
 
         content = "FROM python:3.11\nRUN echo hi\n"
         assert _flatten_multistage(content) == content
 
     def test_flatten_quotes_copy_paths_for_shell(self):
+        # [FUNCTION DOC]
+        # Paths in the generated cp command are shell-quoted.
         from openenv.core.containers.runtime.novita_provider import _flatten_multistage
 
         out = _flatten_multistage(
@@ -962,6 +1196,12 @@ class TestDockerfileRewriting:
 # Tests: _DefaultNovitaAdapter against a fake novita_sandbox SDK
 # ---------------------------------------------------------------------------
 def _install_fake_novita():
+    # [FUNCTION DOC]
+    # HELPER: Writes a fake "novita_sandbox" module into sys.modules (Novita client with
+    # sandbox.create and template.build, Template/builder, CommandExitException,
+    # wait_for_timeout/wait_for_url helpers). Returns: (module, calls mapping recording
+    # constructor credentials, create kwargs and template build details). Callers must remove
+    # it from sys.modules afterwards.
     """Install a minimal fake ``novita_sandbox`` package into sys.modules.
 
     Pins the real SDK surface the adapter depends on: ``Novita.sandbox.create``
@@ -973,7 +1213,11 @@ def _install_fake_novita():
     calls: dict = {"create_kwargs": None}
 
     class _SandboxNS:
+        # [CLASS DOC]
+        # HELPER: Sandbox namespace whose create records kwargs and returns a mock sandbox.
         def create(self, **kwargs):
+            # [FUNCTION DOC]
+            # Records kwargs; returns a MagicMock sandbox with get_host, commands.run and kill.
             calls["create_kwargs"] = kwargs
             sandbox = MagicMock()
             sandbox.get_host = MagicMock(return_value=_SANDBOX_HOST)
@@ -986,21 +1230,31 @@ def _install_fake_novita():
             return sandbox
 
     class _FakeBuilder:
+        # [CLASS DOC]
+        # HELPER: Template builder recording user, start and ready commands.
         def __init__(self):
+            # [FUNCTION DOC]
+            # Initialises recorded fields to None.
             self.start_cmd = None
             self.ready_cmd = None
             self.user = None
 
         def set_user(self, user):
+            # [FUNCTION DOC]
+            # Records the user. Returns self.
             self.user = user
             return self
 
         def set_start_cmd(self, start_cmd, ready_cmd):
+            # [FUNCTION DOC]
+            # Records start and ready commands. Returns self.
             self.start_cmd = start_cmd
             self.ready_cmd = ready_cmd
             return self
 
     class _FakeTemplateClass:
+        # [CLASS DOC]
+        # HELPER: Template class recording the build context and Dockerfile content.
         """Pins the Template surface `_DefaultNovitaAdapter.build_template` uses.
 
         Mirrors the real shape: `Template(...)` is constructed with the build
@@ -1009,22 +1263,32 @@ def _install_fake_novita():
         """
 
         def __init__(self, file_context_path=None, file_ignore_patterns=None):
+            # [FUNCTION DOC]
+            # Records the file context path and creates a builder.
             calls["template_context"] = file_context_path
             self.builder = _FakeBuilder()
 
         def from_dockerfile(self, content):
+            # [FUNCTION DOC]
+            # Records the content and returns the builder.
             calls["dockerfile_content"] = content
             return self.builder
 
         @staticmethod
         def build(builder, name, **kwargs):
+            # [FUNCTION DOC]
+            # Records name, builder and kwargs. Returns an object with template_id "tpl-built-1".
             calls["build_name"] = name
             calls["build_builder"] = builder
             calls["build_kwargs"] = kwargs
             return types.SimpleNamespace(template_id="tpl-built-1")
 
     class _TemplateNS:
+        # [CLASS DOC]
+        # HELPER: Client template namespace that records the client credentials then delegates.
         def build(self, builder, name, **kwargs):
+            # [FUNCTION DOC]
+            # Records api_key/domain at build time and delegates to the template class build.
             calls["template_namespace_build"] = {
                 "api_key": calls["api_key"],
                 "domain": calls["domain"],
@@ -1032,21 +1296,35 @@ def _install_fake_novita():
             return _FakeTemplateClass.build(builder, name, **kwargs)
 
     class _FakeNovita:
+        # [CLASS DOC]
+        # HELPER: Fake client recording credentials and exposing sandbox/template namespaces.
         def __init__(self, api_key=None, domain=None, **kwargs):
+            # [FUNCTION DOC]
+            # Records api_key and domain and builds the namespaces.
             calls["api_key"] = api_key
             calls["domain"] = domain
             self.sandbox = _SandboxNS()
             self.template = _TemplateNS()
 
     class _ReadyCmd:
+        # [CLASS DOC]
+        # HELPER: Ready command wrapper.
         def __init__(self, cmd):
+            # [FUNCTION DOC]
+            # Stores the command string.
             self._cmd = cmd
 
         def get_cmd(self):
+            # [FUNCTION DOC]
+            # Returns the command string.
             return self._cmd
 
     class _CommandExitException(Exception):
+        # [CLASS DOC]
+        # HELPER: Exception carrying stdout, stderr, exit code and error.
         def __init__(self, stderr="", stdout="", exit_code=1, error=None):
+            # [FUNCTION DOC]
+            # Stores stdout, stderr, exit_code and error.
             self.stdout, self.stderr, self.exit_code, self.error = (
                 stdout,
                 stderr,
@@ -1065,7 +1343,11 @@ def _install_fake_novita():
 
 
 class TestDefaultAdapter:
+    # [CLASS DOC]
+    # Tests _DefaultNovitaAdapter against the fake SDK; each test removes the fake module after.
     def test_uses_env_var_fallbacks_when_unset(self):
+        # [FUNCTION DOC]
+        # None credentials are passed through as None.
         """None for api_key/domain lets the SDK read its own env vars."""
         _, calls = _install_fake_novita()
         try:
@@ -1076,6 +1358,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_explicit_credentials_passed_through(self):
+        # [FUNCTION DOC]
+        # Explicit api_key and domain are passed to the client.
         _, calls = _install_fake_novita()
         try:
             _DefaultNovitaAdapter(api_key="k-123", domain="us-phx-1.sandbox.novita.ai")
@@ -1085,6 +1369,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_create_sandbox_kwargs_match_sdk_signature(self):
+        # [FUNCTION DOC]
+        # Create maps env_vars to envs, omits secure/template when None, and sets no network policy.
         """The kwargs the provider forwards must match Sandbox.create's params."""
         _, calls = _install_fake_novita()
         try:
@@ -1113,6 +1399,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_create_sandbox_with_template_id(self):
+        # [FUNCTION DOC]
+        # A template id is passed with no image and no build block.
         """A built template id is passed as `template`, with no image."""
         _, calls = _install_fake_novita()
         try:
@@ -1134,6 +1422,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_start_cmd_pins_keepalive_not_image_cmd(self):
+        # [FUNCTION DOC]
+        # The JSON-serialisable build block pins "sleep infinity" and a timeout ready command.
         """The build block must override the image's own CMD.
 
         from_image defaults to inherit_config=True, which would otherwise adopt
@@ -1163,6 +1453,9 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_build_template_uses_dockerfile_and_pins_keepalive(self):
+        # [FUNCTION DOC]
+        # build_template uses the context and content, forwards cpu/memory, uses the client's
+        # credentials, pins the keepalive start command and returns the template id.
         """build_template drives Template.from_dockerfile -> build -> id."""
         _, calls = _install_fake_novita()
         try:
@@ -1197,6 +1490,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_build_template_forwards_on_build_logs(self):
+        # [FUNCTION DOC]
+        # A log callback is forwarded to the build.
         _, calls = _install_fake_novita()
         try:
             adapter = _DefaultNovitaAdapter(api_key="k", domain=None)
@@ -1214,6 +1509,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_build_template_sets_user_root(self):
+        # [FUNCTION DOC]
+        # Without a USER in the Dockerfile the builder runs as root.
         """The template must run as root, not the parser's default "user".
 
         Novita's Dockerfile parser rewrites USER to "user" when the Dockerfile
@@ -1238,6 +1535,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_build_template_preserves_explicit_dockerfile_user(self):
+        # [FUNCTION DOC]
+        # An explicit USER leaves the builder user unset.
         _, calls = _install_fake_novita()
         try:
             adapter = _DefaultNovitaAdapter(api_key="k", domain=None)
@@ -1254,6 +1553,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_exec_swallows_nonzero_exit(self):
+        # [FUNCTION DOC]
+        # A non-zero exit exception returns its stdout instead of raising.
         """Probes exit non-zero by design; stdout must still come back."""
         mod, _ = _install_fake_novita()
         try:
@@ -1269,6 +1570,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_exec_returns_stdout(self):
+        # [FUNCTION DOC]
+        # Returns the command stdout.
         _, _calls = _install_fake_novita()
         try:
             adapter = _DefaultNovitaAdapter(api_key="k", domain=None)
@@ -1281,6 +1584,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_exec_forwards_background(self):
+        # [FUNCTION DOC]
+        # background and user are forwarded with timeout 10.
         _, _calls = _install_fake_novita()
         try:
             adapter = _DefaultNovitaAdapter(api_key="k", domain=None)
@@ -1294,6 +1599,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_missing_sdk_raises_install_hint(self):
+        # [FUNCTION DOC]
+        # A missing SDK raises RuntimeError mentioning openenv[novita].
         sys.modules["novita_sandbox"] = None  # forces ImportError
         try:
             with pytest.raises(RuntimeError, match=r"openenv\[novita\]"):
@@ -1302,6 +1609,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_host_uses_get_host(self):
+        # [FUNCTION DOC]
+        # host delegates to sandbox.get_host(port).
         _, _calls = _install_fake_novita()
         try:
             adapter = _DefaultNovitaAdapter(api_key="k", domain=None)
@@ -1313,6 +1622,8 @@ class TestDefaultAdapter:
             sys.modules.pop("novita_sandbox", None)
 
     def test_kill_uses_sandbox_kill(self):
+        # [FUNCTION DOC]
+        # kill delegates to sandbox.kill().
         _, _calls = _install_fake_novita()
         try:
             adapter = _DefaultNovitaAdapter(api_key="k", domain=None)

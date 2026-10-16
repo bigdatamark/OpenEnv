@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# HELPER: renders rollouts for the Harbor UI as HTML strings. Normalizes conversations from
+# any wire dialect (chat-completions, Anthropic, structured-JSON text agents like
+# terminus-2) into a timeline of events (prompt, thinking, tool calls with results,
+# keystroke batches with terminal output, text, final answer), and renders result,
+# checks/findings and per-turn token panels. All model/task text is HTML-escaped and
+# markdown is rendered with raw HTML and images disabled. Long output is folded/cut.
 """How a rollout reads in the UI: its trajectory as a timeline of events, and its result.
 
 A coding agent works in a loop: the model says something, acts, and gets something back. The capture
@@ -30,6 +37,9 @@ _MD: Any = None
 
 
 def _markdown(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders text as CommonMark (tables on, raw HTML off, images off) with a lazily
+    # created markdown-it parser cached in a module global. Returns HTML.
     """Render text written by a model or a task. Raw HTML in it is escaped, never rendered, and so
     are images: one pointing at someone's server would report every reader of the page to it."""
     global _MD
@@ -41,10 +51,14 @@ def _markdown(text: str) -> str:
 
 
 def _e(value: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: HTML-escapes str(value), with None -> "".
     return html.escape("" if value is None else str(value))
 
 
 def _clip(text: Any, limit: int = 400) -> str:
+    # [FUNCTION DOC]
+    # HELPER: JSON-dumps non-strings, strips, escapes, and truncates to limit chars with an ellipsis.
     """Escape and shorten a value for display, keeping the head where the meaning usually is."""
     body = text if isinstance(text, str) else json.dumps(text, default=str)
     body = body.strip()
@@ -52,6 +66,8 @@ def _clip(text: Any, limit: int = 400) -> str:
 
 
 def _plural(n: int, word: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: formats "<n with thousands separators> <word>" adding "s" unless n is 1.
     return f"{n:,} {word}{'' if n == 1 else 's'}"
 
 
@@ -59,6 +75,9 @@ def _plural(n: int, word: str) -> str:
 
 
 def _tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: returns tool calls on a message as {id, name, arguments}, from chat-completions
+    # tool_calls (function or top-level fields) and Anthropic tool_use content blocks.
     """Tool calls on a message, normalised across the dialects.
 
     Chat-completions puts them in `tool_calls`; Anthropic puts them in the content block list as
@@ -95,6 +114,9 @@ def _tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _message_text(message: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns a message's readable text: string content as-is, or the joined "text"
+    # of content blocks that are not tool_use/tool_result/thinking; "" otherwise.
     """Readable text of a message, without its tool-call, tool-result and thinking blocks."""
     content = message.get("content")
     if isinstance(content, str):
@@ -111,6 +133,10 @@ def _message_text(message: dict[str, Any]) -> str:
 
 
 def _results(message: dict[str, Any]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: returns tool results from a message: a role "tool" message yields one
+    # {id, text, error False, name}; otherwise Anthropic tool_result blocks yield
+    # {id, text (list content joined), error from is_error}. Empty list if none.
     """What came back from tools, in either the chat-completions or the Anthropic shape."""
     if message.get("role") == "tool":
         content = message.get("content")
@@ -151,6 +177,9 @@ def _results(message: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _thinking(message: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns model reasoning from reasoning_content/reasoning/thinking string fields,
+    # or joined thinking content blocks; "" if none.
     """The model's reasoning, where the endpoint returned it."""
     for key in ("reasoning_content", "reasoning", "thinking"):
         value = message.get(key)
@@ -167,6 +196,9 @@ def _thinking(message: dict[str, Any]) -> str:
 
 
 def _structured(text: str) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: if text (optionally wrapped in a code fence) is a single JSON object, returns
+    # the parsed dict; else None.
     """A reply that is one JSON object, which is how terminus-2 and its kin write their actions."""
     s = (text or "").strip()
     if s.startswith("```"):
@@ -181,6 +213,9 @@ def _structured(text: str) -> dict[str, Any] | None:
 
 
 def _commands(value: dict[str, Any]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: extracts {keys, duration} entries from a structured reply's "commands" list
+    # (dict items using keystrokes/command/cmd, or plain strings).
     """Keystroke or command batches in a structured reply."""
     out = []
     for c in value.get("commands") or []:
@@ -196,6 +231,9 @@ def _commands(value: dict[str, Any]) -> list[dict[str, Any]]:
 def split_steps(
     messages: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    # [FUNCTION DOC]
+    # Splits messages into the opening (messages before the first assistant message) and a
+    # list of steps, each {"assistant": message, "back": following non-assistant messages}.
     """A conversation as its opening (everything before the first reply) and one step per reply.
 
     Each step is the assistant message and everything that came back before the next one.
@@ -213,6 +251,9 @@ def split_steps(
 
 
 def count_actions(result: dict[str, Any]) -> int:
+    # [FUNCTION DOC]
+    # Returns the total tool calls across result turns; if zero, counts commands in structured
+    # assistant replies of agent conversations.
     """Tool calls, or for an agent that writes its actions as text, the commands it wrote."""
     calls = sum(len(t.get("tool_calls") or []) for t in result.get("turns") or [])
     if calls:
@@ -260,6 +301,9 @@ _TOOL_ICONS = (
 
 
 def _tool_icon(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: maps a tool name to an icon name by keyword groups (terminal, edit, write, read,
+    # search, list, plan, web), default "tool".
     low = name.lower()
     for words, ic in _TOOL_ICONS:
         if any(w in low for w in words):
@@ -268,6 +312,8 @@ def _tool_icon(name: str) -> str:
 
 
 def _term_lines(lines: list[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: escapes terminal lines, wrapping a leading shell prompt in a "ps" span.
     out = []
     for line in lines:
         m = _PROMPT.match(line)
@@ -280,6 +326,9 @@ def _term_lines(lines: list[str]) -> str:
 
 
 def _terminal(text: str, *, error: bool = False) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders text as a terminal block (error style optional): first 40 lines shown,
+    # the rest folded, text beyond 30000 chars cut with a note.
     """Output as a terminal shows it. Long output folds after forty lines; very long is cut."""
     cut = len(text) > _MAX_CHARS
     lines = text[:_MAX_CHARS].rstrip("\n").split("\n")
@@ -297,6 +346,8 @@ def _terminal(text: str, *, error: bool = False) -> str:
 
 
 def _capped(text: Any) -> tuple[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: returns (text truncated to 30000 chars, note HTML or "").
     """`(text, note)`: text past `_MAX_CHARS` is left out of the page, which is redrawn every two
     seconds while a run is live; the result JSON keeps all of it."""
     text = str(text)
@@ -309,6 +360,8 @@ def _capped(text: Any) -> tuple[str, str]:
 
 
 def _code(text: str, cls: str = "hb-code") -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders capped text as an escaped preformatted block, folding lines after 40.
     text, note = _capped(text)
     lines = text.rstrip("\n").split("\n")
     out = f'<pre class="{cls}">{_e(chr(10).join(lines[:_SHOW_LINES]))}</pre>'
@@ -321,12 +374,16 @@ def _code(text: str, cls: str = "hb-code") -> str:
 
 
 def _diff(old: str, new: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders old lines as deletions and new lines as additions in a diff block.
     rows = [f'<span class="d">{_e(line)}</span>' for line in old.split("\n")]
     rows += [f'<span class="a">{_e(line)}</span>' for line in new.split("\n")]
     return f'<pre class="diff">{"".join(rows)}</pre>'
 
 
 def _parse_args(arguments: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: parses a JSON object/array string into a value; otherwise returns arguments unchanged.
     if isinstance(arguments, str):
         s = arguments.strip()
         if s.startswith(("{", "[")):
@@ -338,6 +395,8 @@ def _parse_args(arguments: Any) -> Any:
 
 
 def _first(args: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the first non-blank string value among keys in args, or None.
     return next(
         (args[k] for k in keys if isinstance(args.get(k), str) and args[k].strip()),
         None,
@@ -345,6 +404,9 @@ def _first(args: dict[str, Any], keys: tuple[str, ...]) -> str | None:
 
 
 def _peek(args: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: one-line (max 200 chars, whitespace collapsed) summary of tool arguments:
+    # command, then path, then query keys, then any string value, else JSON; non-dicts stringified.
     """What a tool call is about, on one line: its command, its file, or its query."""
     if isinstance(args, dict):
         value = (
@@ -364,6 +426,10 @@ def _peek(args: Any) -> str:
 
 
 def _input_html(args: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders tool input: non-dict args as code (empty -> ""); for dicts a command
+    # line, an old/new string diff or the first body field as code, then remaining args as a
+    # definition list (if all short scalars) or indented JSON.
     """A tool call's input, as what it does: a command, an edit, a file body, or its arguments."""
     if not isinstance(args, dict):
         return (
@@ -414,6 +480,9 @@ def _input_html(args: Any) -> str:
 
 
 def _output_html(text: str, *, error: bool = False, label: str = "Output") -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a labelled output section with line count (and error marker) as a
+    # terminal block, or "no output" when blank.
     text = text or ""
     if not text.strip():
         return f'<div><h5>{_e(label)}</h5><div class="hb-fine">no output</div></div>'
@@ -422,14 +491,21 @@ def _output_html(text: str, *, error: bool = False, label: str = "Output") -> st
 
 
 def _ev(kind: str, ic: str, body: str, ts: str = "") -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns one timeline list item with kind class, icon, body and timestamp label.
     return f'<li class="ev {kind}"><span class="ei">{icon(ic, 15)}</span><div class="eb">{body}</div><span class="ts">{_e(ts)}</span></li>'
 
 
 def _fold(summary: str, inner: str, *, open_: bool = False) -> str:
+    # [FUNCTION DOC]
+    # HELPER: wraps inner HTML in a details element with a chevron summary (optionally open).
     return f"<details{' open' if open_ else ''}><summary>{icon('chevronRight', 13, 'chev')}{summary}</summary>{inner}</details>"
 
 
 def _tool_event(call: dict[str, Any], result: dict[str, Any] | None, ts: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a tool call and its result (or "no result") as a folded event with a
+    # summary (name, argument peek, line count/error) and input/output panes.
     args = _parse_args(call.get("arguments"))
     error = bool(result and result.get("error"))
     peek = _peek(args)
@@ -457,6 +533,9 @@ def _tool_event(call: dict[str, Any], result: dict[str, Any] | None, ts: str) ->
 
 
 def _keys_event(commands: list[dict[str, Any]], output: str | None, ts: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a batch of keystroke commands (with non-default waits) and the terminal
+    # output that followed as a folded terminal event.
     """A batch of keystrokes typed into a terminal, with the terminal as it looked afterwards."""
     first = commands[0]["keys"].strip().split("\n")[0] if commands else ""
     more = f'<span class="ms">+{len(commands) - 1}</span>' if len(commands) > 1 else ""
@@ -479,6 +558,8 @@ def _keys_event(commands: list[dict[str, Any]], output: str | None, ts: str) -> 
 
 
 def _thought_event(label: str, text: str, ts: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders labelled reasoning text as a folded "thinking" event with a short peek.
     peek = " ".join(text.split())[:220]
     summary = f'<b>{_e(label)}</b><span class="peek">{_e(peek)}</span>'
     return _ev(
@@ -490,6 +571,9 @@ def _thought_event(label: str, text: str, ts: str) -> str:
 
 
 def _prompt_events(opening: list[dict[str, Any]]) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: renders opening messages (system prompt, then instructions/messages to the
+    # model) as folded markdown events, skipping blank ones.
     """The system prompt and the task: long and the same on every rollout of a task, so folded."""
     out = []
     first_user = True
@@ -519,6 +603,14 @@ def _prompt_events(opening: list[dict[str, Any]]) -> list[str]:
 def _step_events(
     n: int, step: dict[str, Any], *, final: bool, structured_run: bool
 ) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: renders one model call's events: thinking; for structured replies a plan event
+    # from analysis/plan/thought/reasoning fields, keystroke batch with collected terminal
+    # output (or a bare terminal event), other fields, and task-complete marker; otherwise its
+    # text (final style if final). Then each tool call paired with its result by id or else in
+    # order from unmatched results, then remaining returned messages as terminal output (when
+    # prefixed or in a structured run) or folded user messages. Emits "Empty reply." if nothing.
+    # Only the first event of the step carries the "#n" label.
     """One model call as events: its thinking, its actions with their results, what it said."""
     a = step["assistant"]
     ts = f"#{n}"
@@ -677,6 +769,11 @@ def _step_events(
 
 
 def trajectory_html(messages: list[dict[str, Any]], *, live: bool = False) -> str:
+    # [FUNCTION DOC]
+    # Renders a conversation as an ordered-list timeline: prompt events then each step's
+    # events. The run is treated as structured if any of the first three replies is a JSON
+    # object; the last step is final when not live and it has no tool calls and nothing came
+    # back. When live, appends a "waiting for the next model call" row. Returns HTML.
     """A conversation as a timeline: the prompt, then every model call's events in order.
 
     Args:
@@ -713,6 +810,9 @@ def trajectory_html(messages: list[dict[str, Any]], *, live: bool = False) -> st
 
 
 def _conversation_label(convo: dict[str, Any], seen_agents: int, n_agents: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: label for a conversation: "main conversation" or "conversation i of n" for
+    # agent roots; "auxiliary call"/"discarded branch" or the role name otherwise.
     role = convo.get("role", "agent")
     if role == "agent":
         return (
@@ -726,6 +826,10 @@ def _conversation_label(convo: dict[str, Any], seen_agents: int, n_agents: int) 
 
 
 def _conversation_html(r: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders all non-empty conversations of a result: a single one directly;
+    # otherwise agent ones as sections and other roles folded, each headed by label and model
+    # call count. Placeholder when none were captured.
     """Every conversation of a finished rollout, the agent's first.
 
     Each root is a separate conversation. An auxiliary one (a next-speaker check, a summariser) is
@@ -757,6 +861,10 @@ def _conversation_html(r: dict[str, Any]) -> str:
 
 
 def _transcript_html(session: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders the live trajectory of a running capture session from its newest node
+    # that offered tools (or the newest node): its request messages plus response, with live
+    # styling. Returns "" if the session graph has no nodes.
     """The trajectory of a rollout still running, from its newest captured call.
 
     That call's `request_messages` already holds the whole conversation the harness assembled, tool
@@ -782,6 +890,9 @@ _LEVELS = (("FATAL", "bad", "x"), ("WARN", "warn", "alert"), ("INFO", "", "info"
 
 
 def _findings_html(findings: list[str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders findings grouped FATAL, WARN, then INFO, stripping the leading
+    # "[LEVEL]" tag and truncating each to 400 chars; "" when empty.
     """Findings, worst first: a FATAL means unusable, a WARN means read it before training on it."""
     if not findings:
         return ""
@@ -813,6 +924,10 @@ _ATIF = {
 
 
 def _verdict(r: dict[str, Any]) -> tuple[str, str, str, str]:
+    # [FUNCTION DOC]
+    # HELPER: returns (tone, status word, big number, class) for a result: failed; graded
+    # with several rewards but no headline; not graded; solved (reward > 0, class full when
+    # >= 0.999 else part); or not solved.
     """`(status tone, status word, big number, its class)` for a finished rollout."""
     reward = r.get("reward")
     if not r.get("ok"):
@@ -833,6 +948,12 @@ def _verdict(r: dict[str, Any]) -> tuple[str, str, str, str]:
 
 
 def _result_html(r: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders the Result panel (verdict, reward and caption, meter for rewards in
+    # [0,1], per-key rewards when several with the chosen one marked, step rewards, facts:
+    # model calls, actions, conversations, duration, trainable tokens unless eval, generated
+    # tokens when any; truncated error) and the Checks panel (trace check status, upstream
+    # parameter changes, findings, agent log tail). Returns HTML.
     """The result, and what to check before trusting it, as side panels.
 
     Figures that mean nothing for this kind of rollout (token counts from an endpoint that returns no
@@ -919,6 +1040,8 @@ def _result_html(r: dict[str, Any]) -> str:
 
 
 def _duration(seconds: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: formats seconds as "Ns", "Mm SSs" or "Hh MMm"; "–" for None/"".
     if seconds in (None, ""):
         return "–"
     s = int(float(seconds))
@@ -933,12 +1056,18 @@ def _duration(seconds: Any) -> str:
 
 
 def _confidence(mean_logp: float) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a bar whose width is clamp(1 + mean logprob, 0, 1).
     """A bar for mean logprob. Closer to 0 is more confident; -1.0 is the practical floor here."""
     pct = max(0.0, min(1.0, 1.0 + mean_logp))
     return f'<span class="rp-conf" title="mean logprob {mean_logp:.3f}"><i style="width:{pct * 100:.0f}%"></i></span>'
 
 
 def _turns_html(r: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a table of captured turns: index, action (tool names, final answer or
+    # text only, discarded chip), generated token count, mean-logprob confidence bar and
+    # finish reason, with an explanatory note; placeholder when no turns.
     """Per model call: what it did, how much it wrote, how sure it was. Only meaningful with token ids."""
     turns = r.get("turns") or []
     if not turns:

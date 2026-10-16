@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Implements "openenv init": scaffolds a new environment directory from the packaged template
+# openenv.cli.templates.openenv_env, substituting name placeholders (class prefix, snake, camel and
+# title case names, default image name) and random Hugging Face Space card values (emoji and
+# colors) in file contents and file names, then generates uv.lock. Several helpers are reused by
+# "openenv import".
 """Initialize a new OpenEnv environment."""
 
 from __future__ import annotations
@@ -17,11 +23,17 @@ app = typer.Typer(help="Initialize a new OpenEnv environment")
 
 
 def _snake_to_pascal(snake_str: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: joins the underscore-separated words, each capitalized (PascalCase).
     """Convert snake_case to PascalCase (e.g., 'my_env' -> 'MyEnv')."""
     return "".join(word.capitalize() for word in snake_str.split("_"))
 
 
 def _get_env_prefix(env_name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the class-name prefix: strips a trailing "_env" and PascalCases the rest (a single
+    # word is just capitalized; if nothing remains, the capitalized full name).
+    # KNOWN ISSUE: an inline comment says all parts except the last are PascalCased, but every part is.
     """Extract the prefix for class names (e.g., 'my_env' -> 'My', 'test_env' -> 'Test')."""
     # Remove trailing '_env' if present
     if env_name.endswith("_env"):
@@ -39,17 +51,25 @@ def _get_env_prefix(env_name: str) -> str:
 
 
 def _snake_to_camel(snake_str: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first word unchanged followed by the remaining words capitalized (camelCase).
     """Convert snake_case to camelCase (e.g., 'my_env' -> 'myEnv')."""
     parts = snake_str.split("_")
     return parts[0] + "".join(word.capitalize() for word in parts[1:])
 
 
 def _snake_to_title(snake_str: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the words capitalized and joined by spaces (Title Case).
     """Convert snake_case to Title Case (e.g., 'my_env' -> 'My Env')."""
     return " ".join(word.capitalize() for word in snake_str.split("_"))
 
 
 def _validate_env_name(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the name if it is a non-empty Python identifier.
+    # Raises: typer.BadParameter otherwise. Snake case is not actually enforced, and the leading-digit
+    # check is redundant with the identifier check.
     """Validate environment name (must be valid Python identifier in snake_case)."""
     if not name:
         raise typer.BadParameter("Environment name cannot be empty")
@@ -70,6 +90,9 @@ def _validate_env_name(name: str) -> str:
 
 
 def _get_random_hf_space_config() -> Dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: returns a dict with a random emoji (from a fixed list) and random colorFrom and colorTo
+    # values from the HF Spaces color list.
     """
     Get random Hugging Face Space configuration values.
 
@@ -211,6 +234,11 @@ def _get_random_hf_space_config() -> Dict[str, str]:
 
 
 def _create_template_replacements(env_name: str) -> Dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: builds the placeholder replacement map: full class-name placeholders for Environment,
+    # Action, Observation and Env, then __ENV_NAME__, __ENV_CLASS_NAME__ (prefix), __ENV_TITLE_NAME__,
+    # __ENV_CAMEL_NAME__, __ENV_IMAGE_NAME__ ("openenv-<name without _env>") and the HF Space emoji
+    # and colors.
     """
     Create comprehensive template replacement dictionary.
 
@@ -249,6 +277,8 @@ def _create_template_replacements(env_name: str) -> Dict[str, str]:
 
 
 def _replace_in_content(content: str, replacements: Dict[str, str]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: applies replacements to the text, longest placeholder first, and returns the result.
     """Replace all occurrences in content using case-sensitive replacements."""
     result = content
     # Sort by length (longest first) to avoid partial replacements
@@ -258,6 +288,9 @@ def _replace_in_content(content: str, replacements: Dict[str, str]) -> str:
 
 
 def _should_rename_file(filename: str, env_name: str) -> Tuple[bool, str]:
+    # [FUNCTION DOC]
+    # HELPER: returns (True, name with __ENV_NAME__ replaced) if the file name contains the
+    # placeholder, else (False, unchanged name).
     """
     Check if a file should be renamed and return the new name.
 
@@ -277,6 +310,10 @@ def _copy_and_template_file(
     dest_path: Path,
     replacements: Dict[str, str],
 ) -> None:
+    # [FUNCTION DOC]
+    # HELPER: creates parent directories and copies a file; UTF-8 text is normalized to LF line endings
+    # and has placeholders replaced, binary files are copied unchanged.
+    # Raises: RuntimeError wrapping any read/write error.
     """Copy a file and apply template replacements."""
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -301,6 +338,10 @@ def _copy_and_template_file(
 
 
 def _resolve_template_path(template_pkg: str, template_dir: str) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: locates the template directory by importing the parent package and joining the last
+    # component to its directory (falling back to importlib.resources), then appends template_dir if
+    # given. Returns: the path. Raises: FileNotFoundError if it cannot be found or is not a directory.
     """Resolve the template package directory used by `openenv init`."""
     # Get the package path using importlib.resources but avoid importing the template package
     # We'll use the package's __file__ to get the directory path
@@ -345,6 +386,9 @@ def _copy_template_directory(
     replacements: Dict[str, str],
     env_name: str,
 ) -> List[Path]:
+    # [FUNCTION DOC]
+    # HELPER: copies every file under the template directory into dest_dir preserving relative paths,
+    # renaming files with the name placeholder and templating contents. Returns: list of created paths.
     """Recursively copy template directory and apply replacements."""
     created_files: List[Path] = []
     template_path = _resolve_template_path(template_pkg, template_dir)
@@ -368,6 +412,10 @@ def _copy_template_directory(
 
 
 def _generate_uv_lock(env_dir: Path) -> bool:
+    # [FUNCTION DOC]
+    # Runs "uv lock --directory <env_dir>" if pyproject.toml exists. Returns: True on success; False if
+    # there is no pyproject.toml, the command fails or uv is not installed (with a warning).
+    # Side effects: subprocess, console output.
     """Generate uv.lock from pyproject.toml using uv."""
     pyproject_path = env_dir / "pyproject.toml"
 
@@ -418,6 +466,11 @@ def init(
         ),
     ] = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: validates the name, resolves the target directory (output dir or cwd plus name) and
+    # refuses an existing file or non-empty directory (BadParameter). Creates the directory, copies and
+    # templates the files, generates uv.lock (with manual instructions if that fails) and prints next
+    # steps. On any error removes the directory, prints the error and raises typer.Exit(1).
     """
     Initialize a new OpenEnv environment.
 

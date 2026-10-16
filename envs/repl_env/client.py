@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Async WebSocket client for a remote REPL environment server, with helpers for executing code,
+# submitting a final answer and inspecting variables.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -29,6 +32,8 @@ except ImportError:
 
 
 class REPLEnv(EnvClient[REPLAction, REPLObservation, REPLState]):
+    # [CLASS DOC]
+    # EnvClient subclass for REPL sessions. Methods are async; the base class offers a sync wrapper.
     """
     Async client for the remote REPL environment.
 
@@ -50,6 +55,8 @@ class REPLEnv(EnvClient[REPLAction, REPLObservation, REPLState]):
     """
 
     def _step_payload(self, action: REPLAction) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns a mapping with code, is_final and final_answer from the action.
         return {
             "code": action.code,
             "is_final": action.is_final,
@@ -57,6 +64,11 @@ class REPLEnv(EnvClient[REPLAction, REPLObservation, REPLState]):
         }
 
     def _parse_result(self, payload: dict[str, Any]) -> StepResult[REPLObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a StepResult with a REPLObservation from the response: the nested result mapping
+        # becomes a CodeBlockResult (defaults: empty output, success True), plus context preview/length,
+        # available variables, iteration, max_iterations (default 30), top-level done/reward and metadata
+        # (top level preferred).
         obs_data = payload.get("observation", {})
         result_data = obs_data.get("result", {})
 
@@ -87,6 +99,9 @@ class REPLEnv(EnvClient[REPLAction, REPLObservation, REPLState]):
         )
 
     def _parse_state(self, payload: dict[str, Any]) -> REPLState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a REPLState from a state response with defaults (iteration 0, max 30, empty keys,
+        # total execution time 0.0).
         return REPLState(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),
@@ -100,17 +115,26 @@ class REPLEnv(EnvClient[REPLAction, REPLObservation, REPLState]):
         )
 
     async def execute(self, code: str) -> StepResult[REPLObservation]:
+        # [FUNCTION DOC]
+        # Sends a step with the given code and returns the StepResult.
         """Execute Python code in the REPL."""
         return await self.step(REPLAction(code=code))
 
     async def submit_final_answer(self, answer: str) -> StepResult[REPLObservation]:
+        # [FUNCTION DOC]
+        # Sends a step with empty code, is_final True and the answer, ending the episode. Returns the StepResult.
         """Submit a final answer and terminate the episode."""
         return await self.step(REPLAction(code="", is_final=True, final_answer=answer))
 
     async def get_variable(self, name: str) -> StepResult[REPLObservation]:
+        # [FUNCTION DOC]
+        # Executes code printing the repr of the named variable and returns the StepResult. The name is
+        # inserted into code unescaped, so it is executed as an expression.
         """Retrieve and print a variable from the REPL namespace."""
         return await self.execute(f"print(repr({name}))")
 
     async def list_variables(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Fetches the remote state and returns its namespace_keys list.
         """Return the current REPL namespace keys."""
         return (await self.state()).namespace_keys

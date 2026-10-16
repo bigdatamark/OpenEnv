@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Defines the visual theme for the OpenEnv Gradio web UI: a green primary hue
+# and zinc-like neutral hue, Geist fonts, a Gradio Base theme with light and
+# dark color overrides (OPENENV_GRADIO_THEME), and a CSS string
+# (OPENENV_GRADIO_CSS) styling the "oe-*" classes used by the playground layout
+# (header, cards, tool/action pickers, result panes, stats, episode history,
+# JSON/code views) and hiding the Gradio footer. No functions; imports gradio at
+# module load (ImportError if absent).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Theme for the OpenEnv Gradio UI: white, hairline borders, one green accent."""

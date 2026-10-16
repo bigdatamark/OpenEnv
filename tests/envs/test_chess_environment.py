@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for the chess environment: models, move handling and penalties,
+# state, terminal positions, random/moonfish opponents, moonfish cache reset,
+# temporal reward discounting, and the web playground. Skipped without
+# python-chess or moonfish.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for Chess environment."""
@@ -14,14 +19,20 @@ from moonfish.psqt import BOARD_EVALUATION_CACHE
 
 
 class TestChessModels:
+    # [CLASS DOC]
+    # Chess model defaults.
     """Test Chess data models."""
 
     def test_chess_action_creation(self):
+        # [FUNCTION DOC]
+        # Action stores the UCI move.
         """Test ChessAction can be created with a move."""
         action = ChessAction(move="e2e4")
         assert action.move == "e2e4"
 
     def test_chess_observation_defaults(self):
+        # [FUNCTION DOC]
+        # Observation defaults: empty FEN and legal moves, no check, not done, no result.
         """Test ChessObservation has correct defaults."""
         obs = ChessObservation()
         assert obs.fen == ""
@@ -31,6 +42,8 @@ class TestChessModels:
         assert obs.result is None
 
     def test_chess_state_defaults(self):
+        # [FUNCTION DOC]
+        # State defaults: white to move, empty history.
         """Test ChessState has correct defaults."""
         state = ChessState(episode_id="test-123", step_count=0)
         assert state.episode_id == "test-123"
@@ -40,14 +53,20 @@ class TestChessModels:
 
 
 class TestChessEnvironment:
+    # [CLASS DOC]
+    # Environment logic without an opponent.
     """Test Chess environment logic."""
 
     @pytest.fixture
     def env(self):
+        # [FUNCTION DOC]
+        # Fixture: ChessEnvironment with no opponent.
         """Create a fresh ChessEnvironment for each test."""
         return ChessEnvironment(opponent=None)  # No opponent for testing
 
     def test_reset_returns_observation(self, env):
+        # [FUNCTION DOC]
+        # Initial position has 20 legal moves, no check, not done.
         """Test reset returns a valid observation."""
         obs = env.reset()
         assert isinstance(obs, ChessObservation)
@@ -57,12 +76,16 @@ class TestChessEnvironment:
         assert obs.done is False
 
     def test_reset_with_custom_fen(self, env):
+        # [FUNCTION DOC]
+        # reset(fen=...) uses the given position.
         """Test reset with custom starting position."""
         fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         obs = env.reset(fen=fen)
         assert obs.fen == fen
 
     def test_step_valid_move(self, env):
+        # [FUNCTION DOC]
+        # e2e4 updates the FEN.
         """Test stepping with a valid move."""
         env.reset()
         obs = env.step(ChessAction(move="e2e4"))
@@ -71,6 +94,8 @@ class TestChessEnvironment:
         assert "4P3" in obs.fen
 
     def test_step_invalid_move_format(self, env):
+        # [FUNCTION DOC]
+        # Malformed move gives reward -0.1, not done.
         """Test stepping with invalid move format returns penalty."""
         env.reset()
         obs = env.step(ChessAction(move="invalid"))
@@ -78,6 +103,8 @@ class TestChessEnvironment:
         assert obs.done is False
 
     def test_step_illegal_move(self, env):
+        # [FUNCTION DOC]
+        # Illegal move gives reward -0.1, not done.
         """Test stepping with illegal move returns penalty."""
         env.reset()
         obs = env.step(ChessAction(move="e2e5"))  # Can't move pawn 3 squares
@@ -85,6 +112,8 @@ class TestChessEnvironment:
         assert obs.done is False
 
     def test_state_property(self, env):
+        # [FUNCTION DOC]
+        # State after reset: non-empty episode id, 0 steps, white to move.
         """Test state property returns ChessState."""
         env.reset()
         state = env.state
@@ -94,6 +123,8 @@ class TestChessEnvironment:
         assert state.current_player == "white"
 
     def test_state_updates_after_move(self, env):
+        # [FUNCTION DOC]
+        # After a move: step 1, move in history, black to move.
         """Test state updates correctly after a move."""
         env.reset()
         env.step(ChessAction(move="e2e4"))
@@ -103,6 +134,9 @@ class TestChessEnvironment:
         assert state.current_player == "black"
 
     def test_checkmate_ends_game(self, env):
+        # [FUNCTION DOC]
+        # Resetting to a fool's-mate position yields a checkmated internal board.
+        # KNOWN ISSUE: docstring promises a reward check but only checkmate is asserted.
         """Test checkmate ends the game with correct reward."""
         # Fool's mate position
         fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
@@ -111,6 +145,8 @@ class TestChessEnvironment:
         assert env._board.is_checkmate()
 
     def test_stalemate_is_draw(self, env):
+        # [FUNCTION DOC]
+        # Stalemate position: done, reward 0.0, no legal moves.
         """Test stalemate ends with draw reward."""
         # Stalemate position - black king on h8, white king f7, white queen g6
         fen = "7k/5K2/6Q1/8/8/8/8/8 b - - 0 1"
@@ -122,9 +158,13 @@ class TestChessEnvironment:
 
 
 class TestChessEnvironmentWithOpponent:
+    # [CLASS DOC]
+    # Environments with automatic opponents.
     """Test Chess environment with opponent configured."""
 
     def test_random_opponent_makes_moves(self):
+        # [FUNCTION DOC]
+        # Random opponent replies; white to move again after 2 plies.
         """Test random opponent makes a move after agent move."""
         env = ChessEnvironment(opponent="random", agent_color="white")
         env.reset()
@@ -137,6 +177,8 @@ class TestChessEnvironmentWithOpponent:
         assert env.state.step_count == 2  # Agent + opponent
 
     def test_moonfish_opponent_makes_moves(self):
+        # [FUNCTION DOC]
+        # Moonfish opponent replies; white to move after 2 plies.
         """Test moonfish opponent makes a move after agent move."""
         env = ChessEnvironment(
             opponent="moonfish", opponent_depth=1, agent_color="white"
@@ -151,6 +193,8 @@ class TestChessEnvironmentWithOpponent:
         assert env.state.step_count == 2
 
     def test_reset_clears_moonfish_evaluation_cache(self):
+        # [FUNCTION DOC]
+        # reset empties moonfish's global evaluation cache down to the start position.
         """Test reset empties moonfish's position cache so it can't grow across episodes."""
         env = ChessEnvironment(
             opponent="moonfish", opponent_depth=1, agent_color="white"
@@ -165,6 +209,8 @@ class TestChessEnvironmentWithOpponent:
         assert len(BOARD_EVALUATION_CACHE) == 1
 
     def test_opponent_checkmate_gives_negative_reward(self):
+        # [FUNCTION DOC]
+        # Blundering into Qh4# gives done, reward -1.0, result "0-1".
         """Test agent gets -1.0 reward when opponent checkmates."""
         env = ChessEnvironment(
             opponent="moonfish", opponent_depth=2, agent_color="white"
@@ -182,9 +228,13 @@ class TestChessEnvironmentWithOpponent:
 
 
 class TestTemporalDiscounting:
+    # [CLASS DOC]
+    # Discounted terminal reward credit assignment.
     """Test temporal discounting for credit assignment."""
 
     def test_discounted_rewards_in_terminal_observation(self):
+        # [FUNCTION DOC]
+        # Mate-in-one: reward 1.0 and metadata with discounted_rewards and gamma.
         """Test that terminal observation includes discounted rewards."""
         env = ChessEnvironment(opponent=None, agent_color="white", gamma=0.99)
         # Back-rank mate: black king trapped by own pawns, white rook delivers mate
@@ -200,6 +250,8 @@ class TestTemporalDiscounting:
         assert obs.metadata["gamma"] == 0.99
 
     def test_discounted_rewards_length_matches_agent_moves(self):
+        # [FUNCTION DOC]
+        # One agent move gives one discounted reward.
         """Test discounted rewards list length equals number of agent moves."""
         env = ChessEnvironment(opponent=None, agent_color="white", gamma=0.99)
         # Back-rank mate position
@@ -213,6 +265,8 @@ class TestTemporalDiscounting:
         assert len(obs.metadata["discounted_rewards"]) == 1
 
     def test_discounting_formula(self):
+        # [FUNCTION DOC]
+        # The final move receives the undiscounted reward.
         """Test the discounting formula: r_t = γ^(T-1-t) × R_final."""
         gamma = 0.5  # Use 0.5 for easy mental math
         env = ChessEnvironment(opponent=None, agent_color="white", gamma=gamma)
@@ -231,6 +285,8 @@ class TestTemporalDiscounting:
         assert rewards[0] == 1.0  # Last move gets full reward
 
     def test_earlier_moves_get_less_credit(self):
+        # [FUNCTION DOC]
+        # In self-play fool's mate (white loses), four moves get -gamma^k credit.
         """Test that earlier moves get less credit than later moves (self-play mode)."""
         gamma = 0.9
         env = ChessEnvironment(opponent=None, agent_color="white", gamma=gamma)
@@ -261,6 +317,8 @@ class TestTemporalDiscounting:
         assert abs(rewards[0] - (-0.729)) < 0.001
 
     def test_gamma_parameter_configurable(self):
+        # [FUNCTION DOC]
+        # gamma is stored on the environment.
         """Test that gamma can be configured."""
         env1 = ChessEnvironment(opponent=None, gamma=0.99)
         env2 = ChessEnvironment(opponent=None, gamma=0.5)
@@ -270,6 +328,9 @@ class TestTemporalDiscounting:
 
 
 def test_chess_web_playground():
+    # [FUNCTION DOC]
+    # web_actions lists 20 opening moves; render_web draws an SVG board with
+    # pieces, no accent unless in check, no hex colours; None for empty obs.
     env = ChessEnvironment(opponent=None)
     obs = env.reset().model_dump()
     actions = env.web_actions(obs)

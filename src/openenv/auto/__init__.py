@@ -1,3 +1,7 @@
+# [PACKAGE DOC]
+# Auto-discovery API package: re-exports AutoEnv (resolve and instantiate an environment client
+# by name or Hub repo) and AutoAction (resolve an environment's action class), backed by
+# discovery of installed openenv environment packages and Hub repositories.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """

@@ -1,10 +1,19 @@
+# [MODULE DOC]
+# kernrl problem (level 3, full blocks): multi-head self-attention plus
+# residual LayerNorm over the spatial positions of a (2, 128, 128, 128) feature
+# map (sequence length 16384, embed dim 128, 4 heads).
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference attention block wrapping nn.MultiheadAttention (sequence-first
+    # layout) and a LayerNorm over the embedding dim.
     def __init__(self, embed_dim, num_heads):
+        # [FUNCTION DOC]
+        # Creates the MultiheadAttention (embed_dim, num_heads) and LayerNorm modules.
         """
         Attention Block using Multihead Self-Attention.
         :param embed_dim: Embedding dimension (the number of channels)
@@ -15,6 +24,9 @@ class Model(nn.Module):
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x):
+        # [FUNCTION DOC]
+        # Flattens (B, C, H, W) to a (H*W, B, C) sequence, applies self-attention,
+        # adds the residual, applies LayerNorm, and reshapes back to (B, C, H, W).
         """
         Forward pass of the AttentionBlock.
         :param x: Input tensor of shape (B, C, H, W)
@@ -37,8 +49,12 @@ image_width = 128
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, num_channels, height, width).
     return [torch.randn(batch_size, num_channels, image_height, image_width)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [embed_dim, num_heads].
     return [embed_dim, num_heads]

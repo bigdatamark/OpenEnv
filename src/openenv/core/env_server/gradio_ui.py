@@ -1,3 +1,17 @@
+# [MODULE DOC]
+# Builds the Gradio "playground" page mounted at /web by the web interface. The
+# page mirrors an agent loop: a Reset card, a step card (a tool picker plus one
+# form per MCP tool for MCP environments; a single message box for chat envs;
+# otherwise a form generated from the action's JSON schema), a result pane
+# (error, tool output or observation fields, plus reward/done/step stats), a raw
+# JSON view, an episode log, a state view, an optional "same call in Python"
+# snippet and the README. Environments can contribute an HTML drawing and
+# one-click legal actions per observation (render_web / web_actions). Helper
+# functions render HTML fragments (all user data HTML-escaped), shorten and
+# fold large values, and turn JSON-schema properties into Gradio inputs with
+# converters. Parameter names ending in api_key/token/secret/password are masked
+# or rendered as password fields; names containing words like code/message/text
+# get multi-line inputs.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -38,17 +52,29 @@ def get_gradio_display_title(
     metadata: Optional[EnvironmentMetadata],
     fallback: str = "OpenEnv Environment",
 ) -> str:
+    # [FUNCTION DOC]
+    # Returns "OpenEnv Agentic Environment: <metadata.name>" (or the fallback name
+    # when metadata is None).
     """Return the title used for the Gradio app (browser tab and Blocks)."""
     name = metadata.name if metadata else fallback
     return f"OpenEnv Agentic Environment: {name}"
 
 
 def _readme_body(readme: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the README text with a leading YAML front matter block
+    # ("---" ... "---") removed.
     """The README without the Hugging Face Space front matter."""
     return re.sub(r"\A---\n.*?\n---\n", "", readme, flags=re.S)
 
 
 def _description(metadata: Optional[EnvironmentMetadata]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns metadata.description, except when it is the generic
+    # "<word> environment" default and README content exists: then returns the
+    # first README paragraph that is not a heading, HTML, admonition, image, table,
+    # code fence or quote, whitespace-collapsed and with Markdown links reduced to
+    # their text (falls back to the description). Returns "" with no metadata.
     """The metadata description, or the README's first paragraph when it's the default."""
     if not metadata:
         return ""
@@ -65,6 +91,10 @@ def _description(metadata: Optional[EnvironmentMetadata]) -> str:
 
 
 def _header_html(metadata: Optional[EnvironmentMetadata], kind: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the header HTML: an eyebrow "<name> · <kind>", a title made
+    # from the name (trailing "_env" removed, underscores to spaces, title case) and
+    # the description.
     name = metadata.name if metadata else "environment"
     title = name.removesuffix("_env").replace("_", " ").title()
     return (
@@ -74,10 +104,16 @@ def _header_html(metadata: Optional[EnvironmentMetadata], kind: str) -> str:
 
 
 def _step_title(number: int, title: str, text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns a step heading HTML "<n>. <title>" with a paragraph. text and
+    # title are inserted unescaped (callers pass trusted markup).
     return f'<div class="oe-step"><h2>{number}. {title}</h2><p>{text}</p></div>'
 
 
 def _rounded(value: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively rounds floats to 4 decimals inside lists and dicts;
+    # other values unchanged.
     if isinstance(value, float):
         return round(value, 4)
     if isinstance(value, list):
@@ -88,6 +124,10 @@ def _rounded(value: Any) -> Any:
 
 
 def _folded(value: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Recursively replaces any nested numeric list whose shape (following
+    # first elements) has more than 64 elements with the string "list · AxBx...";
+    # other values are kept.
     """
     The value with each array of more than 64 numbers (a grid, a screen, a screenshot)
     shown as its shape, so the page stays light. Smaller boards and lists keep their values.
@@ -106,6 +146,10 @@ def _folded(value: Any) -> Any:
 
 
 def _short(value: Any, limit: int = 160) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Converts a value to a short display string: rounds floats; lists
+    # longer than 20 show "<n> items: [first 8, …]"; non-strings are JSON-encoded;
+    # result truncated to limit (default 160) with an ellipsis.
     value = _rounded(value)
     if isinstance(value, list) and len(value) > 20:
         text = f"{len(value)} items: {json.dumps(value[:8], default=str)[:-1]}, …]"
@@ -115,6 +159,9 @@ def _short(value: Any, limit: int = 160) -> str:
 
 
 def _error(obs: Dict[str, Any]) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the observation's error ("error" key, or metadata "error") as
+    # a string, using its "message" when it is a dict; None if absent/falsy.
     """The error an observation reports: a failed tool call, or an env error in metadata."""
     error = obs.get("error") or (obs.get("metadata") or {}).get("error")
     if not error:
@@ -123,12 +170,21 @@ def _error(obs: Dict[str, Any]) -> Optional[str]:
 
 
 def _output(obs: Dict[str, Any]) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Returns the observation's "result", unwrapped to its "data" field
+    # when result is a dict containing one.
     """What a tool call returned."""
     result = obs.get("result")
     return result.get("data", result) if isinstance(result, dict) else result
 
 
 def _result_html(data: Dict[str, Any], step_count: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the result pane HTML for a step/reset response: an error block
+    # (first 2000 chars), else a tool output block (string or pretty JSON, first
+    # 4000 chars), else rows of non-empty observation fields (excluding metadata,
+    # done, reward, result, error); followed by reward ("–" if None), done and step
+    # count stats.
     """The observation (a tool's output or its fields), then reward, done and step."""
     obs = data.get("observation", {}) or {}
     error = _error(obs)
@@ -166,10 +222,16 @@ def _result_html(data: Dict[str, Any], step_count: int) -> str:
 
 
 def _error_html(message: str, step_count: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Result pane HTML showing only message as an error with the step
+    # count.
     return _result_html({"observation": {"error": message}}, step_count)
 
 
 def _episode_html(entries: List[List[str]]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the episode log HTML from [badge, call, result] entries, or a
+    # placeholder message when empty.
     if not entries:
         items = '<p class="oe-muted">Nothing yet. Reset, then run a step.</p>'
     else:
@@ -186,16 +248,26 @@ def _episode_html(entries: List[List[str]]) -> str:
 
 
 def _list_tools(env: Any) -> List[Any]:
+    # [FUNCTION DOC]
+    # HELPER: Calls env.step with a ListToolsAction and returns the tools list.
+    # Side effect: performs a step on the environment instance.
     return list(env.step(ListToolsAction()).tools)
 
 
 def _tool_label(tool: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "<name>: <first description line>" or just the name.
     """The tool's name and the first line of its description, if it has one."""
     first_line = (tool.description or "").strip().split("\n")[0]
     return f"{tool.name}: {first_line}" if first_line else tool.name
 
 
 def _params(schema: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any], bool]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns (name, resolved property schema, required flag) for each
+    # property of a JSON schema except "metadata". Resolution inlines local "$ref"s
+    # from "$defs" (sibling keys override) and collapses anyOf/oneOf/allOf by taking
+    # the first non-null option merged with the remaining keys, recursively.
     """
     The (name, schema, required) of each property of a JSON schema, with `$ref`s
     resolved and `X | None` unwrapped to `X`.
@@ -203,6 +275,8 @@ def _params(schema: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any], bool]]:
     defs = schema.get("$defs", {})
 
     def resolve(prop: Dict[str, Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Resolves one property schema as described for _params.
         if "$ref" in prop:
             prop = {
                 **defs.get(prop["$ref"].split("/")[-1], {}),
@@ -224,6 +298,9 @@ def _params(schema: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any], bool]]:
 
 
 def _call_args(arguments: Dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats arguments as "k=v, ..." for the episode log, masking secret
+    # names as "***" and shortening JSON values to 60 characters.
     """Arguments as `name=value` for the episode log, with secrets masked and long values cut."""
     return ", ".join(
         f"{k}={'***' if k.lower().endswith(_SECRET_NAMES) else _short(json.dumps(v), 60)}"
@@ -232,12 +309,27 @@ def _call_args(arguments: Dict[str, Any]) -> str:
 
 
 def _blank(value: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True for None or a whitespace-only string.
     return value is None or (isinstance(value, str) and not value.strip())
 
 
 def _param_input(
     name: str, schema: Dict[str, Any], required: bool
 ) -> Tuple[Any, Callable[[Any], Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Creates a Gradio input component for one parameter and a converter
+    # from the raw widget value to the value to send (None means omit).
+    # Enum -> dropdown (required starts on the first option); boolean -> checkbox
+    # (converter bool); integer/number -> number box, or a text box for optional
+    # numbers without default, converting via float then int/float (ValueError
+    # "<name> must be a number" for unparsable text); array/object -> multi-line
+    # text parsed as JSON (ValueError on invalid JSON); otherwise a text box
+    # (multi-line for long-text names or maxLength > 100, password type for secret
+    # names). Label shows type, JSON hint and required marker; info is the first
+    # 200 chars of the description. Must be called inside a Gradio Blocks context.
+    # KNOWN ISSUE: a numeric input of "inf" for an integer raises OverflowError,
+    # which the form's ValueError handling does not catch.
     """
     A form input for one parameter, and a function that turns its value into
     the one to send (`None` to leave the parameter out).
@@ -261,6 +353,9 @@ def _param_input(
         cast = int if kind == "integer" else float
 
         def number(value: Any) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: Number converter: None for blank, else cast(float(value)); raises
+            # ValueError with a friendly message on parse failure.
             if _blank(value):
                 return None
             try:
@@ -280,6 +375,9 @@ def _param_input(
     if is_json:
 
         def parse(value: Any) -> Any:
+            # [FUNCTION DOC]
+            # HELPER: JSON converter: None for blank, else the parsed JSON; raises
+            # ValueError with the decode error on failure.
             if _blank(value):
                 return None
             try:
@@ -314,9 +412,15 @@ def _param_input(
 
 
 class _Form:
+    # [CLASS DOC]
+    # HELPER: Group of inputs for a parameter list: required parameters first, then
+    # optional ones (inside a collapsed "More fields" accordion when both kinds
+    # exist). Keeps parallel lists of (name, required), components and converters.
     """Inputs for a set of parameters, and the dict to send built from their values."""
 
     def __init__(self, params: List[Tuple[str, Dict[str, Any], bool]]):
+        # [FUNCTION DOC]
+        # Creates the components (inside the current Gradio layout context).
         required = [p for p in params if p[2]]
         optional = [p for p in params if not p[2]]
         self.names: List[Tuple[str, bool]] = []
@@ -330,6 +434,8 @@ class _Form:
             self._add(optional)
 
     def _add(self, params: List[Tuple[str, Dict[str, Any], bool]]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Creates and records an input and converter for each parameter.
         for name, schema, required in params:
             component, convert = _param_input(name, schema, required)
             self.names.append((name, required))
@@ -337,6 +443,11 @@ class _Form:
             self.converters.append(convert)
 
     def values(self, raw: List[Any]) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Converts raw widget values (same order as inputs) into a dict, omitting
+        # parameters whose converter returns None.
+        # Raises: ValueError "Fill in <names>." when required values are missing, or a
+        # converter's ValueError.
         """The values to send. Raises `ValueError` for a missing or invalid one."""
         values, missing = {}, []
         for (name, required), convert, value in zip(self.names, self.converters, raw):
@@ -359,6 +470,18 @@ def build_gradio_app(
     title: str = "OpenEnv Environment",
     quick_start_md: Optional[str] = None,
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Builds and returns the gr.Blocks playground for web_manager (which exposes
+    # env, action_cls, async reset_environment/step_environment and get_state).
+    # For MCPEnvironment instances it lists tools at build time (a step on the env)
+    # and builds one form per tool; MCP actions are sent as {"type": "call_tool",
+    # "tool_name", "arguments"}. Otherwise builds a chat message form or a form from
+    # the action schema (excluding "type"). action_fields is unused. Event wiring:
+    # Reset, Run step (and Enter on text boxes) and quick-action selection run with a
+    # shared concurrency limit of one, each followed by refreshing the state view.
+    # Errors are shown in the result pane without failing the UI.
+    # KNOWN ISSUE: action_fields is accepted but ignored; the title argument only
+    # serves as the fallback name.
     """
     Build a Gradio Blocks app for the OpenEnv web interface.
 
@@ -380,6 +503,11 @@ def build_gradio_app(
     kind = "MCP environment" if is_mcp else "environment"
 
     def render(data: Dict[str, Any]):
+        # [FUNCTION DOC]
+        # HELPER: For a response, merges reward/done into the observation and asks the
+        # env for its HTML drawing and (unless done) its one-click actions. Returns
+        # updates for the drawing and the actions radio (choices labeled by index) and
+        # the list of action payloads.
         """The env's drawing and its one-click actions for this observation."""
         obs = {
             **(data.get("observation") or {}),
@@ -399,9 +527,14 @@ def build_gradio_app(
         )
 
     def steps_in(entries: List[List[str]]) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Counts episode entries that are steps (badge other than "R").
         return sum(1 for badge, _, _ in entries if badge != "R")
 
     def unchanged(message: str, entries: List[List[str]]):
+        # [FUNCTION DOC]
+        # HELPER: Returns step outputs that leave everything as-is except the result
+        # pane, which shows message as an error.
         """Show an error without touching the episode."""
         return (
             gr.update(),
@@ -414,6 +547,11 @@ def build_gradio_app(
         )
 
     async def reset_env(entries):
+        # [FUNCTION DOC]
+        # Calls reset_environment. On error shows "reset() failed" and keeps the
+        # episode. Otherwise starts a new episode log with a reset entry (noting an
+        # observation error if any), renders drawing/actions, shows the folded response
+        # in the reset pane and raw JSON, and clears the step result pane.
         try:
             data = await web_manager.reset_environment()
         except Exception as e:
@@ -455,6 +593,12 @@ def build_gradio_app(
         )
 
     async def run_step(action: Dict[str, Any], call: str, entries):
+        # [FUNCTION DOC]
+        # Runs one action: auto-resets first if the episode log is empty (error shown
+        # if that fails); calls step_environment; on exception appends an error entry
+        # and shows it; otherwise appends an entry summarizing the error, tool output or
+        # reward, renders drawing/actions and shows the folded result and raw JSON.
+        # Returns the seven step outputs.
         if not entries:
             try:
                 await web_manager.reset_environment()
@@ -569,6 +713,10 @@ def build_gradio_app(
                                 ]
 
                                 async def step_fn(entries, name, *values):
+                                    # [FUNCTION DOC]
+                                    # MCP variant: selects the slice of all form values belonging to the chosen
+                                    # tool, converts them (validation errors shown without changing the episode)
+                                    # and runs a call_tool step labeled "<tool>(<args>)".
                                     start = 0
                                     for tool_name, form in forms.items():
                                         if tool_name == name:
@@ -618,6 +766,9 @@ def build_gradio_app(
                                 form = _Form(params)
 
                                 async def step_fn(entries, *values):
+                                    # [FUNCTION DOC]
+                                    # Non-MCP variant: converts the form values into the action dict (validation
+                                    # errors shown) and runs it as "step(<args>)".
                                     try:
                                         action = form.values(list(values))
                                     except ValueError as e:
@@ -666,12 +817,16 @@ def build_gradio_app(
         quick_state = gr.State([])
 
         def show_state():
+            # [FUNCTION DOC]
+            # HELPER: Returns web_manager.get_state() as pretty JSON, or "" on any error.
             try:
                 return json.dumps(web_manager.get_state(), indent=2, default=str)
             except Exception:
                 return ""
 
         async def quick_step(entries, actions, choice):
+            # [FUNCTION DOC]
+            # Runs the one-click action at index choice from the stored actions list.
             action = actions[int(choice)]
             return await run_step(action, f"step({_call_args(action)})", entries)
 

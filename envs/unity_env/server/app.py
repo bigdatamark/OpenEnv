@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI app for the Unity environment, created at import with the environment class as per-session
+# factory and env name "unity_env". Tries several import layouts (package-relative, direct execution with
+# the parent dir added to sys.path, installed package, repo root with envs prefix).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -66,6 +70,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Serves the app with uvicorn on 0.0.0.0:8000 with a single worker; blocks.
     """
     Entry point for direct execution via uv run or python -m.
 

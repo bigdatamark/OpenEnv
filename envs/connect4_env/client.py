@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the Connect4 environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +27,8 @@ if TYPE_CHECKING:
 
 
 class Connect4Env(EnvClient[Connect4Action, Connect4Observation, Connect4State]):
+    # [CLASS DOC]
+    # Typed client sending column moves and parsing board observations and state.
     """
     Client for Connect4 Environment.
 
@@ -41,6 +45,8 @@ class Connect4Env(EnvClient[Connect4Action, Connect4Observation, Connect4State])
     """
 
     def _step_payload(self, action: Connect4Action) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns {"column": action.column}.
         """
         Convert Connect4Action to JSON payload for step request.
 
@@ -55,6 +61,9 @@ class Connect4Env(EnvClient[Connect4Action, Connect4Observation, Connect4State])
         }
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[Connect4Observation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a Connect4Observation (board default empty 6x7, legal_actions) with done/reward from the
+        # envelope (reward default 0.0) and metadata from payload or observation; wraps it in a StepResult.
         """
         Parse server response into StepResult[Connect4Observation].
 
@@ -82,6 +91,8 @@ class Connect4Env(EnvClient[Connect4Action, Connect4Observation, Connect4State])
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> Connect4State:
+        # [FUNCTION DOC]
+        # HELPER: Builds a Connect4State with defaults (empty board, next_player 1, step_count 0).
         """
         Parse server response into Connect4State object.
 

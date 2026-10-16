@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 3): minGPT causal multi-head self-attention
+# (batch 64, sequence 512, embedding 768, 8 heads, dropout 0).
 import math
 
 import torch
@@ -8,6 +11,9 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference causal self-attention with a fused QKV Linear, an output Linear,
+    # dropouts, and a lower-triangular mask buffer of size max_seqlen.
     """
     A vanilla multi-head masked self-attention layer with a projection at the end.
     It is possible to use torch.nn.MultiheadAttention here but I am including an
@@ -15,6 +21,9 @@ class Model(nn.Module):
     """
 
     def __init__(self, n_embd, n_head, attn_pdrop, resid_pdrop, max_seqlen):
+        # [FUNCTION DOC]
+        # Creates the QKV and output projections, dropouts and the causal mask buffer
+        # (1, 1, max_seqlen, max_seqlen). Asserts n_embd is divisible by n_head.
         super().__init__()
         assert n_embd % n_head == 0
         # key, query, value projections for all heads, but in a batch
@@ -35,6 +44,11 @@ class Model(nn.Module):
         self.n_embd = n_embd
 
     def forward(self, x):
+        # [FUNCTION DOC]
+        # Projects x (B, T, C) to q, k, v, splits into heads, computes scaled dot
+        # products, masks future positions with -inf, softmaxes, applies attention
+        # dropout, combines with v, merges heads, and applies the output projection and
+        # residual dropout. Returns (B, T, C).
         B, T, C = (
             x.size()
         )  # batch size, sequence length, embedding dimensionality (n_embd)
@@ -76,8 +90,12 @@ resid_pdrop = 0.0
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, seq_len, n_embd).
     return [torch.randn(batch_size, seq_len, n_embd)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [n_embd, n_head, attn_pdrop, resid_pdrop, max_seqlen].
     return [n_embd, n_head, attn_pdrop, resid_pdrop, max_seqlen]

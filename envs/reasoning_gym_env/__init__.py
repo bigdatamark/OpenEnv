@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Package entry for the Reasoning Gym environment; re-exports the client and action/observation models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

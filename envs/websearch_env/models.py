@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for the WebSearch environment: search action, observation and one web content result.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -17,6 +19,9 @@ from pydantic import BaseModel, Field
 
 
 class WebSearchAction(Action):
+    # [CLASS DOC]
+    # Action with the required search query and an optional temporary Serper API key overriding the server's.
+    # KNOWN ISSUE: the docstring says it is "a message to echo", which does not match the fields.
     """Action for the WebSearch Env environment - just a message to echo."""
 
     query: str = Field(..., description="The query to search the web for")
@@ -27,6 +32,9 @@ class WebSearchAction(Action):
 
 
 class WebSearchObservation(Observation):
+    # [CLASS DOC]
+    # Observation with formatted text of the results (or an error message) and the list of WebContent results.
+    # KNOWN ISSUE: the docstring says it is "the echoed message".
     """Observation from the WebSearch Env environment - the echoed message."""
 
     content: str = Field(
@@ -39,6 +47,8 @@ class WebSearchObservation(Observation):
 
 
 class WebContent(BaseModel):
+    # [CLASS DOC]
+    # One search result: title, extracted content text and URL.
     """Web content of a search result."""
 
     title: str = Field(..., description="The title of the web content")

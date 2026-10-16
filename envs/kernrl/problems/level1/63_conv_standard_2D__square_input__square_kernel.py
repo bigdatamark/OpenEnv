@@ -1,8 +1,14 @@
+# [MODULE DOC]
+# kernrl problem (level 1): standard 2D convolution, 3 -> 64 channels, 3x3
+# kernel, no bias, on a (16, 3, 256, 256) input.
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model wrapping nn.Conv2d with a square kernel and configurable
+    # stride, padding, dilation, groups and bias (default no bias).
     """
     Performs a standard 2D convolution operation with a square input and square kernel.
 
@@ -28,6 +34,9 @@ class Model(nn.Module):
         groups: int = 1,
         bias: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Creates the Conv2d submodule with a (kernel_size, kernel_size) kernel and the
+        # given options.
         super(Model, self).__init__()
         self.conv2d = nn.Conv2d(
             in_channels,
@@ -41,6 +50,9 @@ class Model(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the convolution of x: (B, in_channels, H, W) ->
+        # (B, out_channels, H_out, W_out).
         """
         Performs the 2D convolution.
 
@@ -63,11 +75,15 @@ height = 256
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, in_channels, height, width).
     x = torch.randn(batch_size, in_channels, height, width)
     return [x]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [in_channels, out_channels, kernel_size].
     return [
         in_channels,
         out_channels,

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Serving entry point for harbor_env: a process-wide HarborService owning the capture
+# proxy (published locally via a forwarder, or mounted at /capture on a HF Space), the
+# serve_harbor CLI routine running uvicorn, build_app assembling the OpenEnv FastAPI app
+# with the Harbor Gradio UI, optional HF OAuth login, and a same-origin guard for UI POSTs.
 """Serve Harbor tasks: Task API, MCP rollouts, and a human UI.
 
 Locally this is two ports:
@@ -30,6 +35,10 @@ CAPTURE_MOUNT = "/capture"
 
 
 def space_public_url() -> str:
+    # [FUNCTION DOC]
+    # Returns "https://<SPACE_HOST>" (scheme/trailing slash normalized) if SPACE_HOST is set,
+    # else derives "https://<owner-name>.hf.space" from SPACE_ID (slashes, underscores, dots ->
+    # dashes, lowercased), else "".
     """The public URL of the Space this process is running in, or `""` when it is not on one.
 
     Returns:
@@ -50,6 +59,10 @@ def space_public_url() -> str:
 
 
 class HarborService:
+    # [CLASS DOC]
+    # Long-lived serving state: admin key, LLM URL/model, datasets, provider, capture level,
+    # the CaptureServer, forwarder, public URL and mounted flag. One instance is registered
+    # at class level as the current service.
     """Long-lived state for a serving process: capture proxy, forwarding, datasets.
 
     Held at module scope by `serve_harbor` so that the environment instances OpenEnv builds
@@ -80,6 +93,12 @@ class HarborService:
         # Honours $OPENENV_CAPTURE_ADMIN_KEY so an operator who wants to call the management routes
         # can choose the key; otherwise a random one, which locks the routes without putting a secret
         # nobody asked for into the logs.
+        # [FUNCTION DOC]
+        # Sets the admin key from OPENENV_CAPTURE_ADMIN_KEY or a random token, stores config,
+        # sets capture_level to "text" for the anthropic provider (else as given), and constructs
+        # (but does not start) the CaptureServer.
+        # KNOWN ISSUE: the CaptureServer receives the original capture_level argument, not the
+        # "text" override applied to self.capture_level for anthropic, so the two can disagree.
         self.admin_key = os.environ.get(
             "OPENENV_CAPTURE_ADMIN_KEY"
         ) or secrets.token_urlsafe(24)
@@ -106,6 +125,11 @@ class HarborService:
         self._lock = threading.Lock()
 
     def start(self) -> str:
+        # [FUNCTION DOC]
+        # On a Space: marks mounted and sets public_url to <space url>/capture (build_app does the
+        # mount); capture server not started. Locally: starts the capture server, then a forwarder
+        # of the configured kind on the capture port; on any failure stops capture and re-raises.
+        # Returns the public URL.
         """Make the capture proxy reachable from the sandbox and return its public URL.
 
         Two different situations, and conflating them is what makes the hosted case awkward:
@@ -140,6 +164,8 @@ class HarborService:
         return self.public_url
 
     def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the forwarder if any, and always stops the capture server and clears the forwarder.
         """Tear both halves down, even if the first half refuses to go.
 
         The capture port is released in a `finally` for the same reason `start()` unwinds on failure:
@@ -156,10 +182,14 @@ class HarborService:
 
     @classmethod
     def current(cls) -> "HarborService | None":
+        # [FUNCTION DOC]
+        # Class method returning the registered service or None.
         return cls._instance
 
     @classmethod
     def set_current(cls, service: "HarborService") -> None:
+        # [FUNCTION DOC]
+        # Class method registering service as the process-wide current one.
         cls._instance = service
 
 
@@ -178,6 +208,13 @@ def serve_harbor(
     provider: str = "openai",
     max_output_tokens: int | None = 8192,
 ) -> None:
+    # [FUNCTION DOC]
+    # Runs prepare() (LLM required only if llm_url given; prints capabilities), derives model,
+    # capture level (measured, else "tokens" with an llm_url or "text" without) and api_key
+    # (argument or OPENENV_LLM_API_KEY), creates and starts a HarborService and registers it,
+    # prints connection info (and an EVAL ONLY notice when not "tokens"), defaults
+    # ENABLE_WEB_INTERFACE=true, builds the app and runs uvicorn (blocking). Always stops the
+    # service afterwards. Raises RuntimeError from prepare; forwarder errors propagate.
     """Boot the capture proxy, then serve the env server with the UI mounted.
 
     Args:
@@ -274,6 +311,11 @@ def build_app(
     model: str = "",
     llm: dict[str, Any] | None = None,
 ) -> Any:
+    # [FUNCTION DOC]
+    # Configures HarborEnvironment class defaults, creates the OpenEnv app for harbor_env with
+    # CallToolAction/Observation, MAX_CONCURRENT_ENVS (default 4) and a custom Harbor Gradio
+    # tab only; mounts the capture app at /capture if the current service is mounted; attaches
+    # HF OAuth when configured; adds the SameOrigin middleware. Returns the app.
     """The FastAPI app: Task API + MCP + the Gradio UI."""
     from openenv.core.env_server.http_server import create_app
     from openenv.core.env_server.mcp_environment import (
@@ -296,6 +338,9 @@ def build_app(
         display_title: str = "",
         _quick_start: Any = None,
     ) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: ignores OpenEnv's six web-interface arguments and returns the Harbor Gradio UI
+        # for the configured datasets with a fixed title.
         """OpenEnv calls this positionally with six web-interface arguments.
 
         None of them is used: the Harbor UI drives rollouts through its own handlers rather than the
@@ -334,6 +379,11 @@ def build_app(
 
 
 def _attach_hf_login(app: Any) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: if UI settings enable hf_login, sets SYSTEM=spaces (default only) and attaches
+    # Gradio's OAuth routes to the app. Returns True on success; False (with a printed reason)
+    # when disabled, not seen as a Space, or on ImportError/ValueError.
+    # Side effects: mutates os.environ and the app's routes; prints.
     """ "Sign in with Hugging Face", where the Hub has set it up for the Space (`hf_oauth: true`).
 
     Attached to this app rather than to the Gradio UI mounted at `/web`: Gradio's OAuth routes and
@@ -370,6 +420,8 @@ def _attach_hf_login(app: Any) -> bool:
 
 
 class SameOrigin:
+    # [CLASS DOC]
+    # ASGI middleware refusing cross-site state-changing requests to the /web UI prefix.
     """Refuse a state-changing request to the UI that a browser made from another site.
 
     Browsers label every request they make (`Sec-Fetch-Site`, `Origin`); servers calling this app,
@@ -379,10 +431,16 @@ class SameOrigin:
     """
 
     def __init__(self, app: Any, prefix: str = "/web") -> None:
+        # [FUNCTION DOC]
+        # Stores the wrapped ASGI app and the guarded path prefix (default /web).
         self.app = app
         self.prefix = prefix
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        # [FUNCTION DOC]
+        # For HTTP requests with a method other than GET/HEAD/OPTIONS under the prefix: responds
+        # 403 "cross-site request refused" if Sec-Fetch-Site is cross-site or an Origin header's
+        # host is not one of this server's hosts. Otherwise passes through to the app.
         path = scope.get("path") or ""
         if (
             scope.get("type") == "http"
@@ -407,6 +465,9 @@ class SameOrigin:
 
 
 def _same_host(origin: str, host: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if the netloc of origin equals the request Host header, SPACE_HOST, or any
+    # comma-separated host in OPENENV_HARBOR_UI_HOSTS.
     """Whether a page at `origin` is this server's own.
 
     Its own hosts are the `Host` it was reached at, a Space's `SPACE_HOST`, and any listed in

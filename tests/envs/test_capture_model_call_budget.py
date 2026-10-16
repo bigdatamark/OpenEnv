@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for the capture proxy's per-session model-call budget and context
+# budget stops: calls beyond max_model_calls are never forwarded or captured
+# and are answered with a terminal non-empty stop (SSE when streaming);
+# context-length upstream 400s become budget stops while other upstream
+# errors pass through; 0 means unlimited; budgets are per session.
 # Copyright 2026 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,15 +38,21 @@ from openenv.core.harness.capture.upstream import UpstreamHTTPError
 
 
 class _CountingEngine:
+    # [CLASS DOC]
+    # Stub upstream at capture level "text" counting completion calls.
     """Stands in for vLLM. Records what it was asked to do, so 'not forwarded' is observable."""
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Sets call count 0, served model, empty param fixes and capture level.
         self.calls = 0
         self.served_model = "test-model"
         self.param_fixes: dict[str, Any] = {}
         self.capture_level = "text"
 
     async def completion(self, request: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Async: increments calls and returns a stop completion "turn N" with usage.
         self.calls += 1
         return {
             "id": f"c{self.calls}",
@@ -59,6 +71,9 @@ class _CountingEngine:
 
 @pytest.fixture
 def app_and_engine():
+    # [FUNCTION DOC]
+    # Fixture: capture app from create_app with the counting engine installed as
+    # app.state.inference and as the default upstream; returns (app, engine).
     app = create_app(
         llm_url="http://engine.invalid/v1", model="test-model", capture_level="text"
     )
@@ -72,6 +87,8 @@ def app_and_engine():
 
 
 def _chat(client: TestClient, session_id: str) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: posts a chat completion with the session bearer token; returns the response.
     return client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {session_id}"},
@@ -83,6 +100,11 @@ def _chat(client: TestClient, session_id: str) -> Any:
 def test_context_limit_stops_without_fabricating_a_captured_turn(
     app_and_engine, stream
 ):
+    # [FUNCTION DOC]
+    # Parametrized over streaming: after one turn, an upstream context-length 400
+    # becomes a 200 stop response (SSE when streaming), increments
+    # budget_stop_count, adds a context_budget_exhausted finding, records no
+    # upstream error or new turn, and export has no degenerate_rollout warning.
     app, engine = app_and_engine
     session = app.state.registry.create(max_model_calls=17)
     with TestClient(app) as client:
@@ -90,6 +112,8 @@ def test_context_limit_stops_without_fabricating_a_captured_turn(
         before = session.graph.stats()["n_turns"]
 
         async def too_long(request):
+            # [FUNCTION DOC]
+            # Async stub raising UpstreamHTTPError 400 with a max-context-length message.
             raise UpstreamHTTPError(
                 400,
                 {
@@ -137,10 +161,15 @@ def test_context_limit_stops_without_fabricating_a_captured_turn(
 def test_other_upstream_errors_are_not_converted_to_budget_stops(
     app_and_engine, upstream_status, expected_status
 ):
+    # [FUNCTION DOC]
+    # Other upstream errors are returned (500 mapped to 502), counted as upstream
+    # errors, not budget stops, with no turns captured.
     app, engine = app_and_engine
     session = app.state.registry.create()
 
     async def invalid(request):
+        # [FUNCTION DOC]
+        # Async stub raising UpstreamHTTPError with the parametrized status.
         raise UpstreamHTTPError(
             upstream_status, {"error": {"message": "invalid tools"}}
         )
@@ -154,6 +183,8 @@ def test_other_upstream_errors_are_not_converted_to_budget_stops(
 
 
 def test_single_turn_without_recorded_budget_stop_warns(app_and_engine):
+    # [FUNCTION DOC]
+    # A one-turn session exports with a "[WARN] degenerate_rollout" finding.
     from openenv.core.harness.capture.export import export_session
 
     app, _ = app_and_engine
@@ -167,6 +198,8 @@ def test_single_turn_without_recorded_budget_stop_warns(app_and_engine):
 
 
 def test_budget_stop_does_not_make_an_empty_capture_valid(app_and_engine):
+    # [FUNCTION DOC]
+    # A session with a budget stop but no turns exports "[FATAL] no_turns".
     from openenv.core.harness.capture.export import export_session
 
     app, _ = app_and_engine
@@ -177,6 +210,8 @@ def test_budget_stop_does_not_make_an_empty_capture_valid(app_and_engine):
 
 
 def test_budget_stops_forwarding_at_the_cap(app_and_engine):
+    # [FUNCTION DOC]
+    # With cap 3, five requests all return 200 but only three reach the engine.
     app, engine = app_and_engine
     session = app.state.registry.create(max_model_calls=3)
     with TestClient(app) as client:
@@ -188,6 +223,10 @@ def test_budget_stops_forwarding_at_the_cap(app_and_engine):
 
 
 def test_the_capped_turn_is_terminal_and_never_captured(app_and_engine):
+    # [FUNCTION DOC]
+    # The over-budget reply is a non-empty stop without tool calls, is not in the
+    # graph, export records budget_stop_count 1, and ATIF reconcile reports
+    # proxy_budget_stops rather than atif_calls_missing.
     app, engine = app_and_engine
     session = app.state.registry.create(max_model_calls=1)
     with TestClient(app) as client:
@@ -233,6 +272,8 @@ def test_the_capped_turn_is_terminal_and_never_captured(app_and_engine):
 
 
 def test_the_stop_is_streamed_when_the_caller_streams(app_and_engine):
+    # [FUNCTION DOC]
+    # Over-budget streaming requests get an SSE body with a stop and [DONE].
     """A streaming caller must get SSE back, not a JSON body.
 
     This is the failure that made the cap useless in practice. opencode streams; answering it with a
@@ -264,6 +305,8 @@ def test_the_stop_is_streamed_when_the_caller_streams(app_and_engine):
 
 
 def test_the_stop_message_is_not_empty(app_and_engine):
+    # [FUNCTION DOC]
+    # Over-budget stop content is non-empty.
     """An empty assistant message reads as a failed generation and gets retried."""
     app, engine = app_and_engine
     session = app.state.registry.create(max_model_calls=1)
@@ -274,6 +317,8 @@ def test_the_stop_message_is_not_empty(app_and_engine):
 
 
 def test_zero_means_unlimited(app_and_engine):
+    # [FUNCTION DOC]
+    # Default budget 0 forwards all six calls and is never over budget.
     app, engine = app_and_engine
     session = app.state.registry.create()
     assert session.max_model_calls == 0
@@ -285,6 +330,8 @@ def test_zero_means_unlimited(app_and_engine):
 
 
 def test_budget_is_per_session_not_per_server(app_and_engine):
+    # [FUNCTION DOC]
+    # A capped and an uncapped session on the same app count independently.
     """One deployment serves a capped training run and an uncapped eval run at the same time."""
     app, engine = app_and_engine
     capped = app.state.registry.create(max_model_calls=2)

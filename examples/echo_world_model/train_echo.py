@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# CPU-runnable verifier-free ECHO training: fine-tunes a small causal LM (default distilgpt2) with only the env-output
+# cross-entropy on oracle rollouts of the training tasks, evaluating held-out env-token CE every 5 steps, keeping the best
+# held-out checkpoint, printing a teacher-forced prediction of one held-out observation before/after, and saving a loss
+# curve PNG. Side effects: model download, CPU training, image file write, stdout.
+# KNOWN ISSUE: the reported "after" value and restored checkpoint are selected by the held-out metric itself, so the held-out result is optimistically biased.
 """Train a small model to predict the terminal's responses — the ECHO env-token
 world-model loss, with the reward term OFF (verifier-free).
 
@@ -31,6 +37,9 @@ from trajectory import ENV_OUTPUT, tokenize_trajectory
 
 
 def build_batch(tokenizer, trajs, world_loss_target="env_only"):
+    # [FUNCTION DOC]
+    # Tokenises each trajectory into ids and role masks and right-pads them into batch tensors (padding with the EOS id, masks
+    # and attention mask zero on padding). Returns a dict with input_ids, action_mask, obs_mask and attention_mask.
     toks = [
         tokenize_trajectory(tokenizer, t, world_loss_target=world_loss_target)
         for t in trajs
@@ -58,6 +67,8 @@ def build_batch(tokenizer, trajs, world_loss_target="env_only"):
 
 @torch.no_grad()
 def eval_env_ce(model, batch):
+    # [FUNCTION DOC]
+    # Without gradients, runs the model on the batch and returns the env-token CE from the verifier-free loss as a float.
     """Mean cross-entropy (nats/token) the model assigns to held-out env-output tokens."""
     out = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
     _, stats = echo_loss(
@@ -74,6 +85,10 @@ def eval_env_ce(model, batch):
 
 @torch.no_grad()
 def predict_observation(model, tokenizer, task):
+    # [FUNCTION DOC]
+    # Without gradients, takes the task's oracle rollout, finds the first ENV_OUTPUT segment, runs the model teacher-forced on
+    # prefix plus observation tokens, and takes the argmax prediction at each observation position. Returns a tuple of
+    # (command text parsed from the prefix, actual observation, decoded prediction, token accuracy).
     """Teacher-forced world-model readout: at each position of the first env
     observation, what token does the model predict? Returns (cmd, actual,
     predicted, token_accuracy)."""
@@ -94,6 +109,10 @@ def predict_observation(model, tokenizer, task):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses model, steps, lr, output path and seed; seeds torch, loads tokenizer/model, builds train and held-out batches,
+    # runs AdamW training with gradient clipping on the verifier-free loss, tracks histories and the best held-out
+    # checkpoint (deep copy of the state dict), restores it, prints results and saves the curve plot.
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="distilgpt2")
     ap.add_argument("--steps", type=int, default=120)

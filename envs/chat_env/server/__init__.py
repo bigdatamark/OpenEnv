@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Chat environment server package. Re-exports ChatEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

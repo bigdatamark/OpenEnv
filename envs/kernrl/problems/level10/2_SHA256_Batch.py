@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 10): SHA-256 compression of a batch of 1024
+# independent 64-byte blocks, reference computed by a per-message Python loop.
 """
 SHA-256 Hash - Batch Processing
 
@@ -16,6 +19,8 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference batch SHA-256 model with K and H0 constant buffers (int64).
     """
     Batch SHA-256 computation.
 
@@ -23,6 +28,8 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the 64 round constants K and 8 initial hash words H0.
         super(Model, self).__init__()
 
         # SHA-256 constants
@@ -113,6 +120,11 @@ class Model(nn.Module):
         self.register_buffer("H0", H0)
 
     def forward(self, messages: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Packs each message's bytes big-endian into 16 words, then for each message
+        # sequentially builds the 64-word schedule, runs 64 compression rounds with
+        # inline rotations, and stores H0 + working variables (mod 2^32). Returns a
+        # (B, 8) int64 tensor. No SHA-256 padding is applied.
         """
         Compute SHA-256 hashes for batch of messages.
 
@@ -206,9 +218,13 @@ batch_size = 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a random (batch_size, 64) int64 tensor of byte values.
     messages = torch.randint(0, 256, (batch_size, 64), dtype=torch.int64)
     return [messages]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

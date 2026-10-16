@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# FastAPI app for the Connect4 environment (class used as session factory; MAX_CONCURRENT_ENVS default 8).
+# Supports in-repo and standalone imports.
 """FastAPI application for the Connect4 Environment."""
 
 import os
@@ -28,6 +31,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

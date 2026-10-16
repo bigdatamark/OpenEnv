@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests for PythonCodeActEnv import allow-listing (DEFAULT_SAFE_IMPORTS plus
+# additional_imports, preserved across reset) and that an explicit transform
+# is kept. Module constants are code snippets importing json and base64.
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
@@ -14,15 +18,23 @@ IMPORT_BASE64 = "import base64\nprint(base64.b64encode(b'a').decode())"
 
 
 class RecordingTransform(Transform):
+    # [CLASS DOC]
+    # HELPER: transform counting calls and returning the observation unchanged.
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Sets call count 0.
         self.calls = 0
 
     def __call__(self, observation: Observation) -> Observation:
+        # [FUNCTION DOC]
+        # Increments the count and returns the observation.
         self.calls += 1
         return observation
 
 
 def test_additional_imports_keep_the_default_safe_imports():
+    # [FUNCTION DOC]
+    # With base64 added, both json and base64 imports run with exit code 0.
     env = PythonCodeActEnv(additional_imports=["base64"])
     env.reset()
 
@@ -32,6 +44,8 @@ def test_additional_imports_keep_the_default_safe_imports():
 
 
 def test_additional_imports_survive_reset():
+    # [FUNCTION DOC]
+    # The same holds after two resets.
     env = PythonCodeActEnv(additional_imports=["base64"])
     env.reset()
     env.reset()
@@ -42,6 +56,8 @@ def test_additional_imports_survive_reset():
 
 
 def test_default_constructor_authorizes_only_the_safe_imports():
+    # [FUNCTION DOC]
+    # Default allows only json; base64 import fails with exit code 1.
     env = PythonCodeActEnv()
     env.reset()
 
@@ -51,6 +67,8 @@ def test_default_constructor_authorizes_only_the_safe_imports():
 
 
 def test_explicit_transform_survives_reset():
+    # [FUNCTION DOC]
+    # The supplied transform remains set after reset.
     transform = RecordingTransform()
     env = PythonCodeActEnv(transform=transform)
     env.reset()

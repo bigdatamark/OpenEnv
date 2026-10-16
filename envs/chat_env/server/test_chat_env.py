@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Unit tests for ChatEnvironment using a deterministic MockTokenizer (character codes). Also runnable as
+# a script via main.
+# KNOWN ISSUE: the module uses relative imports, so app.get_tokenizer's fallback that imports it as a
+# top-level module "test_chat_env" fails with ImportError.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -17,6 +22,9 @@ from .chat_environment import ChatEnvironment
 
 
 class MockTokenizer:
+    # [CLASS DOC]
+    # Test tokenizer: tokens are character codes mod 256 of the space-joined message contents; decode maps
+    # codes back to characters.
     """Mock tokenizer for testing without requiring transformers library."""
 
     def apply_chat_template(
@@ -26,6 +34,8 @@ class MockTokenizer:
         return_tensors: str | None = None,
         **kwargs,
     ):
+        # [FUNCTION DOC]
+        # Returns character codes (mod 256) of the message contents joined with spaces; other args ignored.
         """Mock implementation that creates deterministic tokens from text."""
         # Concatenate all message content
         del tokenize, return_tensors, kwargs
@@ -38,6 +48,8 @@ class MockTokenizer:
         return tokens
 
     def decode(self, token_ids, skip_special_tokens: bool = False, **kwargs) -> str:
+        # [FUNCTION DOC]
+        # Converts token ids (lists or tensors) back to a string of characters.
         """Mock decode that reverses the encoding process."""
         del skip_special_tokens, kwargs
         if hasattr(token_ids, "tolist") and callable(token_ids.tolist):
@@ -49,6 +61,8 @@ class MockTokenizer:
 
 
 def test_tokenization_consistency():
+    # [FUNCTION DOC]
+    # Same message tokenizes to identical, non-empty tokens.
     """Test that tokenizing the same string produces the same tokens."""
     tokenizer = MockTokenizer()
     env = ChatEnvironment(tokenizer=tokenizer)
@@ -73,6 +87,8 @@ def test_tokenization_consistency():
 
 
 def test_message_content_preservation():
+    # [FUNCTION DOC]
+    # Stepping with a tokenized user then assistant message yields last messages whose decoded content equals the input.
     """Test that message content is preserved in the observation."""
     tokenizer = MockTokenizer()
     env = ChatEnvironment(tokenizer=tokenizer)
@@ -116,6 +132,8 @@ def test_message_content_preservation():
 
 
 def test_system_prompt_preserved():
+    # [FUNCTION DOC]
+    # System prompt is the only message after reset, and again after another reset.
     """Test that system prompt is preserved after reset."""
     tokenizer = MockTokenizer()
     system_prompt = "You are a helpful assistant."
@@ -145,6 +163,8 @@ def test_system_prompt_preserved():
 
 
 def test_token_history_accumulation():
+    # [FUNCTION DOC]
+    # Observation tokens grow with each step and equal the concatenation of action tokens.
     """Test that tokens accumulate correctly in the observation."""
     tokenizer = MockTokenizer()
     env = ChatEnvironment(tokenizer=tokenizer)
@@ -182,6 +202,8 @@ def test_token_history_accumulation():
 
 
 def test_direct_token_action():
+    # [FUNCTION DOC]
+    # Nested raw token lists are flattened; the step adds one assistant message with matching tokens.
     """Test creating actions directly from tokens."""
     tokenizer = MockTokenizer()
     env = ChatEnvironment(tokenizer=tokenizer)
@@ -208,6 +230,8 @@ def test_direct_token_action():
 
 
 def test_chat_models_use_message_shape():
+    # [FUNCTION DOC]
+    # ChatState and ChatObservation accept and preserve role/content message dicts.
     """Test that chat models accept the shared Message structure."""
     conversation: list[Message] = [
         {"role": "system", "content": "You are a helpful assistant."},
@@ -224,6 +248,8 @@ def test_chat_models_use_message_shape():
 
 
 def test_empty_tokens_validation():
+    # [FUNCTION DOC]
+    # Empty token list raises a validation error mentioning "at least 1 item".
     """Test that empty tokens raise a ValueError."""
     try:
         action = ChatAction(tokens=[])
@@ -237,6 +263,8 @@ def test_empty_tokens_validation():
 
 
 def test_message_validation():
+    # [FUNCTION DOC]
+    # Missing role, missing content, or None content raise errors in message_to_action.
     """Test that invalid messages raise appropriate errors."""
     tokenizer = MockTokenizer()
     env = ChatEnvironment(tokenizer=tokenizer)
@@ -266,6 +294,8 @@ def test_message_validation():
 
 
 def test_reset_clears_history():
+    # [FUNCTION DOC]
+    # Reset restores history to just the system prompt.
     """Test that reset properly clears all message and token history."""
     tokenizer = MockTokenizer()
     env = ChatEnvironment(tokenizer=tokenizer, system_prompt="System message")
@@ -295,6 +325,9 @@ def test_reset_clears_history():
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the listed tests, printing pass/fail per test and a summary. Returns 0 if all pass, else 1.
+    # KNOWN ISSUE: test_chat_models_use_message_shape is not included in the list run by main.
     """Run all tests."""
     print("\n" + "=" * 60)
     print("ChatEnvironment Test Suite")

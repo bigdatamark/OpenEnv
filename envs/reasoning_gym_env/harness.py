@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Harness adapter for Reasoning Gym: exposes a client as a resource session with one MCP-style tool
+# "answer" (string), using a one-question dataset per session.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -46,12 +49,17 @@ _REASONING_GYM_TOOLS: list[Tool] = [
 
 
 def _build_tool_result() -> Callable[..., ToolResult]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a tool-result builder function.
     def builder(
         tool_name: str,
         arguments: dict[str, Any],
         result: Any,
         state: Any,
     ) -> ToolResult:
+        # [FUNCTION DOC]
+        # HELPER: Converts a step result into a ToolResult with the submitted answer, score, correct answer,
+        # reward and done in data; done flag; reward and state (dumped if it is a model) in metadata.
         observation = result.observation
         return ToolResult(
             data={
@@ -72,6 +80,8 @@ def _build_tool_result() -> Callable[..., ToolResult]:
 
 
 class ReasoningGymSessionFactory(ResourceSessionFactory):
+    # [CLASS DOC]
+    # Resource session factory bound to a dataset name and optional dataset config.
     """Create ReasoningGym-backed resource sessions for harness rollouts."""
 
     def __init__(
@@ -81,6 +91,8 @@ class ReasoningGymSessionFactory(ResourceSessionFactory):
         dataset_name: str,
         dataset_config: dict[str, Any] | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the zero-argument client factory, dataset name and config (default empty mapping).
         self._client_factory = client_factory
         self._dataset_name = dataset_name
         self._dataset_config = dataset_config or {}
@@ -91,6 +103,11 @@ class ReasoningGymSessionFactory(ResourceSessionFactory):
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> StepEnvSessionAdapter:
+        # [FUNCTION DOC]
+        # Creates a client and returns a StepEnvSessionAdapter with the answer tool, an action builder that
+        # stringifies the "answer" argument (KeyError if missing), an initial user message holding the
+        # question, the tool result builder, and reset kwargs (dataset name, config, size 1). The seed is the
+        # given one or a random 31-bit integer from the global random module.
         client = self._client_factory()
         effective_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
 

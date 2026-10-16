@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Chess Environment: the agent plays one color against a moonfish (alpha-beta, configurable depth) or
+# random opponent, or alone (self-play). Rewards: +1 win, -1 loss, 0 draw, -0.1 for invalid/illegal
+# moves. moonfish's shared evaluation cache is guarded by the process-wide _MOONFISH_LOCK.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,6 +34,9 @@ _MOONFISH_LOCK = threading.Lock()
 
 
 class ChessEnvironment(Environment):
+    # [CLASS DOC]
+    # Chess game environment supporting concurrent sessions. Holds a python-chess Board, ChessState,
+    # agent color, agent move count and a ChessWinLossRubric.
     """
     Chess environment implementing the OpenEnv interface.
 
@@ -48,6 +55,9 @@ class ChessEnvironment(Environment):
         agent_color: str | None = None,
         gamma: float = 0.99,
     ):
+        # [FUNCTION DOC]
+        # Stores opponent ("moonfish", "random", or None for self-play), search depth, max half-moves (500),
+        # agent color ("white", "black" or None for random per episode) and gamma, then resets.
         """
         Initialize the chess environment.
 
@@ -71,6 +81,12 @@ class ChessEnvironment(Environment):
         self.reset()
 
     def reset(self, fen: str = None):
+        # [FUNCTION DOC]
+        # Starts a new game: resets the rubric, clears the moonfish cache, builds a board from fen or the start
+        # position, assigns a new episode id and the agent color (random via the id hash when unset; unknown
+        # strings mean white), initializes state, lets the opponent move first when the agent is black, and
+        # returns the observation (done if the start position is already terminal).
+        # Raises: ValueError for an invalid FEN.
         """
         Initialize a new chess game episode.
 
@@ -124,6 +140,14 @@ class ChessEnvironment(Environment):
         return self._make_observation(done=done)
 
     def step(self, action: ChessAction):
+        # [FUNCTION DOC]
+        # Applies the agent's UCI move. Unparsable or illegal moves return the unchanged position with reward
+        # -0.1 and done False (no state change, rubric not fed). Otherwise pushes the move, updates state,
+        # evaluates the result, lets the opponent reply if the game continues, re-evaluates, builds the
+        # observation and feeds it to the rubric.
+        # Returns: ChessObservation. Raises: RuntimeError if the board is uninitialized.
+        # KNOWN ISSUE: step_count includes opponent moves, so max_moves counts both sides' half-moves; in
+        # self-play (no opponent) checkmate rewards are still relative to the fixed agent color.
         """
         Execute a chess move and return the resulting state.
 
@@ -177,6 +201,10 @@ class ChessEnvironment(Environment):
         return obs
 
     def _make_observation(self, reward: float = 0.0, done: bool = False):
+        # [FUNCTION DOC]
+        # HELPER: Builds the observation with legal moves, check flag, result string when done, and metadata
+        # (moonfish evaluation, fullmove number, halfmove clock; plus discounted_rewards and gamma when done
+        # after at least one agent move).
         """Build observation from current board state."""
         legal_moves = [move.uci() for move in self._board.legal_moves]
 
@@ -209,6 +237,10 @@ class ChessEnvironment(Environment):
         )
 
     def _calculate_reward_and_done(self):
+        # [FUNCTION DOC]
+        # HELPER: Returns (1.0, True) / (-1.0, True) on checkmate depending on whether the agent won; (0.0, True)
+        # for stalemate, insufficient material, fifty-move rule, threefold repetition, or step_count >= max_moves;
+        # else (0.0, False).
         """Calculate reward and check if episode is done."""
         if self._board.is_checkmate():
             winner = not self._board.turn
@@ -235,12 +267,16 @@ class ChessEnvironment(Environment):
         return 0.0, False
 
     def _get_result_string(self):
+        # [FUNCTION DOC]
+        # HELPER: "1-0" or "0-1" on checkmate by side, else "1/2-1/2".
         """Get the game result as a string."""
         if self._board.is_checkmate():
             return "1-0" if not self._board.turn else "0-1"
         return "1/2-1/2"
 
     def _compute_discounted_rewards(self, terminal_reward: float) -> list[float]:
+        # [FUNCTION DOC]
+        # HELPER: Returns gamma^(T-1-t) * terminal_reward for each of the T agent moves.
         """
         Compute temporally discounted rewards for all agent moves.
 
@@ -266,6 +302,9 @@ class ChessEnvironment(Environment):
         return discounted_rewards
 
     def _make_opponent_move(self):
+        # [FUNCTION DOC]
+        # HELPER: Plays a moonfish search move (under the lock) or a random legal move, updating board and state;
+        # does nothing if no legal moves or no opponent type matches.
         """Make a move for the opponent using configured strategy."""
         if not self._board.legal_moves:
             return
@@ -287,6 +326,8 @@ class ChessEnvironment(Environment):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns sorted legal UCI moves as (label, {"move"}) buttons.
         """The legal moves (UCI) as buttons, sorted so moves of the same piece sit together."""
         return [
             (move, {"move": move})
@@ -294,6 +335,9 @@ class ChessEnvironment(Environment):
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: returns an HTML grid of the board from the observation FEN (rank/file labels,
+        # fixed square colors, checked king highlighted); None if no fen.
         """Draw the board from the FEN, white at the bottom, the king in check highlighted."""
         if "fen" not in observation:
             return None
@@ -333,5 +377,7 @@ class ChessEnvironment(Environment):
 
     @property
     def state(self):
+        # [FUNCTION DOC]
+        # Property: returns the current ChessState.
         """Return the current episode state."""
         return self._state

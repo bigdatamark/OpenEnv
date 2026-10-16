@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# FastAPI server entry for the REPL environment. At import time reads LLM_MODEL (default
+# Qwen/Qwen3.5-9B), HF_TOKEN, REPL_MAX_ITERATIONS (30), REPL_MAX_OUTPUT_LENGTH (8192),
+# REPL_CONTEXT_PREVIEW_LENGTH (500), REPL_RLM_MAX_DEPTH (2), REPL_RLM_MAX_ITERATIONS (30) and
+# MAX_CONCURRENT_ENVS (8); prints whether a server token is configured; and creates "app" with a
+# per-session factory, adding the custom Gradio REPL tab and related options only when the installed
+# create_app supports those parameters (checked by signature inspection), logging a warning otherwise.
+# Raises ValueError at import if an integer variable is malformed.
+# KNOWN ISSUE: LLM_MODEL and HF_TOKEN are read and reported here but never passed to the environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -78,6 +87,9 @@ else:
 
 
 def create_repl_environment() -> REPLEnvironment:
+    # [FUNCTION DOC]
+    # Factory creating a REPLEnvironment with the iteration, output length, preview length and recursion
+    # limits from the module configuration.
     """Factory function that creates REPLEnvironment with server config.
 
     LLM functions are created dynamically during `reset()` when a client
@@ -134,6 +146,8 @@ else:
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: runs the app with uvicorn on 0.0.0.0:8000.
     """
     Entry point for direct execution via uv run or python -m.
 

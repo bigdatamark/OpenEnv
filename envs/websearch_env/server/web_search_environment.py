@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Server-side WebSearch environment: each step runs one web search via WebSearchTool; there is no reward
+# logic or terminal condition.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 class WebSearchEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment holding a State, a reset counter and a WebSearchTool configured from SERPER_API_KEY
+    # (top 5 results, 60 s timeout, full-page mode, no proxy).
     """
     A web search environment that uses the google search API (via Serper API) to search the web.
 
@@ -47,6 +53,9 @@ class WebSearchEnvironment(Environment):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates the state and the search tool. Logs whether SERPER_API_KEY is set (last 3 chars only) or warns
+        # if missing.
         """Initialize the searchr1_env environment."""
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._reset_count = 0
@@ -72,6 +81,9 @@ class WebSearchEnvironment(Environment):
         )
 
     def reset(self) -> WebSearchObservation:
+        # [FUNCTION DOC]
+        # Starts a new episode (fresh state, increments reset count). Returns an empty observation with done False
+        # and reward 0.0.
         """
         Reset the environment.
 
@@ -89,6 +101,10 @@ class WebSearchEnvironment(Environment):
         )
 
     def step(self, action: WebSearchAction) -> WebSearchObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Increments step_count and returns the tool's observation for the action's query (never done, reward
+        # unset).
+        # KNOWN ISSUE: the docstring says it echoes the message; it performs a web search.
         """
         Execute a step in the environment by echoing the message.
 
@@ -104,6 +120,8 @@ class WebSearchEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property returning the current State.
         """
         Get the current environment state.
 

@@ -1,3 +1,13 @@
+# [MODULE DOC]
+# Defines MCPEnvironment, an Environment base class that exposes a FastMCP
+# server's tools to agents through step(): ListToolsAction returns tool
+# descriptions and CallToolAction invokes a tool (with a default 30 s timeout),
+# while other actions go to the subclass's _step_impl. Supports tools
+# registered only for "production" or "simulation" mode (selected by the
+# instance's _mode attribute, if any), rejects reserved tool names (reset,
+# step, state, close), and offers a "code mode" that runs Python code with tools
+# as plain callables. Also provides get_server_tools, which reads a FastMCP
+# server's tools across FastMCP 2.x and 3.x APIs.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -85,6 +95,11 @@ VALID_MODES = {"production", "simulation"}
 
 
 def get_server_tools(mcp_server: Any) -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a mapping of tool name to tool object: from the server's get_tools()
+    # when it exists and returns a dict (FastMCP 2.x), else from list_tools()
+    # (FastMCP 3.x), else an empty dict. Async calls are run synchronously via
+    # run_async_safely.
     """
     Get tools from a FastMCP server, compatible with both 2.x and 3.x.
 
@@ -104,6 +119,9 @@ def get_server_tools(mcp_server: Any) -> Dict[str, Any]:
 
 
 def _tool_from_server_tool(tool: Any) -> Tool:
+    # [FUNCTION DOC]
+    # HELPER: Builds an OpenEnv Tool from a FastMCP/MCP tool (name, description or
+    # "", inputSchema if present else {}).
     """Convert a FastMCP tool object into OpenEnv's Tool model."""
     return Tool(
         name=tool.name,
@@ -113,6 +131,9 @@ def _tool_from_server_tool(tool: Any) -> Tool:
 
 
 def _tool_from_mode_schema(schema: Dict[str, Any]) -> Tool:
+    # [FUNCTION DOC]
+    # HELPER: Builds a Tool from a stored mode schema dict (name, description,
+    # input_schema).
     """Convert a stored mode-aware schema into OpenEnv's Tool model."""
     return Tool(
         name=schema["name"],
@@ -124,6 +145,9 @@ def _tool_from_mode_schema(schema: Dict[str, Any]) -> Tool:
 def _schema_for_mode(
     mode_schemas: Dict[Optional[str], Dict[str, Any]], current_mode: Optional[str]
 ) -> Optional[Dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the all-modes (None key) schema if present, else the schema
+    # for current_mode, else None.
     """Return the schema visible for the current mode, if any."""
     if None in mode_schemas:
         return mode_schemas[None]
@@ -131,6 +155,14 @@ def _schema_for_mode(
 
 
 class MCPEnvironment(Environment):
+    # [CLASS DOC]
+    # Abstract Environment holding a FastMCP server, an in-process FastMCP Client
+    # for it, and mode-specific tool registries (tool name -> mode -> function, and
+    # tool name -> mode -> schema). Subclasses implement reset, state and
+    # _step_impl.
+    # KNOWN ISSUE: the module docstring example registers tools with self.tool
+    # before calling super().__init__, which would fail because the registries and
+    # server are created in __init__.
     """
     Base class for environments that expose tools via MCP (Model Context Protocol).
 
@@ -171,6 +203,10 @@ class MCPEnvironment(Environment):
     """
 
     def __init__(self, mcp_server: Any, transform: Optional[Any] = None) -> None:
+        # [FUNCTION DOC]
+        # Initializes the base Environment with the transform, validates that the
+        # server has no reserved tool names (ValueError), stores the server, creates a
+        # Client for it, and initializes empty mode registries.
         """
         Initialize the MCP environment.
 
@@ -197,12 +233,16 @@ class MCPEnvironment(Environment):
         self._mode_tool_schemas = defaultdict(dict)
 
     def _require_mcp_client(self) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns the MCP client; raises RuntimeError if the env was closed.
         """Return MCP client or raise if environment has been closed."""
         if self.mcp_client is None:
             raise RuntimeError("MCP client is not available; environment is closed")
         return self.mcp_client
 
     def _require_mcp_server(self) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns the MCP server; raises RuntimeError if the env was closed.
         """Return MCP server or raise if environment has been closed."""
         if self.mcp_server is None:
             raise RuntimeError("MCP server is not available; environment is closed")
@@ -210,6 +250,10 @@ class MCPEnvironment(Environment):
 
     @asynccontextmanager
     async def mcp_session(self):
+        # [FUNCTION DOC]
+        # Async context manager that enters the (reentrant) MCP client context and
+        # yields the client; the transport closes when the outermost context exits.
+        # Raises RuntimeError if the env was closed.
         """
         Context manager for MCP client sessions.
 
@@ -244,10 +288,14 @@ class MCPEnvironment(Environment):
 
     @property
     def supports_code_mode(self) -> bool:
+        # [FUNCTION DOC]
+        # Always True.
         """Check if this environment supports code mode (execute_code)."""
         return True
 
     def _get_server_tools(self, mcp_server: Any) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Delegates to get_server_tools.
         """
         Get tools from a FastMCP server, compatible with both 2.x and 3.x.
 
@@ -257,6 +305,10 @@ class MCPEnvironment(Environment):
         return get_server_tools(mcp_server)
 
     def get_callables(self) -> Dict[str, Callable]:
+        # [FUNCTION DOC]
+        # Returns tool name -> Python function for code mode: functions ("fn") of the
+        # server's tools, plus registry tools available in all modes (if not already
+        # present) and tools registered for the current mode (overriding).
         """
         Get callable functions for code mode.
 
@@ -288,6 +340,14 @@ class MCPEnvironment(Environment):
         return callables
 
     def execute_code(self, code: str) -> Observation:
+        # [FUNCTION DOC]
+        # Executes code with exec, using get_callables() as globals and a fresh dict as
+        # locals. Returns an Observation (done False, reward 0.0) with metadata
+        # "result" set to the code's local variable named result (None if unset), or
+        # metadata "error" with "Syntax error: ..." or the exception message.
+        # Side effects: arbitrary code execution in-process (no sandboxing).
+        # KNOWN ISSUE: separate globals/locals mean functions defined by the code
+        # cannot see other names it defines at top level.
         """
         Execute Python code with tools available as callables.
 
@@ -318,6 +378,9 @@ class MCPEnvironment(Environment):
             return Observation(done=False, reward=0.0, metadata={"error": str(e)})
 
     def _validate_tool_names(self, mcp_server: Any) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Raises ValueError listing conflicts if any server tool name is in
+        # RESERVED_TOOL_NAMES.
         """
         Validate that no tools use reserved names.
 
@@ -341,6 +404,15 @@ class MCPEnvironment(Environment):
                 )
 
     def tool(self, mode: Optional[str] = None) -> Callable:
+        # [FUNCTION DOC]
+        # Returns a decorator that registers a tool. mode must be None, "production"
+        # or "simulation" (ValueError). The decorator rejects reserved function names
+        # (ValueError). With mode None it registers the function on the FastMCP server
+        # (returning FastMCP's decorated object) and records it for all modes. With a
+        # mode it only records the function and a simple JSON schema derived from the
+        # signature (int/float/bool annotations map to integer/number/boolean, else
+        # string; parameters without defaults are required; description from the
+        # docstring), returning the function unchanged.
         """
         Decorator for registering mode-aware tools.
 
@@ -360,6 +432,8 @@ class MCPEnvironment(Environment):
             )
 
         def decorator(func: Callable) -> Callable:
+            # [FUNCTION DOC]
+            # HELPER: Registers func as described in tool.
             tool_name = func.__name__
             # Validate tool name is not reserved
             if tool_name in RESERVED_TOOL_NAMES:
@@ -421,6 +495,10 @@ class MCPEnvironment(Environment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Synchronous step: ListToolsAction -> _handle_list_tools; CallToolAction ->
+        # _handle_call_tool with timeout_s; anything else -> _step_impl with timeout_s
+        # and kwargs.
         """
         Execute an action in the environment.
 
@@ -452,10 +530,14 @@ class MCPEnvironment(Environment):
             return self._step_impl(action, timeout_s=timeout_s, **kwargs)
 
     def _handle_list_tools(self) -> ListToolsObservation:
+        # [FUNCTION DOC]
+        # HELPER: Runs _async_handle_list_tools synchronously.
         """Sync wrapper — delegates to the canonical async implementation."""
         return run_async_safely(self._async_handle_list_tools())
 
     async def _async_list_tools(self) -> list:
+        # [FUNCTION DOC]
+        # HELPER: Lists tools through an MCP client session.
         """
         Async helper to list tools from the MCP client.
 
@@ -470,12 +552,16 @@ class MCPEnvironment(Environment):
         action: CallToolAction,
         timeout_s: Optional[float] = None,
     ) -> CallToolObservation:
+        # [FUNCTION DOC]
+        # HELPER: Runs _async_handle_call_tool synchronously.
         """Sync wrapper — delegates to the canonical async implementation."""
         return run_async_safely(
             self._async_handle_call_tool(action, timeout_s=timeout_s)
         )
 
     async def _async_call_tool(self, tool_name: str, arguments: dict) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Calls a tool by name with arguments through an MCP client session.
         """
         Async helper to call a tool on the MCP server.
 
@@ -490,6 +576,11 @@ class MCPEnvironment(Environment):
             return await client.call_tool(tool_name, arguments)
 
     async def _async_handle_list_tools(self) -> ListToolsObservation:
+        # [FUNCTION DOC]
+        # Returns a ListToolsObservation: server tools except names that have
+        # mode-specific schemas, plus each mode-specific schema visible in the current
+        # mode. Any error yields an empty tool list with metadata error and
+        # error_type "list_tools_failed".
         """Async version of _handle_list_tools — avoids run_async_safely."""
         try:
             current_mode = getattr(self, "_mode", None)
@@ -514,6 +605,18 @@ class MCPEnvironment(Environment):
         action: CallToolAction,
         timeout_s: Optional[float] = None,
     ) -> CallToolObservation:
+        # [FUNCTION DOC]
+        # Calls a tool and returns a CallToolObservation. If the name is in the mode
+        # registry, calls the registered function (all-modes entry first, else the
+        # current mode's; TOOL_NOT_FOUND if neither) directly with the arguments
+        # (awaiting coroutines), wrapping the result in a CallToolResult with text
+        # content, structured {"result": value} and data; exceptions become
+        # EXECUTION_ERROR. Otherwise calls through the MCP client with a timeout
+        # (timeout_s or 30 s): timeout -> TIMEOUT error; other exceptions are
+        # classified by message text ("not found"/"unknown tool" -> TOOL_NOT_FOUND,
+        # "invalid"/"argument" -> INVALID_ARGS, else EXECUTION_ERROR).
+        # KNOWN ISSUE: registry-dispatched tools (including all-mode tools registered
+        # via tool()) bypass the timeout and FastMCP argument validation.
         """Async version of _handle_call_tool — avoids run_async_safely."""
         timeout = timeout_s if timeout_s is not None else MCP_TOOL_CALL_TIMEOUT
         tool_name = action.tool_name
@@ -600,6 +703,9 @@ class MCPEnvironment(Environment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Async step: MCP actions are handled on the current loop; other actions run
+        # _step_impl in the default thread pool executor.
         """
         Async step that routes MCP actions without going through run_async_safely.
 
@@ -624,6 +730,8 @@ class MCPEnvironment(Environment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Abstract: handle a non-MCP action and return an Observation.
         """
         Handle non-MCP actions in the environment.
 
@@ -642,6 +750,9 @@ class MCPEnvironment(Environment):
         pass
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Drops references to the MCP client and server (later MCP use raises
+        # RuntimeError). Does not explicitly close an open client session.
         """
         Clean up resources used by the environment.
 

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Client for the Unity ML-Agents environment server, with longer timeouts for slow Unity startup and a
+# "direct mode" that launches a local server subprocess. Supports several import layouts.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -38,6 +41,9 @@ except ImportError:
 
 
 class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
+    # [CLASS DOC]
+    # EnvClient for Unity: serialisation hooks, a reset accepting env_id/include_visual, a static list of known
+    # environment ids, and from_direct to spawn a local server.
     """
     Client for Unity ML-Agents environments.
 
@@ -93,6 +99,9 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         message_timeout_s: float = 180.0,  # 3 minutes for slow Unity initialization
         provider: Optional[Any] = None,
     ):
+        # [FUNCTION DOC]
+        # Forwards base_url, connect timeout (default 10 s), message timeout (default 180 s) and an optional
+        # provider to EnvClient.
         """
         Initialize Unity environment client.
 
@@ -113,6 +122,13 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         )
 
     def connect(self) -> "UnityEnv":
+        # [FUNCTION DOC]
+        # Opens a WebSocket to the server's /ws URL using the synchronous websockets client with long ping/close
+        # timeouts, unless a socket already exists. Returns self. Raises ConnectionError on failure.
+        # KNOWN ISSUE: the base EnvClient's connect is dual-mode and async-based (it reuses or replaces sockets
+        # per event loop and starts providers); this override stores a synchronous connection in the same
+        # attribute and skips provider startup, which is likely incompatible with the base class's async
+        # send/receive path.
         """
         Establish WebSocket connection to the server.
 
@@ -146,6 +162,9 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         return self
 
     def _step_payload(self, action: UnityAction) -> Dict:
+        # [FUNCTION DOC]
+        # Returns a mapping containing only the provided fields: discrete_actions, continuous_actions and
+        # non-empty metadata.
         """
         Convert UnityAction to JSON payload for step request.
 
@@ -169,6 +188,10 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         return payload
 
     def _parse_result(self, payload: Dict) -> StepResult[UnityObservation]:
+        # [FUNCTION DOC]
+        # Builds a UnityObservation from the payload's observation (vector/visual observations, behavior name,
+        # action/observation spec info), with done/reward from the envelope and metadata from envelope or
+        # observation. Returns a StepResult.
         """
         Parse server response into StepResult[UnityObservation].
 
@@ -199,6 +222,8 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         )
 
     def _parse_state(self, payload: Dict) -> UnityState:
+        # [FUNCTION DOC]
+        # Returns a UnityState from the payload with defaults (env_id "", empty specs and lists).
         """
         Parse server response into UnityState object.
 
@@ -224,6 +249,9 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         include_visual: bool = False,
         **kwargs,
     ) -> StepResult[UnityObservation]:
+        # [FUNCTION DOC]
+        # Builds reset kwargs from extra kwargs, env_id (only if given) and include_visual (always sent), and
+        # delegates to the base reset.
         """
         Reset the environment.
 
@@ -245,6 +273,8 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
 
     @staticmethod
     def available_environments() -> List[str]:
+        # [FUNCTION DOC]
+        # Returns a fixed list of commonly available Unity environment ids.
         """
         List commonly available Unity environments.
 
@@ -274,6 +304,13 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
         quality_level: int = 5,
         port: int = 8765,
     ) -> "UnityEnv":
+        # [FUNCTION DOC]
+        # Starts a local uvicorn server subprocess for the Unity app (module path chosen depending on whether it
+        # runs from the repo root or the env directory, with src and the root added to PYTHONPATH) configured via
+        # UNITY_* env vars (env id, graphics, size, time scale, quality) and with proxies bypassed for localhost.
+        # Polls GET /health once per second for up to about 30 s; if not healthy, kills the process and raises
+        # RuntimeError. Returns a client for http://127.0.0.1:<port> owning a provider that stops the subprocess.
+        # Side effects: spawns a subprocess (stdout piped, never drained), network polling.
         """
         Create a Unity environment client with an embedded local server.
 
@@ -411,12 +448,18 @@ class UnityEnv(EnvClient[UnityAction, UnityObservation, UnityState]):
 
         # Create a provider to manage the subprocess lifecycle
         class DirectModeProvider:
+            # [CLASS DOC]
+            # HELPER: provider object owning the embedded server subprocess; only implements stop().
             """Provider that manages the embedded server subprocess."""
 
             def __init__(self, process: subprocess.Popen):
+                # [FUNCTION DOC]
+                # Stores the subprocess.
                 self._process = process
 
             def stop(self):
+                # [FUNCTION DOC]
+                # Terminates the subprocess, waits up to 10 s then kills it, and forgets it. No-op if already stopped.
                 """Stop the embedded server."""
                 if self._process:
                     self._process.terminate()

@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Custom Gradio web UI for the coding tools environment: session controls (setup/verify commands, reset,
+# close), a tool picker with per-tool input forms, and panels showing tool output, raw step JSON, session
+# status, call history and full state. TOOL_SPECS holds the icon, description and signature per tool.
+# KNOWN ISSUE: the read tool description says offset/limit slice lines, but the sandbox slices characters.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -71,14 +76,21 @@ TOOL_CHOICES = [(f"{spec['icon']}  {name}", name) for name, spec in TOOL_SPECS.i
 
 
 def _lines(value: str) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Splits text into stripped non-empty lines.
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
 def _csv_list(value: str) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: Splits comma-separated text into stripped non-empty items.
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _extract_tool_text(result: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the first content item's text from a step response's observation.result, else its "data"
+    # field as a string, or "" when the shape is unexpected.
     obs = result.get("observation", {})
     if not isinstance(obs, dict):
         return ""
@@ -94,6 +106,8 @@ def _extract_tool_text(result: dict[str, Any]) -> str:
 
 
 def _extract_tool_error(result: dict[str, Any]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: Returns observation.result.is_error from a step response (False when missing).
     obs = result.get("observation", {})
     if not isinstance(obs, dict):
         return False
@@ -104,6 +118,9 @@ def _extract_tool_error(result: dict[str, Any]) -> bool:
 
 
 def _format_status(state: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Markdown status line with sandbox id, step count, submitted flag and last reward, or a "No active
+    # session" prompt for an empty state.
     if not state:
         return "**No active session.** Configure setup/verify and click *Reset sandbox*."
     sandbox_id = state.get("sandbox_id") or "—"
@@ -119,6 +136,9 @@ def _format_status(state: dict[str, Any]) -> str:
 
 
 def _format_history(state: dict[str, Any]) -> list[list[str]]:
+    # [FUNCTION DOC]
+    # HELPER: Returns up to the latest 25 tool history entries, newest first, as [ok icon, tool, output or error
+    # truncated to 140 chars] rows.
     history = state.get("tool_history", []) or []
     rows: list[list[str]] = []
     for entry in history[-25:][::-1]:
@@ -141,7 +161,16 @@ def coding_tools_ui_builder(
     title: str,
     quick_start_md: Optional[str],
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Gradio builder passed to create_app. Builds the Blocks layout and wires: the tool dropdown to show the
+    # matching input group and help; Reset to web_manager.reset_environment with setup/verify line lists; Close
+    # to the environment's close in a thread pool; Run to web_manager.step_environment with
+    # {"tool_name", "arguments"} built from the form. All handlers return (status, output status, output text,
+    # raw JSON, summary, state JSON, history rows). Other builder arguments are unused except title.
+    # Returns: the gr.Blocks app.
     def state_payload() -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns web_manager.get_state(), or {} if it raises RuntimeError (no session).
         try:
             return web_manager.get_state()
         except RuntimeError:
@@ -329,6 +358,8 @@ def coding_tools_ui_builder(
         group_components = list(TOOL_GROUPS.values())
 
         def on_tool_change(tool: str):
+            # [FUNCTION DOC]
+            # HELPER: Returns the selected tool's help markdown and visibility updates for every input group.
             spec = TOOL_SPECS.get(tool, {})
             help_md = (
                 f"**{spec.get('signature', tool)}**  \n{spec.get('description', '')}"
@@ -342,6 +373,9 @@ def coding_tools_ui_builder(
 
         # ───────── Result rendering helper ─────────
         def render_result(tool: str, raw: dict[str, Any]) -> tuple[str, str, str, str, str, list[list[str]]]:
+            # [FUNCTION DOC]
+            # HELPER: Builds output panel values from a step response: status badge (error if is_error or text starts with
+            # ERROR:/Error:), text, raw JSON, status, state JSON and history.
             text = _extract_tool_text(raw)
             is_error = _extract_tool_error(raw) or text.startswith("ERROR:") or text.startswith("Error:")
             badge = "❌ error" if is_error else "✅ ok"
@@ -358,6 +392,9 @@ def coding_tools_ui_builder(
 
         # ───────── Session handlers ─────────
         async def on_reset(setup_text: str, verify_text: str):
+            # [FUNCTION DOC]
+            # HELPER: Async: resets the environment with setup/verify commands and reports the sandbox id or the error from
+            # the observation metadata.
             raw = await web_manager.reset_environment(
                 {"setup": _lines(setup_text), "verify": _lines(verify_text)}
             )
@@ -383,6 +420,8 @@ def coding_tools_ui_builder(
             )
 
         async def on_close():
+            # [FUNCTION DOC]
+            # HELPER: Async: closes the environment (kills the sandbox) and clears the panels.
             await web_manager._run_sync_in_thread_pool(web_manager.env.close)
             return (
                 _format_status({}),
@@ -416,6 +455,10 @@ def coding_tools_ui_builder(
             # todo_write
             todo_json: str,
         ):
+            # [FUNCTION DOC]
+            # HELPER: Async: builds tool arguments from the form (numbers converted, JSON parsed for multi_edit/todo_write,
+            # optional fields omitted when blank, ls ignore split on commas), calls the tool through a step, and renders
+            # the result. Returns an error rendering for unknown tools or unparsable input.
             try:
                 if tool == "bash":
                     args = {

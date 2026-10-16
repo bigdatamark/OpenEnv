@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Defines AutoEnv, a non-instantiable factory that creates an environment client from an
+# environment name or Hugging Face Hub Space id/URL. For Hub names it can connect to a running
+# Space, pip-install the Space's package from git (after user confirmation unless trusted via
+# argument or the OPENENV_TRUST_REMOTE_CODE env var), or start a Docker container. Keeps a
+# module-level cache mapping Hub names to resolved environment names.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -56,11 +62,16 @@ OPENENV_TRUST_REMOTE_CODE = "OPENENV_TRUST_REMOTE_CODE"
 
 
 def _has_uv() -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the uv executable is on PATH.
     """Check if uv is available in the system."""
     return shutil.which("uv") is not None
 
 
 def _get_pip_command() -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the pip invocation prefix: uv pip if uv is available, else the current
+    # interpreter's pip module.
     """
     Get the appropriate pip command (uv pip or pip).
 
@@ -73,6 +84,10 @@ def _get_pip_command() -> list[str]:
 
 
 def _confirm_remote_install(repo_id: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True without prompting if OPENENV_TRUST_REMOTE_CODE is 1/true/yes; False
+    # (with a warning) when stdin is not a TTY; otherwise prints a security warning naming the
+    # Space and returns True only if the user answers y/yes (False on EOF or Ctrl-C).
     """
     Ask user for confirmation before installing remote code.
 
@@ -116,6 +131,9 @@ def _confirm_remote_install(repo_id: str) -> bool:
 
 
 class AutoEnv:
+    # [CLASS DOC]
+    # Factory class with class methods only for resolving, installing and instantiating environment
+    # clients.
     """
     AutoEnv automatically selects and instantiates the correct environment client
     based on environment names or HuggingFace Hub repositories.
@@ -145,6 +163,8 @@ class AutoEnv:
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Always raises TypeError: the class must not be instantiated.
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
@@ -153,6 +173,11 @@ class AutoEnv:
 
     @classmethod
     def _resolve_space_url(cls, repo_id: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: converts a repo id (or a huggingface.co URL, using its last two path segments) to
+        # "https://<owner>-<repo>.hf.space" by replacing "/" with "-".
+        # KNOWN ISSUE: does not lowercase or replace underscores/dots, which Hugging Face applies to
+        # Space subdomains, so such repo names resolve to a wrong host.
         """
         Resolve HuggingFace Space repo ID to Space URL.
 
@@ -180,6 +205,9 @@ class AutoEnv:
 
     @classmethod
     def _is_local_url(cls, url: str) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns True if the URL's host is localhost, 0.0.0.0 or a loopback IP address;
+        # False for unparsable URLs, missing hosts or other hosts.
         """
         Check if a URL points to a local server.
 
@@ -212,6 +240,9 @@ class AutoEnv:
 
     @classmethod
     def _check_server_availability(cls, base_url: str, timeout: float = 2.0) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: GETs <base_url>/health (bypassing proxies for local URLs) and, if not 200, GETs the
+        # base URL. Returns True if either returns 200; False on any exception.
         """
         Check if a server at the given URL is running and accessible.
 
@@ -248,6 +279,8 @@ class AutoEnv:
 
     @classmethod
     def _check_space_availability(cls, space_url: str, timeout: float = 5.0) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: same as the server check for a Space URL (no proxy bypass, 5 s default timeout).
         """
         Check if HuggingFace Space is running and accessible.
 
@@ -277,6 +310,9 @@ class AutoEnv:
 
     @classmethod
     def _get_hub_git_url(cls, repo_id: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: returns "git+https://huggingface.co/spaces/<repo_id>" (normalizing a full URL to its
+        # last two path segments).
         """
         Get the git URL for a HuggingFace Space.
 
@@ -296,6 +332,13 @@ class AutoEnv:
 
     @classmethod
     def _install_from_hub(cls, repo_id: str, trust_remote_code: bool = False) -> str:
+        # [FUNCTION DOC]
+        # HELPER: confirms (unless trust_remote_code) and installs the Space package via pip/uv from its
+        # git URL. Returns the package name parsed from the "Successfully installed" line (first
+        # "openenv-" entry, version suffix removed), or else one inferred from the repo name
+        # ("openenv-<name>_env").
+        # Raises: ValueError if the user declines or the install command fails.
+        # Side effects: subprocess installing packages into the current environment.
         """
         Install environment package directly from HuggingFace Hub using git+.
 
@@ -374,6 +417,8 @@ class AutoEnv:
 
     @classmethod
     def _is_package_installed(cls, package_name: str) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: returns True if a distribution with that name is installed.
         """
         Check if a package is already installed.
 
@@ -395,6 +440,15 @@ class AutoEnv:
     def _ensure_package_from_hub(
         cls, name: str, trust_remote_code: bool = False
     ) -> str:
+        # [FUNCTION DOC]
+        # HELPER: makes sure the Hub environment's package is installed and returns an environment
+        # name usable for discovery lookup. Uses the module cache when possible. If the expected package
+        # "openenv-<repo with underscores>_env" is installed, refreshes discovery and returns the
+        # expected "<name>_env". Otherwise records currently discovered keys, installs from the Hub,
+        # rediscovers and returns a newly appeared key; else a discovered key matching the repo name
+        # (substring/prefix); else the inferred key (warning). Caches the result.
+        # Raises: ValueError from installation. Side effects: deletes/rewrites the discovery cache file,
+        # may install packages.
         """
         Ensure package from HuggingFace Hub is installed.
 
@@ -507,6 +561,21 @@ class AutoEnv:
         skip_install: bool = False,
         **kwargs: Any,
     ) -> "EnvClient":
+        # [FUNCTION DOC]
+        # Creates an environment client.
+        # With skip_install: returns a GenericEnvClient for an available base_url (ConnectionError if
+        # unavailable), for a running Space (Hub names), or from the Hub Docker registry if the Space is
+        # down; for local names requires docker_image (GenericEnvClient from that image) else
+        # ValueError.
+        # Otherwise: for Hub names, checks the Space; if reachable and no base_url, installs the package
+        # and connects to the Space; else installs the package (Docker fallback). Resolves the
+        # environment via discovery (ValueError with suggestions if unknown), imports the client class
+        # (ImportError with reinstall hint), defaults docker_image to the env's default image, then:
+        # with base_url connects directly if reachable, auto-starts Docker if the URL is local, else
+        # fails; without base_url starts a Docker container. Async factories are run synchronously.
+        # Returns: client instance. Raises: ValueError (wrapping any client creation error).
+        # KNOWN ISSUE: the docstring lists ConnectionError for an unreachable remote base_url, but in
+        # the non-skip path that error is caught and re-raised as ValueError.
         """
         Create an environment client from a name or HuggingFace Hub repository.
 
@@ -777,6 +846,8 @@ class AutoEnv:
         skip_install: bool = False,
         **kwargs: Any,
     ) -> "EnvClient":
+        # [FUNCTION DOC]
+        # Alias of from_env passing through all arguments.
         """
         Create an environment client from a name or HuggingFace Hub repository.
 
@@ -816,6 +887,9 @@ class AutoEnv:
 
     @classmethod
     def get_env_class(cls, name: str):
+        # [FUNCTION DOC]
+        # Returns the client class for an installed environment name without instantiating it.
+        # Raises: ValueError if unknown; ImportError if the class cannot be imported.
         """
         Get the environment client class without instantiating it.
 
@@ -843,6 +917,10 @@ class AutoEnv:
 
     @classmethod
     def get_env_info(cls, name: str) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a metadata dict (env_key, name, package, version, description, env_class,
+        # action_class, observation_class, module, default_image, spec_version) for an installed
+        # environment. Raises: ValueError if unknown.
         """
         Get detailed information about an environment.
 
@@ -884,6 +962,8 @@ class AutoEnv:
 
     @classmethod
     def list_environments(cls) -> None:
+        # [FUNCTION DOC]
+        # Prints the discovered environments via the discovery service.
         """
         Print a formatted list of all available environments.
 

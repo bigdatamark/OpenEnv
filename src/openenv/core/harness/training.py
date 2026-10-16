@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Strict pydantic models for validated token capture handed to trainers: TrainingTurn
+# (one engine call with prompt/completion ids, logprobs and a loss mask over
+# prompt+completion) and TrainingTrace (list of uniquely identified turns), with
+# conversion from/to trace-entry dicts.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Validated token capture shared by environment producers and trainers."""
@@ -10,6 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TrainingTurn(BaseModel):
+    # [CLASS DOC]
+    # One engine call; strict, extra fields forbidden. Fields: node_id (non-empty),
+    # prompt_token_ids, completion_token_ids, per_token_logps, loss_mask, request, response,
+    # metadata. Validated after construction with validate_training_turn.
     """One engine call. The required loss mask covers prompt plus completion."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -25,6 +34,9 @@ class TrainingTurn(BaseModel):
 
     @model_validator(mode="after")
     def validate_capture(self) -> TrainingTurn:
+        # [FUNCTION DOC]
+        # Runs validate_training_turn on the turn's ids, logprobs and mask; returns self.
+        # Raises: ValueError (surfaced as a pydantic ValidationError) for malformed turns.
         from .capture.validate import validate_training_turn
 
         validate_training_turn(
@@ -37,6 +49,8 @@ class TrainingTurn(BaseModel):
 
 
 class TrainingTrace(BaseModel):
+    # [CLASS DOC]
+    # Strict model with schema_version 1 and a list of TrainingTurn; node ids must be unique.
     """Selected agent calls, each with an authoritative mask and unique identity.
 
     Zero-masked turns remain available for context and usage accounting. Task rewards
@@ -50,6 +64,8 @@ class TrainingTrace(BaseModel):
 
     @model_validator(mode="after")
     def unique_calls(self) -> TrainingTrace:
+        # [FUNCTION DOC]
+        # Returns self; raises ValueError if any node_id repeats.
         ids = [turn.node_id for turn in self.turns]
         if len(set(ids)) != len(ids):
             raise ValueError("training trace contains duplicate node_ids")
@@ -57,6 +73,10 @@ class TrainingTrace(BaseModel):
 
     @classmethod
     def from_entries(cls, entries: list[dict[str, Any]]) -> TrainingTrace:
+        # [FUNCTION DOC]
+        # Builds a trace from trace-entry dicts: node_id from entry["metadata"]["node_id"], token
+        # fields copied as-is, request/response/metadata defaulting to {}.
+        # Raises: KeyError for missing required keys; validation errors for malformed turns.
         """Adapt producer-selected entries without inferring tokens or masks."""
         return cls(
             turns=[
@@ -75,6 +95,9 @@ class TrainingTrace(BaseModel):
         )
 
     def to_trace_entries(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns trace-entry dicts: each turn dumped without node_id, with node_id merged into
+        # metadata.
         """Return diagnostic records for reward functions and trace viewers."""
         return [
             {

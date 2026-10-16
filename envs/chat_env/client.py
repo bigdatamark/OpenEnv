@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the chat environment; token ids travel as plain JSON lists.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -21,6 +23,8 @@ from .models import ChatAction, ChatObservation, ChatState
 
 
 class ChatEnv(EnvClient[ChatAction, ChatObservation, ChatState]):
+    # [CLASS DOC]
+    # Typed client for ChatEnvironment servers, plus a helper to tokenize a message into an action.
     """
     Client for the Chat Environment.
 
@@ -52,6 +56,8 @@ class ChatEnv(EnvClient[ChatAction, ChatObservation, ChatState]):
     """
 
     def _step_payload(self, action: ChatAction) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Returns {"tokens", "metadata"} from the action.
         """
         Convert ChatAction to JSON payload for step request.
 
@@ -67,6 +73,10 @@ class ChatEnv(EnvClient[ChatAction, ChatObservation, ChatState]):
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[ChatObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a ChatObservation from payload["observation"] (messages, tokens if a list else empty)
+        # with done/reward from the payload and metadata from the payload or observation, and wraps it in a
+        # StepResult with the same reward, done and payload metadata.
         """
         Parse server response into StepResult[ChatObservation].
 
@@ -100,6 +110,9 @@ class ChatEnv(EnvClient[ChatAction, ChatObservation, ChatState]):
         )
 
     def _parse_state(self, payload: Dict) -> ChatState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a ChatState from the payload (episode_id, step_count default 0, history messages,
+        # history token lists with non-list entries replaced by empty lists).
         """
         Parse server response into ChatState object.
 
@@ -126,6 +139,10 @@ class ChatEnv(EnvClient[ChatAction, ChatObservation, ChatState]):
         )
 
     def message_to_action(self, message: Message, tokenizer: Any) -> ChatAction:
+        # [FUNCTION DOC]
+        # Tokenizes a single message with tokenizer.apply_chat_template (tokenize=True) and returns a
+        # ChatAction with those tokens.
+        # Raises: ValueError if role or content is missing or content is None.
         """
         Helper method to convert a message to a ChatAction using a tokenizer.
 

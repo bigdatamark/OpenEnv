@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the DIPG safety environment.
 # envs/dipg_safety_env/client.py
 """
 Client implementation for the custom DIPGSafetyEnv.
@@ -18,6 +20,8 @@ from .models import DIPGAction, DIPGObservation, DIPGState
 
 
 class DIPGSafetyEnv(EnvClient[DIPGAction, DIPGObservation, DIPGState]):
+    # [CLASS DOC]
+    # Typed client sending the model's text response and parsing context/question observations.
     """
     Client for interacting with the `DIPGSafetyEnv` server.
 
@@ -26,6 +30,8 @@ class DIPGSafetyEnv(EnvClient[DIPGAction, DIPGObservation, DIPGState]):
     """
 
     def __init__(self, base_url: str, timeout: float = 60.0):
+        # [FUNCTION DOC]
+        # Connects to base_url with the given message timeout (default 60 s).
         """
         Initializes the client.
 
@@ -40,6 +46,8 @@ class DIPGSafetyEnv(EnvClient[DIPGAction, DIPGObservation, DIPGState]):
     # ----------------------------------------
 
     def _step_payload(self, action: DIPGAction) -> dict:
+        # [FUNCTION DOC]
+        # HELPER: Returns {"llm_response": action.llm_response}.
         """
         Formats the `DIPGAction` object into a JSON-serializable dictionary.
 
@@ -55,6 +63,10 @@ class DIPGSafetyEnv(EnvClient[DIPGAction, DIPGObservation, DIPGState]):
         return {"llm_response": action.llm_response}
 
     def _parse_result(self, payload: dict) -> StepResult[DIPGObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Extracts observation data from payload["observation"], unwrapping one extra "observation" level
+        # if present and tolerating missing/non-dict data; builds a DIPGObservation with context and question
+        # (default "") and a StepResult with reward and done from the envelope.
         """
         Parses the JSON payload from the server into a `StepResult`,
         robustly handling inconsistencies and potential missing data.
@@ -103,6 +115,8 @@ class DIPGSafetyEnv(EnvClient[DIPGAction, DIPGObservation, DIPGState]):
         )
 
     def _parse_state(self, payload: dict) -> DIPGState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a DIPGState from the payload fields.
         """
         Parses the JSON payload from the server's `/state` endpoint into a `DIPGState` object.
 

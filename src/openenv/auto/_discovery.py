@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# HELPER module for AutoEnv/AutoAction: discovers installed OpenEnv environment packages
+# (distributions named "openenv-<name>", excluding "openenv-core"), reads their packaged
+# openenv.yaml manifests, infers client/action/observation class names by convention, and
+# caches results in memory and in a per-user JSON file (XDG cache dir or ~/.cache,
+# openenv/discovery_cache.json) that is only trusted if it is a regular non-symlink file owned
+# by the current user and not group/other-writable. Exposes a lazily created global
+# EnvironmentDiscovery singleton.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -34,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EnvironmentInfo:
+    # [CLASS DOC]
+    # Dataclass describing one discovered environment: env key, full name, package name, version,
+    # description, client module path, client/action/observation class names, default Docker
+    # image, optional spec version and the raw manifest. Provides lazy class loaders.
     """
     Rich information about a discovered environment.
 
@@ -66,6 +78,10 @@ class EnvironmentInfo:
     manifest: dict[str, Any] | None = None
 
     def get_client_class(self) -> Type[Any]:
+        # [FUNCTION DOC]
+        # Imports client_module_path and returns the client class attribute.
+        # Raises: ImportError (with an install hint) if the module import fails, or ImportError if the
+        # class attribute is missing.
         """
         Dynamically import and return the client class.
 
@@ -90,6 +106,9 @@ class EnvironmentInfo:
             ) from e
 
     def get_action_class(self) -> Type[Any]:
+        # [FUNCTION DOC]
+        # Same as the client loader but returns the action class from the client module.
+        # Raises: ImportError on import failure or missing attribute.
         """
         Dynamically import and return the action class.
 
@@ -114,6 +133,9 @@ class EnvironmentInfo:
             ) from e
 
     def get_observation_class(self) -> Type[Any]:
+        # [FUNCTION DOC]
+        # Same as the client loader but returns the observation class from the client module.
+        # Raises: ImportError on import failure or missing attribute.
         """
         Dynamically import and return the observation class.
 
@@ -139,6 +161,9 @@ class EnvironmentInfo:
 
 
 def _normalize_env_name(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: strips one trailing "-env"/"_env", converts hyphens to underscores and appends
+    # "_env". Returns the normalized name.
     """
     Normalize environment name to standard format.
 
@@ -167,6 +192,9 @@ def _normalize_env_name(name: str) -> str:
 
 
 def _is_hub_url(name: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the name contains "/" or "huggingface.co" (treated as a Hub repo id
+    # or URL).
     """
     Check if name is a HuggingFace Hub URL or repo ID.
 
@@ -189,6 +217,11 @@ def _is_hub_url(name: str) -> bool:
 
 
 def _infer_class_name(env_name: str, class_type: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: removes "_env" from the name, PascalCases the underscore-separated words and appends
+    # Env, Action or Observation for class_type client/action/observation.
+    # Raises: ValueError for any other class_type.
+    # KNOWN ISSUE: every occurrence of "_env" is removed, not just a trailing suffix.
     """
     Infer class name from environment name using simple conventions.
 
@@ -225,6 +258,9 @@ def _infer_class_name(env_name: str, class_type: str) -> str:
 def _load_manifest_from_package(
     package_name: str, module_name: str
 ) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: reads openenv.yaml from the importable module's package resources and returns the
+    # parsed YAML (None if missing). Logs and returns None on any error. package_name is unused.
     """
     Load openenv.yaml manifest from an installed package.
 
@@ -259,6 +295,14 @@ def _load_manifest_from_package(
 def _create_env_info_from_package(
     package_name: str, module_name: str, version: str
 ) -> EnvironmentInfo | None:
+    # [FUNCTION DOC]
+    # HELPER: builds EnvironmentInfo for an installed package: name from the manifest (or module
+    # name) with "_env" ensured, env key with "_env" removed, description and spec_version from
+    # the manifest (with default description), class names from the manifest's action/observation
+    # fields when both present (client name always inferred) or by convention, client module
+    # "<module>.client", and default image "<name with hyphens>:latest".
+    # Returns: EnvironmentInfo (never None in practice).
+    # KNOWN ISSUE: "_env" is removed everywhere in the name when computing env_key.
     """
     Create EnvironmentInfo from an installed package.
 
@@ -338,6 +382,9 @@ def _create_env_info_from_package(
 
 
 def _default_cache_file() -> Path:
+    # [FUNCTION DOC]
+    # HELPER: returns the discovery cache path under an absolute XDG_CACHE_HOME (relative values
+    # ignored) or ~/.cache. Raises: RuntimeError if the home directory is not absolute.
     """
     Return the per-user discovery cache file path.
 
@@ -364,6 +411,9 @@ def _default_cache_file() -> Path:
 
 
 def _is_trusted_stat(info: os.stat_result) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: on POSIX returns True only if the stat result's owner is the current user and the
+    # mode has no group/other write bits; always True on non-POSIX.
     """
     Return whether the file *info* describes is safe to load.
 
@@ -386,6 +436,9 @@ def _is_trusted_stat(info: os.stat_result) -> bool:
 
 
 def _is_trusted_cache_file(path: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: path-based variant of the trust check (stats the path; False on OSError; True on
+    # non-POSIX). Not race-free; the descriptor-based opener is preferred.
     """
     Return whether *path* is safe to load.
 
@@ -410,6 +463,10 @@ def _is_trusted_cache_file(path: Path) -> bool:
 
 
 def _open_trusted_cache(path: Path) -> int | None:
+    # [FUNCTION DOC]
+    # HELPER: opens the path read-only with no-follow and non-blocking flags, then fstat-checks
+    # that it is a regular, trusted file. Returns: the open descriptor (caller closes) or None if
+    # missing, unreadable, a symlink, not regular or untrusted (descriptor closed in that case).
     """
     Open *path* for reading and return the descriptor only if it is trustworthy.
 
@@ -450,6 +507,8 @@ def _open_trusted_cache(path: Path) -> int | None:
 
 
 class EnvironmentDiscovery:
+    # [CLASS DOC]
+    # Discovery service holding an in-memory cache and the cache file path.
     """
     Auto-discovery system for OpenEnv environments using installed packages.
 
@@ -457,11 +516,19 @@ class EnvironmentDiscovery:
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes an empty in-memory cache and resolves the cache file path (may raise
+        # RuntimeError from the cache path helper).
         """Initialize discovery system."""
         self._cache: dict[str, EnvironmentInfo] | None = None
         self._cache_file = _default_cache_file()
 
     def _discover_installed_packages(self) -> dict[str, EnvironmentInfo]:
+        # [FUNCTION DOC]
+        # HELPER: invalidates import caches and iterates installed distributions; for each
+        # "openenv-*" package other than openenv-core derives the module name (prefix removed,
+        # hyphens to underscores) and builds EnvironmentInfo. Per-package errors are logged and
+        # skipped. Returns: mapping env_key to EnvironmentInfo (later duplicates overwrite).
         """
         Discover all installed openenv-* packages.
 
@@ -515,6 +582,9 @@ class EnvironmentDiscovery:
         return environments
 
     def _load_cache(self) -> dict[str, EnvironmentInfo] | None:
+        # [FUNCTION DOC]
+        # HELPER: loads the cache file through the trusted opener and rebuilds EnvironmentInfo objects.
+        # Returns None (with a warning if the file exists but is untrusted, or on parse errors).
         """
         Load cached discovery results.
 
@@ -550,6 +620,10 @@ class EnvironmentDiscovery:
             return None
 
     def _save_cache(self, environments: dict[str, EnvironmentInfo]) -> None:
+        # [FUNCTION DOC]
+        # HELPER: serializes the environments to a new 0600 temp file (exclusive create, no-follow)
+        # next to the cache file and atomically replaces the cache, removing the temp file on failure.
+        # All errors are logged as warnings and swallowed.
         """
         Save discovery results to cache.
 
@@ -590,6 +664,9 @@ class EnvironmentDiscovery:
             logger.warning(f"Failed to save discovery cache: {e}")
 
     def discover(self, use_cache: bool = True) -> dict[str, EnvironmentInfo]:
+        # [FUNCTION DOC]
+        # Returns discovered environments: the in-memory cache, else the trusted file cache (when
+        # use_cache), else a fresh scan which is then saved to the file cache and memoized.
         """
         Discover all installed OpenEnv environments.
 
@@ -626,6 +703,8 @@ class EnvironmentDiscovery:
         return environments
 
     def get_environment(self, env_key: str) -> EnvironmentInfo | None:
+        # [FUNCTION DOC]
+        # Returns the EnvironmentInfo for env_key from discover(), or None.
         """
         Get information about a specific environment.
 
@@ -645,6 +724,9 @@ class EnvironmentDiscovery:
         return environments.get(env_key)
 
     def get_environment_by_name(self, name: str) -> EnvironmentInfo | None:
+        # [FUNCTION DOC]
+        # Normalizes a flexible name (echo, echo-env, echo_env), strips "_env" to get the key and
+        # looks it up. Returns EnvironmentInfo or None.
         """
         Get environment info by flexible name matching.
 
@@ -661,6 +743,9 @@ class EnvironmentDiscovery:
         return self.get_environment(env_key)
 
     def list_environments(self) -> None:
+        # [FUNCTION DOC]
+        # Prints a formatted list of discovered environments (key, description, version, package)
+        # and a total, or an install hint if none. Side effects: stdout, may scan/cache.
         """
         Print a formatted list of all discovered environments.
 
@@ -691,6 +776,8 @@ class EnvironmentDiscovery:
         print(f"Total: {len(environments)} environments")
 
     def clear_cache(self) -> None:
+        # [FUNCTION DOC]
+        # Deletes the cache file if it exists and clears the in-memory cache.
         """Clear the discovery cache."""
         if self._cache_file.exists():
             self._cache_file.unlink()
@@ -702,6 +789,8 @@ _global_discovery: EnvironmentDiscovery | None = None
 
 
 def get_discovery() -> EnvironmentDiscovery:
+    # [FUNCTION DOC]
+    # Returns the module-level discovery singleton, creating it on first call.
     """
     Get or create the global discovery instance.
 
@@ -721,6 +810,8 @@ def get_discovery() -> EnvironmentDiscovery:
 
 
 def reset_discovery() -> None:
+    # [FUNCTION DOC]
+    # Resets the module-level singleton to None without touching the on-disk cache.
     """Drop the global discovery singleton (useful for testing).
 
     Does **not** delete the on-disk cache. The cache is now a persistent

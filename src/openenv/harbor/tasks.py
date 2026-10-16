@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Dataset discovery for Harbor tasks: resolves a dataset spec (local directory, HF
+# dataset repo "org/name", or Harbor registry "name@version") to an ordered list of task
+# directories, cached process-wide under a lock; downloads HF datasets as real files into
+# a local cache; guards reads of task files against symlink escapes; and implements the
+# OpenEnv TaskProvider protocol (HarborTaskProvider) where each split is a dataset spec.
+# Config via env vars: OPENENV_VALIDATE_TASKS, OPENENV_DATASET_CACHE, OPENENV_DATASET_WORKERS.
 """Dataset discovery: resolve Harbor task sets and serve them over OpenEnv's Task API.
 
 `HarborTaskProvider` satisfies `openenv.core.env_server.interfaces.TaskProvider`, so the HTTP routes
@@ -37,6 +44,9 @@ _LOCK = threading.Lock()
 
 
 def _is_hf_repo(spec: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if spec looks like "org/name": exactly one slash, no "@", and not starting
+    # with ".", "/" or "~".
     """`org/name`, not a path and not `name@version`."""
     return (
         "/" in spec
@@ -65,6 +75,10 @@ _MAX_TASK_DEPTH = 6
 
 
 def _nested_task_dirs(base: Path) -> list[Path]:
+    # [FUNCTION DOC]
+    # HELPER: depth-first (sorted) search under base for directories containing task.toml,
+    # skipping hidden entries and symlinks, not descending into task dirs, max depth 6.
+    # Returns the found directories.
     """Every folder under `base` holding a `task.toml`, by relative path; a task's own subfolders
     are not searched.
 
@@ -74,6 +88,8 @@ def _nested_task_dirs(base: Path) -> list[Path]:
     found: list[Path] = []
 
     def walk(folder: Path, depth: int) -> None:
+        # [FUNCTION DOC]
+        # HELPER: recursive visitor appending task dirs found in folder at the given depth.
         for p in sorted(folder.iterdir()):
             if p.name.startswith(".") or p.is_symlink() or not p.is_dir():
                 continue
@@ -89,6 +105,11 @@ def _nested_task_dirs(base: Path) -> list[Path]:
 def _task_dirs_from_directory(
     root: Path, *, validate: bool | None = None
 ) -> list[Path]:
+    # [FUNCTION DOC]
+    # HELPER: uses root/tasks if it exists else root; lists non-hidden subdirectories sorted
+    # by name; if none of them contains task.toml, falls back to the nested search. If
+    # validation is enabled (argument or OPENENV_VALIDATE_TASKS), filters with Harbor's
+    # Task.is_valid_dir when Harbor is importable. Returns the list.
     """Task dirs under `root`, preferring a `tasks/` subdir when present.
 
     Args:
@@ -120,6 +141,12 @@ def _task_dirs_from_directory(
 def resolve_task_dirs(
     spec: str, *, refresh: bool = False, tqdm_class: Any = None
 ) -> list[Path]:
+    # [FUNCTION DOC]
+    # Returns the cached list for spec unless refresh. Otherwise resolves: existing local
+    # directory -> scan; HF repo shape -> download then scan; else Harbor registry lookup.
+    # Raises ValueError if no tasks are found (download/registry errors propagate). Caches and
+    # returns the list. Note: resolution itself runs outside the lock, so concurrent first
+    # calls may resolve twice.
     """Resolve a dataset spec to an ordered list of Harbor task directories.
 
     `tqdm_class` is handed to the Hub download, for a caller that shows its progress.
@@ -182,6 +209,10 @@ _DOWNLOAD_WORKERS = int(os.environ.get("OPENENV_DATASET_WORKERS", "32"))
 
 
 def _materialise_hf_dataset(spec: str, *, tqdm_class: Any = None) -> Path:
+    # [FUNCTION DOC]
+    # HELPER: downloads only tasks/** of the HF dataset repo spec into
+    # <dataset cache>/<org>__<name> as real files (no symlink cache), with the configured
+    # worker count and optional tqdm class. Returns the target directory. Network + disk I/O.
     """Download an HF dataset as real files and return its local root.
 
     Mounting beats downloading where it is available: a deployed Space can attach the dataset repo
@@ -204,11 +235,16 @@ def _materialise_hf_dataset(spec: str, *, tqdm_class: Any = None) -> Path:
 
 
 def has_symlinks(task_dir: Path) -> list[Path]:
+    # [FUNCTION DOC]
+    # Returns all symlinks found recursively under task_dir.
     """Any symlinks under `task_dir`. Non-empty means uploads to a tar-based backend will break."""
     return [p for p in task_dir.rglob("*") if p.is_symlink()]
 
 
 def _registry_task_dirs(spec: str) -> list[Path]:
+    # [FUNCTION DOC]
+    # HELPER: parses "name@version", asks Harbor's DatasetConfig for task configs (downloading
+    # on first use; run via run_async_safely) and returns their local paths.
     """A Harbor registry dataset, e.g. `terminal-bench@1.0`. Downloads on first use."""
     from harbor.models.job.config import DatasetConfig
     from openenv.core.utils import run_async_safely
@@ -222,6 +258,10 @@ def _registry_task_dirs(spec: str) -> list[Path]:
 
 
 def _dataset_folder(spec: str, task_dir: Path) -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: returns the resolved folder a dataset's files must stay within: the local
+    # directory, the HF download folder, Harbor's CACHE_DIR for registry tasks inside it, or
+    # None (Harbor not importable or task stored elsewhere).
     """The folder a dataset's files must stay in, with a link to that folder itself followed (an
     operator may serve `~/datasets/current`): the local folder, the Hub download, or Harbor's cache
     for a registry task. `None` for a registry task Harbor keeps elsewhere (a local path its
@@ -241,6 +281,9 @@ def _dataset_folder(spec: str, task_dir: Path) -> Path | None:
 
 
 def task_root(spec: str | None, task_dir: Path) -> Path | None:
+    # [FUNCTION DOC]
+    # Returns task_dir resolved if it lies within its dataset folder, else None. Without a
+    # spec/anchor folder, returns None only if task_dir itself is a symlink.
     """The one folder a task's files are read from to be shown (the Task API's instruction, and
     everything the UI shows): `task_dir` resolved, or `None` when a link (the task folder, `tasks/`,
     anything between) takes it outside its dataset, and then nothing in it is read. Without a
@@ -254,6 +297,9 @@ def task_root(spec: str | None, task_dir: Path) -> Path | None:
 
 
 def own_file(root: Path | None, name: str) -> Path:
+    # [FUNCTION DOC]
+    # Returns root/name if it resolves inside root; raises OSError if root is None or the
+    # file escapes root (e.g. via symlink).
     """`root / name` when it resolves inside the task's root (see `task_root`), else `OSError`,
     which readers already treat as a missing file."""
     if root is None:
@@ -267,6 +313,9 @@ def own_file(root: Path | None, name: str) -> Path:
 def read_instruction(
     task_dir: Path, *, limit: int = 4000, spec: str | None = None
 ) -> str:
+    # [FUNCTION DOC]
+    # Returns the stripped text of the task's instruction.md (read with replacement of bad
+    # bytes), truncated to limit chars plus "\n…", or "" if outside the dataset, missing or unreadable path.
     """The task's prompt, for previewing in discovery. Truncated: this is not the authoritative copy.
 
     The sandbox gets the real instruction from Harbor at run time. Serving a huge prompt over the
@@ -284,6 +333,9 @@ def read_instruction(
 
 
 def prefetch(datasets: list[str]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Resolves each dataset spec, returning a mapping spec -> {"num_tasks": n} or
+    # {"error": "<Type>: <msg>"}; never raises for per-dataset failures. May download.
     """Resolve every dataset up front, downloading if needed.
 
     Called before the server accepts traffic. Two reasons it is worth doing eagerly rather than on
@@ -308,6 +360,9 @@ def prefetch(datasets: list[str]) -> dict[str, Any]:
 
 
 class HarborTaskProvider:
+    # [CLASS DOC]
+    # TaskProvider over a list of dataset specs; each spec is a split. Stateless apart from
+    # the list; heavy work is cached at module level.
     """Serves one or more Harbor datasets as OpenEnv splits.
 
     A split IS a dataset spec: start the server with two datasets and you get two splits. That keeps
@@ -316,10 +371,14 @@ class HarborTaskProvider:
     """
 
     def __init__(self, datasets: list[str] | None = None) -> None:
+        # [FUNCTION DOC]
+        # Stores a copy of the dataset specs (empty if None).
         self._datasets = list(datasets or [])
 
     # --- TaskProvider protocol ------------------------------------------
     def list_splits(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns [{"name", "num_tasks"}] per dataset; failures give num_tasks 0 and a truncated error.
         splits = []
         for spec in self._datasets:
             try:
@@ -330,9 +389,13 @@ class HarborTaskProvider:
         return splits
 
     def num_tasks(self, split: str) -> int:
+        # [FUNCTION DOC]
+        # Returns the number of tasks in the split (empty split = first dataset). Raises ValueError for unknown splits.
         return len(resolve_task_dirs(self._check(split)))
 
     def list_tasks(self, split: str) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns task ref dicts for every task in the split (reads each instruction).
         spec = self._check(split)
         return [
             self._ref(spec, i, d).model_dump()
@@ -340,6 +403,8 @@ class HarborTaskProvider:
         ]
 
     def get_task(self, split: str, index: int) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns the task ref dict at index; raises IndexError when out of range, ValueError for unknown split.
         spec = self._check(split)
         dirs = resolve_task_dirs(spec)
         if not 0 <= index < len(dirs):
@@ -351,6 +416,8 @@ class HarborTaskProvider:
     def get_task_range(
         self, split: str, start: int | None = None, stop: int | None = None
     ) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns task ref dicts for the Python slice [start:stop] of the split's tasks.
         spec = self._check(split)
         dirs = resolve_task_dirs(spec)
         return [
@@ -360,6 +427,8 @@ class HarborTaskProvider:
 
     # --- internals -------------------------------------------------------
     def task_dir(self, split: str, index: int) -> Path:
+        # [FUNCTION DOC]
+        # Returns the task directory at index for the split; IndexError if out of range.
         """The on-disk task dir for an index. Used by the rollout path, not by discovery."""
         dirs = resolve_task_dirs(self._check(split))
         if not 0 <= index < len(dirs):
@@ -367,6 +436,9 @@ class HarborTaskProvider:
         return dirs[index]
 
     def _check(self, split: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: validates split: ValueError if no datasets are configured or split is unknown;
+        # empty split maps to the first dataset. Returns the spec.
         if not self._datasets:
             raise ValueError("this server was started with no datasets; pass --dataset")
         if not split:
@@ -379,6 +451,8 @@ class HarborTaskProvider:
 
     @staticmethod
     def _ref(spec: str, index: int, task_dir: Path) -> HarborTaskRef:
+        # [FUNCTION DOC]
+        # HELPER: builds a HarborTaskRef (index, task dir path as id, dir name, spec, truncated instruction).
         return HarborTaskRef(
             index=index,
             task_id=str(task_dir),

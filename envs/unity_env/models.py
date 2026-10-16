@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for Unity ML-Agents environments plus constants: the list of known registry environment
+# ids and the PushBlock discrete action names.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,6 +28,9 @@ except ImportError:
 
 
 class UnityAction(Action):
+    # [CLASS DOC]
+    # Action with optional discrete action indices (one per branch) and optional continuous values (usually in
+    # [-1, 1]). Either or both may be given; omitted parts default server-side to zeros.
     """
     Action for Unity ML-Agents environments.
 
@@ -61,6 +67,9 @@ class UnityAction(Action):
 
 
 class UnityObservation(Observation):
+    # [CLASS DOC]
+    # Observation with flattened vector observations of the first agent, optional base64 PNG visual
+    # observations, behavior name, and action/observation spec info mappings.
     """
     Observation from Unity ML-Agents environments.
 
@@ -102,6 +111,9 @@ class UnityObservation(Observation):
 
 
 class UnityState(State):
+    # [CLASS DOC]
+    # State with the loaded env id (default PushBlock), behavior name, action and observation specs, and the
+    # list of available registry environments.
     """
     Extended state for Unity ML-Agents environments.
 

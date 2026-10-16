@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Custom Gradio "REPL" tab for the REPL environment's web interface: context/task/code inputs, example
+# loader, .txt/.pdf upload, reset and run buttons, a formatted output view, raw JSON and state panes,
+# and help text. Also defines two demo examples (needle in a haystack, recursive child) and a 20 MB
+# upload cap. pypdf is optional.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -23,6 +28,8 @@ _FINAL_RE = re.compile(r"FINAL\(([^\n]+?)\)\s*$", re.MULTILINE)
 
 
 def _extract_final(stdout: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # HELPER: Returns the stripped argument of the last line in stdout ending with a FINAL(...) call, or None.
     """Pull the final answer from the last `FINAL(...)` line of stdout."""
     matches = _FINAL_RE.findall(stdout or "")
     return matches[-1].strip() if matches else None
@@ -122,6 +129,11 @@ _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB — comfortably fits any arXiv PDF
 
 
 def _extract_text_from_upload(file_path: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Reads an uploaded file: returns a message string if larger than 20 MB; text for .txt (with
+    # replacement of undecodable bytes); extracted page text for .pdf (or messages when pypdf is missing,
+    # a page fails or no text exists); otherwise an unsupported-type message. Raises OSError if the file
+    # cannot be read.
     """Read a .txt or .pdf upload from disk and return its text content.
 
     Runs in the Gradio server process (outside the smolagents sandbox),
@@ -156,6 +168,8 @@ def _extract_text_from_upload(file_path: str) -> str:
 
 
 def _code_block(title: str, content: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns a bold title followed by a fenced text block of content, or "" for empty content.
     if not content:
         return ""
     return f"**{title}:**\n```text\n{content}\n```"
@@ -165,6 +179,10 @@ def _format_repl_response(
     data: Dict[str, Any],
     elapsed_s: Optional[float] = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Formats a reset/step response mapping as Markdown: the FINAL answer from stdout, the task
+    # prompt from observation metadata, stdout and stderr blocks, and a metadata line (reward, done,
+    # iteration/max, elapsed seconds). Returns a placeholder line when nothing is available.
     """Render REPL observations as a compact, screenshot-friendly view.
 
     The FINAL answer is surfaced at the top as a quoted block, followed by
@@ -222,6 +240,10 @@ def build_repl_gradio_app(
     title: str,
     quick_start_md: str,
 ) -> gr.Blocks:
+    # [FUNCTION DOC]
+    # Builds and returns the Gradio Blocks for the REPL tab bound to web_manager. Ignores action_fields and
+    # is_chat_env; shows readme content from metadata and the quick-start text when present. Wires buttons
+    # and inputs to the nested handlers below.
     """Build the REPL-specific Gradio tab."""
     del action_fields, is_chat_env
 
@@ -238,6 +260,10 @@ def build_repl_gradio_app(
         hf_token: Optional[str],
         llm_model: Optional[str],
     ):
+        # [FUNCTION DOC]
+        # HELPER: Async reset handler: includes only non-blank fields (expected answer and token stripped),
+        # resets via the web manager, and returns (formatted view, response JSON, state JSON, status text);
+        # on any exception returns empty panes and an error status.
         # Gradio can pass None for untouched password textboxes. Normalize here.
         reset_kwargs: Dict[str, Any] = {}
         if context and context.strip():
@@ -266,6 +292,9 @@ def build_repl_gradio_app(
             return ("", "", "", f"Error: {exc}")
 
     async def run_code(code: Optional[str]):
+        # [FUNCTION DOC]
+        # HELPER: Async run handler: returns a prompt message for empty code; otherwise steps with the code and
+        # returns the same four outputs as reset (errors reported in status).
         if not code or not code.strip():
             return ("", "", "", "Enter Python code to run.")
 
@@ -284,12 +313,17 @@ def build_repl_gradio_app(
             return ("", "", "", f"Error: {exc}")
 
     def get_state_sync():
+        # [FUNCTION DOC]
+        # HELPER: Returns the current state as indented JSON, or an error string.
         try:
             return json.dumps(web_manager.get_state(), indent=2, sort_keys=True)
         except Exception as exc:
             return f"Error: {exc}"
 
     def load_example(label: str):
+        # [FUNCTION DOC]
+        # HELPER: Returns context, task, code and expected answer of the chosen example plus an update that
+        # collapses the context accordion; returns no-op updates for unknown labels.
         if not label or label not in _EXAMPLES:
             return (
                 gr.update(),
@@ -304,6 +338,9 @@ def build_repl_gradio_app(
         return ctx, task, code, expected, gr.update(open=False)
 
     def load_uploaded_document(file_obj):
+        # [FUNCTION DOC]
+        # HELPER: Loads an uploaded file's text into the context field with a status message and collapses
+        # the context accordion; returns no-op updates for no file and an error status on failures.
         if file_obj is None:
             return gr.update(), gr.update(), gr.update()
         file_path = (

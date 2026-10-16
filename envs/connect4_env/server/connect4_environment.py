@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Two-player Connect4 environment on a 6x7 numpy board. Both players move through step (alternating 1 and
+# -1); there is no built-in opponent.
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,16 +19,24 @@ except ImportError as e:
 
 
 class Connect4Environment(Environment):
+    # [CLASS DOC]
+    # Connect4 game supporting concurrent sessions. Board values: 1 / -1 for players, 0 empty; row 0 is the top.
     ROWS = 6
     COLUMNS = 7
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self, opponent=None):
+        # [FUNCTION DOC]
+        # Stores the opponent argument and resets.
+        # KNOWN ISSUE: the opponent argument is never used.
         super().__init__()
         self._opponent = opponent
         self.reset()
 
     def reset(self):
+        # [FUNCTION DOC]
+        # Clears the board, sets player 1 to move, creates a new state with a fresh episode id, and returns the
+        # initial observation (reward 0, not done).
         self.board = np.zeros((self.ROWS, self.COLUMNS), dtype=np.int8)
         self.next_player = 1
         self.invalid_move_played = False
@@ -39,6 +50,12 @@ class Connect4Environment(Environment):
         return self._make_observation()
 
     def step(self, action: Connect4Action):
+        # [FUNCTION DOC]
+        # Drops the current player's piece in the column. Invalid columns (out of range or full) end the game with
+        # reward -1. Otherwise reward 1.0 and done on a four-in-a-row for the mover, done with 0.0 on a full board,
+        # else 0.0. Always switches player and increments step_count.
+        # Returns: Connect4Observation (reward from the mover's perspective).
+        # KNOWN ISSUE: steps are still accepted after the game is over.
         col = action.column
         # reward = 0.0
         done = False
@@ -70,6 +87,9 @@ class Connect4Environment(Environment):
         return self._make_observation(reward, done)
 
     def _make_observation(self, reward=0.0, done=False):
+        # [FUNCTION DOC]
+        # HELPER: Builds the observation with a board copy, non-full columns as legal actions, reward, done and
+        # metadata next_player.
         legal_actions = [c for c in range(self.COLUMNS) if self.board[0, c] == 0]
         return Connect4Observation(
             board=self.board.copy().tolist(),
@@ -80,6 +100,9 @@ class Connect4Environment(Environment):
         )
 
     def _check_win_or_draw(self, row, col):
+        # [FUNCTION DOC]
+        # HELPER: Checks the 7-cell windows through (row, col) in four directions for 4 consecutive pieces of the
+        # placed player. Returns (1.0, True) on a win, (0.0, True) when the board is full, else (0.0, False).
         # Implement 4-in-a-row check (like your Gymnasium code)
         player = self.board[row, col]
         directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
@@ -104,12 +127,17 @@ class Connect4Environment(Environment):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web playground hook: one "col N" button per legal column.
         """The legal columns as buttons."""
         return [
             (f"col {c}", {"column": c}) for c in observation.get("legal_actions") or []
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web playground hook: HTML grid of discs (player 1 accent color, player -1 text color, empty border color)
+        # with column labels; None if the observation has no board.
         """Draw the 6x7 board: player 1 in the accent colour, player -1 in the text colour."""
         if "board" not in observation:
             return None
@@ -137,4 +165,6 @@ class Connect4Environment(Environment):
 
     @property
     def state(self):
+        # [FUNCTION DOC]
+        # Property: returns the Connect4State.
         return self._state

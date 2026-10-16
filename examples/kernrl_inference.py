@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Inference example that iteratively asks an OpenAI-compatible model (Hugging Face router by default) to write an
+# optimised Triton/CUDA kernel for a kernrl problem (PROBLEM_ID env var), evaluates each submission in a Docker-launched
+# kernrl environment, and feeds compilation/correctness/speedup feedback back until the kernel is correct and faster than
+# baseline or MAX_STEPS is reached. Side effects: Docker container (GPU), network calls, stdout.
 """Optimize a GPU kernel with a hosted LLM via Hugging Face Inference.
 
 This script demonstrates using an OpenAI-compatible model to iteratively
@@ -85,6 +90,8 @@ Always wrap your code in a ```python code block."""
 
 
 def extract_python_code(text: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the stripped body of the first fenced code block (optionally tagged python), or the whole stripped text.
     """Extract the first Python code block from the model output."""
     code_blocks = re.findall(
         r"```(?:python)?\s*(.*?)```",
@@ -104,6 +111,10 @@ def format_feedback(
     max_diff: float | None,
     speedup: float | None,
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds feedback text: on compilation failure, the (truncated to 500 chars) error and a fix request; on
+    # correctness failure, the max diff and a fix request; otherwise correctness status and speedup commentary, followed by
+    # a request for an improved kernel. Returns the joined text.
     """Generate feedback text describing the kernel evaluation."""
     parts = [f"Evaluation feedback for step {step}:"]
 
@@ -137,6 +148,8 @@ def format_feedback(
 
 
 def build_initial_prompt(problem_description: str, reference_code: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Builds the first user prompt with the problem description and reference implementation.
     """Construct the first user prompt for the kernel task."""
     return (
         "Optimize the following PyTorch operation by writing a custom GPU kernel.\n\n"
@@ -156,6 +169,12 @@ def optimize_kernel(
     env: kernrl_env,
     client: OpenAI,
 ) -> Tuple[bool, float, List[str]]:
+    # [FUNCTION DOC]
+    # Resets the env to the problem, then each step queries the model (4096 tokens, temperature 0.3), extracts and submits
+    # the code, records a transcript, tracks the best speedup, and returns success when correctness passes with speedup
+    # above 1.0; otherwise appends feedback, keeping at most 16 messages (system plus latest 15).
+    # Returns: tuple of (success flag, best speedup, list of transcript strings).
+    # KNOWN ISSUE: fails with AttributeError if the model returns no content.
     """Iteratively ask the model for kernel code until success."""
 
     # Reset environment
@@ -244,6 +263,9 @@ def optimize_kernel(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Requires API_KEY, HF_TOKEN or OPENAI_API_KEY (SystemExit otherwise); creates the client and the kernrl env from the
+    # kernrl:latest image, runs the optimisation loop, always closes the env, and prints the outcome and transcripts.
     if not API_KEY:
         raise SystemExit(
             "Set HF_TOKEN, OPENAI_API_KEY, or API_KEY to query the model."

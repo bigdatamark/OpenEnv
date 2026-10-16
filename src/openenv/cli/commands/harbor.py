@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Implements the "openenv harbor" sub-app for running Harbor tasks with token-level capture:
+# info (report usable engine/sandboxes/datasets/harnesses), rollout (run rollouts without a
+# server), serve (env server plus capture proxy) and push (deploy harbor_env to a Hugging Face
+# Space with variables, secrets, an optional storage bucket or dataset volumes, and optional HF
+# OAuth sign-in). Heavy harbor modules and huggingface_hub are imported lazily inside commands.
+# UI behavior is configured through OPENENV_HARBOR_* environment/Space variables.
 """`openenv harbor` — run Harbor tasks with token-level capture.
 
 Four commands, in the order you would use them:
@@ -127,6 +134,11 @@ def _ui_env(
     private_urls: Optional[bool] = None,
     reward_key: str = "",
 ) -> dict[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: converts the given UI flags into the environment variables read by the harbor UI
+    # settings: booleans become "1"/"0" only when given, run visibility and a trimmed reward key only
+    # when non-empty. Returns: mapping name to value.
+    # Raises: typer.BadParameter if run_visibility is not "all" or "own".
     """The UI's deployment settings as the variables `openenv.harbor.ui_settings` reads.
 
     Only flags that were given become variables, so an unset one keeps the default for where the
@@ -154,6 +166,10 @@ def _ui_env(
 
 
 def _remove_omitted_ui_variables(repo_id: str, supplied: dict[str, str]) -> None:
+    # [FUNCTION DOC]
+    # HELPER: on a Space, deletes each UI variable owned by this command that exists on the Space but
+    # was not supplied in this push, so omitted flags revert to Space defaults. Side effects: Hub API
+    # calls, stdout.
     """Reset omitted UI flags to deployment defaults on an incremental Space push.
 
     Space variables survive a push. Without this reconciliation, one old `--share-endpoint` remains
@@ -172,6 +188,9 @@ def _remove_omitted_ui_variables(repo_id: str, supplied: dict[str, str]) -> None
 
 
 def _split(values: Optional[list[str]]) -> list[str]:
+    # [FUNCTION DOC]
+    # HELPER: flattens repeated and comma-separated option values into a list of trimmed non-empty
+    # strings.
     """Accept both `--dataset a --dataset b` and `--dataset a,b`."""
     out: list[str] = []
     for value in values or []:
@@ -180,6 +199,9 @@ def _split(values: Optional[list[str]]) -> list[str]:
 
 
 def _hub_not_found(exc: Exception) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the exception is FileNotFoundError or carries an HTTP response with
+    # status 404.
     """Whether a Hub operation failed specifically because its resource does not exist."""
     if isinstance(exc, FileNotFoundError):
         return True
@@ -215,6 +237,10 @@ def info(
         bool, typer.Option("--json", help="Emit machine-readable JSON.")
     ] = False,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: prepares (without requiring an LLM) the capability report for the optional
+    # endpoint, model, datasets, credentials file and API key/header, then prints it as JSON or as
+    # rendered text (verbose lists every harness).
     """Report engine, sandboxes, datasets and harnesses available here."""
     from openenv.harbor.startup import prepare
 
@@ -294,6 +320,11 @@ def rollout(
     ] = "",
     out: Annotated[str, typer.Option("--out", help="Write the result JSON here.")] = "",
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: requires at least one dataset (BadParameter otherwise) and runs a batch of n
+    # consecutive task indices starting at task_index on the first dataset with the given harness,
+    # sandbox, capture proxy port/exposure, trials dir, reward key and credentials. Optionally writes
+    # the results JSON to --out. Exits 0 if all rollouts succeeded, else 1.
     """Run one or more rollouts without starting a server."""
     from openenv.harbor.runner import run_batch
 
@@ -396,6 +427,11 @@ def serve(
         str, typer.Option("--reward-key", help=_REWARD_KEY_HELP)
     ] = "",
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: exports the UI settings variables and OPENENV_HARBOR_UI_HOST into the process
+    # environment, then starts the harbor server (env server port facing the trainer, separate
+    # capture proxy port facing sandboxes) with the endpoint, model, output-token cap, datasets and
+    # credentials. Blocks while serving.
     """Serve Harbor tasks over the OpenEnv Task API and MCP.
 
     Two ports on purpose. The env server faces the trainer on an internal network; the capture proxy
@@ -524,6 +560,19 @@ def push(
         str, typer.Option("--reward-key", help=_REWARD_KEY_HELP)
     ] = "",
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: deploys the harbor_env package to a Space. Validates: --repo-id required;
+    # --no-visitor-endpoints needs --share-endpoint and --llm-url (BadParameter otherwise). Prints
+    # notes/warnings (no endpoint, unshared endpoint, private Space unusable for rollouts). Computes
+    # Space variables (LLM URL, web interface, UI settings, bucket and mount root, datasets, model,
+    # non-default auth header name) and secrets (selected provider keys from the environment after
+    # loading the dotenv, plus --api-key). Locates envs/harbor_env (or OPENENV_HARBOR_ENV_DIR) and,
+    # from a source checkout, bundles the local openenv package (excluding cli and forwarding code).
+    # Prints a summary and stops on --dry-run. Otherwise optionally deletes the Space, creates/fills
+    # the bucket, stages files in a temp dir, enables HF login in the README, prunes stale bundled
+    # files, pushes via the push command, resets omitted UI variables, then attaches the bucket or
+    # dataset volumes and, if confirmed, switches OPENENV_DATASETS to mount paths.
+    # Raises: typer.BadParameter if the harbor_env package is not found. Side effects: Hub writes.
     """Deploy this environment to a Hugging Face Space.
 
     Takes the same arguments as `serve`, because a deployed Space needs exactly the same
@@ -748,6 +797,10 @@ _HF_LOGIN = (
 
 
 def _enable_hf_login(readme: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: adds the HF OAuth settings (inference-api scope, 480 minute expiration) to the README's
+    # YAML front matter unless it already has hf_oauth, or creates front matter if absent; writes the
+    # file. Raises: ValueError if front matter has no closing marker.
     """Turn on "Sign in with Hugging Face" for the Space, in its README front matter.
 
     The Hub then provides the OAuth app (`OAUTH_CLIENT_ID` and friends), and the UI offers sign-in
@@ -766,6 +819,9 @@ def _enable_hf_login(readme: Path) -> None:
 
 
 def _prune_removed_files(repo_id: str, staged: Path) -> None:
+    # [FUNCTION DOC]
+    # HELPER: lists the Space's files and deletes, in one commit, those under openenv/ that are not in
+    # the staged bundle. Skips (with a message) if listing fails, e.g. the Space does not exist yet.
     """Delete files on the Space that this push no longer produces.
 
     `push` uploads but never deletes, so a file dropped from the bundle keeps running in the
@@ -813,6 +869,9 @@ _DATASET_CACHE = Path(
 
 
 def _looks_like_hf_repo(spec: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True for specs shaped "owner/name" (exactly one slash, no "@", not starting with ".",
+    # "/" or "~").
     """True for `owner/name`, false for a local path or a Harbor `name@version`."""
     return (
         spec.count("/") == 1
@@ -822,6 +881,11 @@ def _looks_like_hf_repo(spec: str) -> bool:
 
 
 def _mount_datasets(repo_id: str, mounts: dict[str, str]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: attaches each dataset repo as a read-only volume at its mount path, keeping other
+    # existing volumes, then reads back the Space's volumes to confirm. Returns: True only if all
+    # mount paths are confirmed; False if there are no mounts, the hub client lacks Volume support,
+    # setting volumes fails or confirmation fails (each with a message).
     """Attach each dataset repo to the Space as a read-only volume.
 
     Downloading a Harbor suite inside a Space is the slow path twice over: thousands of small files
@@ -881,6 +945,8 @@ def _mount_datasets(repo_id: str, mounts: dict[str, str]) -> bool:
 
 
 def _delete_space(repo_id: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: deletes the Space repo; any failure (e.g. it does not exist) is printed and ignored.
     """Delete the Space so the next push is a clean deployment.
 
     A Space accumulates state a push does not own: variables and secrets set by earlier runs, mounted
@@ -901,6 +967,11 @@ def _delete_space(repo_id: str) -> None:
 
 
 def _fill_bucket(bucket: str, specs: list[str], public: bool | None = None) -> None:
+    # [FUNCTION DOC]
+    # HELPER: creates the bucket if missing (private unless public is True), or updates an existing
+    # bucket's visibility only when public is given and differs (warning if it is public and nothing
+    # was requested), then server-side copies each dataset into "<owner>__<name>/" unless that prefix
+    # is already present. Raises: non-404 errors from the bucket lookup and copy errors.
     """Create `bucket` if missing and copy each task suite into it, server side.
 
     A new bucket is private unless `public` is `True`. An existing one keeps its visibility unless
@@ -957,6 +1028,10 @@ def _fill_bucket(bucket: str, specs: list[str], public: bool | None = None) -> N
 
 
 def _attach_bucket(repo_id: str, bucket: str, mounts: dict[str, str]) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: sets the Space's volumes to the single bucket mounted at the mount root and checks it is
+    # attached. Returns: False (with a message) if not confirmed, otherwise True only if there are
+    # dataset mounts to switch to.
     """Mount `bucket` on the Space and confirm it attached.
 
     Returns:
@@ -981,6 +1056,9 @@ def _attach_bucket(repo_id: str, bucket: str, mounts: dict[str, str]) -> bool:
 
 
 def _attached_volumes(api: Any, repo_id: str) -> list[Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns the volumes from the Space's runtime info, or an empty list on any error or if
+    # the runtime is missing.
     """Volumes currently mounted on `repo_id`.
 
     Read through `space_info().runtime`, not `get_space_runtime()`. The latter is served by an
@@ -996,5 +1074,7 @@ def _attached_volumes(api: Any, repo_id: str) -> list[Any]:
 
 
 def _attached_mount_paths(api: Any, repo_id: str) -> set[str]:
+    # [FUNCTION DOC]
+    # HELPER: returns the set of mount paths of the Space's attached volumes.
     """Mount paths currently attached to `repo_id`."""
     return {getattr(v, "mount_path", None) for v in _attached_volumes(api, repo_id)}

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests that the capture proxy applies per-session max_output_tokens caps
+# independently under concurrency, never exceeds the server-wide limit, and
+# rejects invalid session caps before calling inference.
 """One shared proxy applies independent rollout caps without relaxing its own limit."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -8,11 +12,15 @@ from openenv.core.harness.capture.server import create_app
 
 
 class Engine:
+    # [CLASS DOC]
+    # Stub upstream that echoes the max_tokens it received as the reply content.
     served_model = "test-model"
     capture_level = "text"
     param_fixes = {}
 
     async def completion(self, request):
+        # [FUNCTION DOC]
+        # Async: returns a stop completion whose content is request["max_tokens"].
         return {
             "id": "cap",
             "model": self.served_model,
@@ -29,6 +37,9 @@ class Engine:
 
 
 def test_parallel_rollouts_keep_distinct_caps_and_cannot_raise_server_limit():
+    # [FUNCTION DOC]
+    # With a server limit of 16384 and session caps 4096/16384/32768, parallel
+    # requests asking for 32768 get min(session cap, server limit).
     app = create_app(
         llm_url="http://unused.invalid",
         model="test-model",
@@ -41,6 +52,8 @@ def test_parallel_rollouts_keep_distinct_caps_and_cannot_raise_server_limit():
     with TestClient(app) as client:
 
         def call(index):
+            # [FUNCTION DOC]
+            # Posts a request for session[index] and returns the echoed max_tokens as int.
             response = client.post(
                 "/v1/chat/completions",
                 headers={"Authorization": "Bearer " + sessions[index].session_id},
@@ -58,6 +71,8 @@ def test_parallel_rollouts_keep_distinct_caps_and_cannot_raise_server_limit():
 
 @pytest.mark.parametrize("cap", [0, -1, True, 1.5, "4096"])
 def test_invalid_session_budget_never_reaches_inference(cap):
+    # [FUNCTION DOC]
+    # Session caps 0, -1, True, 1.5 or "4096" yield HTTP 400 and no model calls.
     app = create_app(
         llm_url="http://unused.invalid", model="test-model", capture_level="text"
     )

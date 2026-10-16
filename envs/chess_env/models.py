@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for the chess environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -21,6 +23,8 @@ from pydantic import Field
 
 
 class ChessAction(Action):
+    # [CLASS DOC]
+    # Action carrying one UCI move string (e.g. "e2e4", "e7e8q").
     """
     Action for Chess environment.
 
@@ -32,6 +36,9 @@ class ChessAction(Action):
 
 
 class ChessObservation(Observation):
+    # [CLASS DOC]
+    # Observation: FEN, legal UCI moves, check flag and result string ("1-0", "0-1", "1/2-1/2") when over;
+    # inherits done, reward and metadata.
     """
     Observation for Chess environment.
 
@@ -51,6 +58,8 @@ class ChessObservation(Observation):
 
 
 class ChessState(State):
+    # [CLASS DOC]
+    # State: FEN (default start position), side to move, UCI move history and half-move step_count.
     """
     State for Chess environment.
 

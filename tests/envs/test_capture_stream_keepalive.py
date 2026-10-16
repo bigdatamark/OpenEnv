@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for the capture proxy's SSE keepalive: a streaming caller gets a
+# keepalive comment before a slow non-streamed upstream generation, capture is
+# exact once it arrives, client disconnect cancels the pending upstream call,
+# late upstream errors become a single error event with no completion, and fast
+# errors keep their HTTP status.
 """Delayed streaming must stay connected without manufacturing captured tokens."""
 
 import asyncio
@@ -15,17 +21,27 @@ from starlette.responses import JSONResponse
 
 
 class DelayedEngine:
+    # [CLASS DOC]
+    # Stub tokens-level upstream that blocks until released and records calls
+    # and cancellation.
     served_model = "test-model"
     capture_level = "tokens"
     param_fixes = {}
     api_key = None
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates release and cancelled threading events and a call counter.
         self.release = threading.Event()
         self.cancelled = threading.Event()
         self.calls = 0
 
     async def completion(self, request):
+        # [FUNCTION DOC]
+        # Async: counts the call, asserts the proxy asked for a non-streamed request,
+        # polls every 5 ms until released (setting cancelled and re-raising on
+        # cancellation), then returns a fixed completion with prompt ids [1,2],
+        # completion ids [3,4] and logprobs.
         self.calls += 1
         assert request["stream"] is False
         try:
@@ -59,6 +75,12 @@ class DelayedEngine:
 
 @pytest.fixture
 def delayed_server(monkeypatch):
+    # [FUNCTION DOC]
+    # Fixture: shrinks sse.KEEPALIVE_INTERVAL_S to 0.02, picks a free port,
+    # starts a real CaptureServer with the delayed engine as inference and default
+    # upstream, creates a session (max 2 calls), yields (server, engine, session),
+    # and finally releases the engine and stops the server. Side effects: binds a
+    # local port and runs a server thread.
     monkeypatch.setattr(sse, "KEEPALIVE_INTERVAL_S", 0.02)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -82,6 +104,10 @@ def delayed_server(monkeypatch):
 
 
 def test_heartbeat_arrives_before_generation_then_exact_capture(delayed_server):
+    # [FUNCTION DOC]
+    # First streamed line is ": openenv keepalive" before any turn is captured;
+    # after release the stream has the content and [DONE], and the export holds one
+    # sequence with input ids 1..4, prompt logprobs 0 and loss mask on completion.
     server, engine, session = delayed_server
     with httpx.stream(
         "POST",
@@ -111,6 +137,9 @@ def test_heartbeat_arrives_before_generation_then_exact_capture(delayed_server):
 
 
 def test_disconnect_cancels_pending_capture(delayed_server):
+    # [FUNCTION DOC]
+    # Closing the stream after the keepalive cancels the upstream call and
+    # captures no turn.
     server, engine, session = delayed_server
     with httpx.stream(
         "POST",
@@ -130,10 +159,17 @@ def test_disconnect_cancels_pending_capture(delayed_server):
 
 @pytest.mark.parametrize("dialect", list(APIType))
 def test_late_error_is_an_error_event_without_completion(monkeypatch, dialect):
+    # [FUNCTION DOC]
+    # For each API dialect, a 502 response arriving after a keepalive becomes one
+    # error data event, no [DONE] and no assistant content.
     monkeypatch.setattr(sse, "KEEPALIVE_INTERVAL_S", 0.001)
 
     async def check():
+        # [FUNCTION DOC]
+        # Async body: runs keepalive_response on a delayed failure and inspects the body.
         async def failed():
+            # [FUNCTION DOC]
+            # Async: sleeps 10 ms then returns a 502 JSON error response.
             await asyncio.sleep(0.01)
             return JSONResponse(
                 {"error": {"message": "engine failed"}}, status_code=502
@@ -157,8 +193,14 @@ def test_late_error_is_an_error_event_without_completion(monkeypatch, dialect):
 
 
 def test_fast_error_keeps_http_status():
+    # [FUNCTION DOC]
+    # An immediate 400 is returned with its status, not as a stream.
     async def check():
+        # [FUNCTION DOC]
+        # Async body: asserts keepalive_response preserves status 400.
         async def failed():
+            # [FUNCTION DOC]
+            # Async: immediately returns a 400 JSON error response.
             return JSONResponse(
                 {"error": {"message": "invalid request"}}, status_code=400
             )

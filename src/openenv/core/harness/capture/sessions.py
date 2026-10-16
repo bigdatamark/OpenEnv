@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Session routing for the capture proxy: the agent's API key is the rollout session id.
+# Defines id sanitising, API-key and harness-session extraction from headers/body, the
+# per-session Upstream engine descriptor, eval-sampling and purpose validation, the
+# Session capture buffer (rollout graph, findings, budgets, sampling policy) and a
+# thread-safe SessionRegistry.
 """Session routing: one server, one port, N concurrent rollouts.
 
 The whole multiplexing scheme is one decision: **the API key IS the session id**. We mint a key per
@@ -42,12 +48,18 @@ _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def clean_session_id(value: Any) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the stripped value if it is a string matching 1-128 chars of
+    # [A-Za-z0-9_.-] starting with an alphanumeric; otherwise None.
     if isinstance(value, str) and _SESSION_ID_RE.fullmatch(value.strip()):
         return value.strip()
     return None
 
 
 def extract_api_key(headers: dict[str, str]) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the API key from headers (case-insensitive): the token after "Bearer " in
+    # Authorization, else x-api-key, else x-goog-api-key; None if absent.
     """Every major SDK puts its key in one of these three places."""
     lower = {k.lower(): v for k, v in headers.items()}
     auth = lower.get("authorization", "")
@@ -59,6 +71,9 @@ def extract_api_key(headers: dict[str, str]) -> str | None:
 def extract_harness_session(
     headers: dict[str, str], body: dict[str, Any]
 ) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the harness's own session id (sanitised) from x-session-id or
+    # proxy-x-session-id headers, or body "_session_id" or "user"; None if none valid.
     """The harness's own conversation id, when it volunteers one. Never used for routing."""
     lower = {k.lower(): v for k, v in headers.items()}
     return (
@@ -71,6 +86,9 @@ def extract_harness_session(
 
 @dataclass(frozen=True)
 class Upstream:
+    # [CLASS DOC]
+    # Immutable description of a session's upstream engine: llm_url, model, api_key (hidden
+    # from repr), auth_header, provider. cache_key identifies a distinct engine+credential.
     """Which engine one rollout's calls go to.
 
     Per session rather than per server because the durable thing here is the DATASET, not the engine.
@@ -91,6 +109,9 @@ class Upstream:
 
     @property
     def cache_key(self) -> tuple[str, str, str, str, str]:
+        # [FUNCTION DOC]
+        # Returns (url without trailing slash, model, lowercased auth header, SHA-256 hex of the
+        # API key or "", provider).
         credential = hashlib.sha256((self.api_key or "").encode()).hexdigest()
         return (
             self.llm_url.rstrip("/"),
@@ -102,6 +123,11 @@ class Upstream:
 
 
 def evaluation_sampling(value: dict[str, Any] | None) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Validates an eval sampling override. None -> {}. Must be a dict with only
+    # temperature (0..2), top_p (0 < p <= 1) and top_k (-1 or positive int); values must be
+    # finite non-bool numbers.
+    # Returns: a copy of the dict. Raises: ValueError on any violation.
     """An explicit eval policy override, distinct from the train-only policy contract."""
     import math
 
@@ -128,6 +154,10 @@ def evaluation_sampling(value: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def rollout_type_for(purpose: str, capture_level: str) -> str:
+    # [FUNCTION DOC]
+    # Returns "eval" if purpose is "eval" or capture_level is not "tokens", else "train".
+    # Raises: ValueError if purpose is not auto/eval/train, or purpose "train" with a
+    # non-token capture level.
     """Separate requested use from observed engine capability; keep legacy auto behavior."""
     if purpose not in {"auto", "eval", "train"}:
         raise ValueError("purpose must be auto, eval, or train")
@@ -138,6 +168,11 @@ def rollout_type_for(purpose: str, capture_level: str) -> str:
 
 @dataclass
 class Session:
+    # [CLASS DOC]
+    # One rollout's capture state: session_id, created_at, RolloutGraph, metadata,
+    # findings, last_turn_at, upstream_errors, optional Upstream, measured capture_level
+    # ("" = server default), purpose, eval_sampling, model_calls (forwarded calls),
+    # max_model_calls (0 = unlimited), budget_stop_count, training sampling policy.
     """One rollout's capture buffer."""
 
     session_id: str
@@ -174,19 +209,28 @@ class Session:
 
     @property
     def over_budget(self) -> bool:
+        # [FUNCTION DOC]
+        # True when max_model_calls > 0 and model_calls >= max_model_calls.
         """Whether this rollout has spent its model-call budget."""
         return self.max_model_calls > 0 and self.model_calls >= self.max_model_calls
 
     @property
     def idle_seconds(self) -> float:
+        # [FUNCTION DOC]
+        # Seconds since the last captured turn (or since creation if none).
         """Since the last captured turn. The cheapest signal that separates progress from a wedge."""
         return time.time() - (self.last_turn_at or self.created_at)
 
 
 class SessionRegistry:
+    # [CLASS DOC]
+    # Thread-safe map from session id to Session, with a require_registered flag controlling
+    # whether unknown API keys are rejected or get an auto-created session.
     """Thread-safe. Uvicorn serves concurrently and rollouts are independent."""
 
     def __init__(self, *, require_registered: bool = True) -> None:
+        # [FUNCTION DOC]
+        # Initializes an empty registry with a lock and the require_registered flag.
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
         self.require_registered = require_registered
@@ -203,6 +247,15 @@ class SessionRegistry:
         sampling: dict[str, Any] | None = None,
         **metadata: Any,
     ) -> Session:
+        # [FUNCTION DOC]
+        # Creates (or updates, if the id already exists) a session.
+        # Validates max_model_calls (non-negative int), purpose, that eval purpose has no training
+        # sampling, purpose vs capture_level (via rollout_type_for), eval_sampling (only with
+        # purpose eval) and the training sampling policy. Uses the sanitised id or a random
+        # "s<24 hex>" id. Merges metadata, sets purpose and eval_sampling, and sets upstream,
+        # capture_level, max_model_calls and sampling only when provided/non-empty.
+        # Returns: the Session. Raises: ValueError on invalid inputs.
+        # Side effects: mutates the registry.
         if type(max_model_calls) is not int or max_model_calls < 0:
             raise ValueError("max_model_calls must be a non-negative integer")
         if purpose not in {"auto", "eval", "train"}:
@@ -235,12 +288,18 @@ class SessionRegistry:
         return session
 
     def get(self, session_id: str | None) -> Session | None:
+        # [FUNCTION DOC]
+        # Returns the session for the id, or None for empty/unknown ids.
         if not session_id:
             return None
         with self._lock:
             return self._sessions.get(session_id)
 
     def resolve(self, headers: dict[str, str], body: dict[str, Any]) -> Session | None:
+        # [FUNCTION DOC]
+        # Routes a request: returns the session whose id equals the request's API key; if none
+        # and require_registered, returns None; otherwise creates a session for that key (random
+        # id if the key is missing/invalid).
         """Route a request to its rollout. `None` means reject.
 
         Order matters and is the opposite of what looks natural: the registered API key wins over any
@@ -257,14 +316,21 @@ class SessionRegistry:
         return self.create(api_key)
 
     def list_ids(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Returns sorted session ids.
         with self._lock:
             return sorted(self._sessions)
 
     def delete(self, session_id: str) -> bool:
+        # [FUNCTION DOC]
+        # Removes a session; returns True if it existed.
         with self._lock:
             return self._sessions.pop(session_id, None) is not None
 
     def summary(self) -> list[dict[str, Any]]:
+        # [FUNCTION DOC]
+        # Returns per-session summaries: session_id, turns, roots, idle_s, upstream_errors,
+        # merged with the session's metadata (metadata keys may override these fields).
         with self._lock:
             sessions = list(self._sessions.values())
         return [

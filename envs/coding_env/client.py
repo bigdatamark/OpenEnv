@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the coding environment.
 """
 CodingEnv
 ---------
@@ -22,15 +24,22 @@ from .models import CodeAction, CodeObservation, CodeState
 
 
 class CodingEnv(EnvClient[CodeAction, CodeObservation, CodeState]):
+    # [CLASS DOC]
+    # Typed client sending code strings and parsing execution observations and state.
     # --- HTTPEnvClient abstract hooks ---
 
     def _step_payload(self, action: CodeAction) -> dict:
+        # [FUNCTION DOC]
+        # HELPER: Returns {"code": action.code}.
         # Shape expected by the server's /step endpoint under "action"
         return {
             "code": action.code,
         }
 
     def _parse_result(self, payload: dict) -> StepResult[CodeObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a CodeObservation from payload["observation"] and a StepResult with reward and done.
+        # Raises: KeyError if "observation" is missing.
         # Expecting: { "observation": {...}, "reward": <float|null>, "done": <bool>, "info": {...} }
         obs = CodeObservation(**payload["observation"])
         return StepResult(
@@ -40,6 +49,8 @@ class CodingEnv(EnvClient[CodeAction, CodeObservation, CodeState]):
         )
 
     def _parse_state(self, payload: dict) -> CodeState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a CodeState with episode_id, step_count (default 0) and last_exit_code (default 0).
         """
         Parse server response into CodeState object.
 

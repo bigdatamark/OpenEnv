@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tiny deterministic, dependency-free "terminal" environment for the ECHO demo: a fixed read-only in-memory filesystem
+# (log, config and CSV files), a command interpreter supporting ls, cat, grep, wc and head -n, train and held-out Task
+# lists (held-out tasks use new commands over the same files), and an OpenEnv-shaped reset/step environment.
 """A tiny, fully deterministic "terminal" environment for the ECHO demo.
 
 **Scenario: forward-deployed incident triage.** An alert fires; an agent opens a
@@ -69,6 +73,11 @@ TOOLS_DOC = (
 
 
 def run_command(cmd: str) -> str:
+    # [FUNCTION DOC]
+    # Executes one command against the fixed files. ls returns sorted names separated by two spaces; cat returns the file
+    # lines; wc returns "<line count> <file>"; head -n N returns the first N lines; grep PATTERN FILE returns lines
+    # containing the literal substring (or "(no matches)"). Missing files return "<cmd>: <file>: No such file"; anything else
+    # returns "sh: <first word>: command not found". Returns the output string.
     """Execute one shell command against the fixed filesystem. Deterministic.
 
     Unknown commands / missing files return a realistic error line — those
@@ -102,6 +111,8 @@ def run_command(cmd: str) -> str:
 
 @dataclass(frozen=True)
 class Task:
+    # [CLASS DOC]
+    # Frozen dataclass for a task: prompt text, expected answer string, and an oracle tuple of commands that solves it.
     prompt: str
     solution: str
     oracle: tuple[str, ...]  # a command sequence that solves it (for scripted rollouts)
@@ -143,17 +154,26 @@ SYSTEM = TOOLS_DOC
 
 @dataclass
 class MiniTerminalEnv:
+    # [CLASS DOC]
+    # Dataclass environment holding the current task and turn counter, with reset and step methods.
     """OpenEnv-shaped deterministic terminal (reset/step)."""
 
     task: Task | None = None
     _turns: int = field(default=0)
 
     def reset(self, task: Task) -> str:
+        # [FUNCTION DOC]
+        # Sets the task, zeroes the turn count and returns the initial observation: the tools doc plus the task prompt.
         self.task = task
         self._turns = 0
         return f"{SYSTEM}\nTask: {task.prompt}"
 
     def step(self, action: str) -> tuple[str, float, bool]:
+        # [FUNCTION DOC]
+        # Increments the turn count. If the action contains "answer: X" (case-insensitive), ends the episode with reward 1.0 when
+        # X equals the task solution exactly, else 0.0, returning a final-answer observation. Otherwise takes the last line of the
+        # action, strips a leading "$" or ">" prefix, runs it as a command, and returns (output, 0.0, done) where done is true
+        # from the 6th turn. Raises AssertionError if reset was not called.
         """One turn. `action` is either `answer: X` (ends episode) or a command."""
         self._turns += 1
         assert self.task is not None

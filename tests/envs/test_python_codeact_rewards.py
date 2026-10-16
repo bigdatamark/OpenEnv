@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests that PythonCodeActEnv computes rewards through its transform pipeline (safety penalty -1.0,
+# conciseness bonus 0.1 for short code, syntax penalty -0.2), records last_code and safety_violation
+# metadata, and behaves consistently across steps and resets. Skipped without smolagents. Side
+# effect at import: prepends the repo root and src to sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Test that PythonCodeActEnv properly computes rewards via transform pipeline."""
@@ -27,6 +32,8 @@ from envs.coding_env.server.python_codeact_env import PythonCodeActEnv
 
 @pytest.fixture
 def env():
+    # [FUNCTION DOC]
+    # HELPER: Fixture returning a freshly reset PythonCodeActEnv.
     """Provides a fresh PythonCodeActEnv for each test."""
     environment = PythonCodeActEnv()
     environment.reset()
@@ -35,6 +42,8 @@ def env():
 
 @pytest.fixture
 def env_with_variable(env):
+    # [FUNCTION DOC]
+    # HELPER: Fixture stepping the env once to define test_var = 42 and returning it.
     """Environment with a variable already defined."""
     env.step(CodeAction(code="test_var = 42"))
     return env
@@ -79,6 +88,9 @@ def env_with_variable(env):
 def test_reward_computation(
     env, code, expected_reward, expected_exit_code, description
 ):
+    # [FUNCTION DOC]
+    # Parametrized over code samples: the step reward and exit code match the expected combination of
+    # safety, syntax and conciseness components.
     """Test reward computation for various code patterns.
 
     Parametrized test covering:
@@ -107,6 +119,8 @@ def test_reward_computation(
 
 
 def test_metadata_contains_last_code(env):
+    # [FUNCTION DOC]
+    # Observation metadata contains the executed code as last_code.
     """Test that step() includes executed code in observation metadata.
 
     This is CRITICAL for the transform pipeline to evaluate code and assign rewards.
@@ -136,6 +150,8 @@ def test_metadata_contains_last_code(env):
     ],
 )
 def test_metadata_safety_violations(env, code, should_have_violation):
+    # [FUNCTION DOC]
+    # Parametrized: safety_violation is present in metadata exactly for dangerous code.
     """Test that metadata correctly tracks safety violations."""
     action = CodeAction(code=code)
     obs = env.step(action)
@@ -159,6 +175,8 @@ def test_metadata_safety_violations(env, code, should_have_violation):
 
 
 def test_reward_not_none_for_safe_code(env):
+    # [FUNCTION DOC]
+    # Safe code yields a non-None reward and exit 0.
     """Test that safe code always receives a non-None reward."""
     action = CodeAction(code="print('Hello')")
     obs = env.step(action)
@@ -168,6 +186,8 @@ def test_reward_not_none_for_safe_code(env):
 
 
 def test_reward_consistency_across_steps(env):
+    # [FUNCTION DOC]
+    # Five short assignments each give reward 0.1.
     """Test that rewards are computed consistently across multiple steps."""
     for i in range(5):
         action = CodeAction(code=f"x = {i}")
@@ -180,6 +200,8 @@ def test_reward_consistency_across_steps(env):
 
 
 def test_reset_preserves_transform_functionality(env):
+    # [FUNCTION DOC]
+    # Rewards are still computed after reset.
     """Test that reset() doesn't break reward computation."""
     # First episode
     action1 = CodeAction(code="x = 1")
@@ -201,6 +223,8 @@ def test_reset_preserves_transform_functionality(env):
 
 
 def test_using_composed_fixture(env_with_variable):
+    # [FUNCTION DOC]
+    # The predefined variable prints 42 with reward 0.1.
     """Test using an environment that builds on base fixture."""
     action = CodeAction(code="print(test_var)")
     obs = env_with_variable.step(action)
@@ -219,6 +243,8 @@ def test_using_composed_fixture(env_with_variable):
     ],
 )
 def test_fixture_with_parametrization(env_with_variable, code, expected_output):
+    # [FUNCTION DOC]
+    # Parametrized expressions over the predefined variable print the expected value with reward 0.1.
     """Test combining fixtures with parametrization."""
     action = CodeAction(code=code)
     obs = env_with_variable.step(action)
@@ -245,6 +271,8 @@ def test_fixture_with_parametrization(env_with_variable, code, expected_output):
     ],
 )
 def test_all_dangerous_patterns_detected(env, dangerous_pattern):
+    # [FUNCTION DOC]
+    # Parametrized dangerous one-liners get reward -0.9 and a safety_violation.
     """Test that all dangerous patterns are correctly detected and penalized."""
     action = CodeAction(code=dangerous_pattern)
     obs = env.step(action)
@@ -257,6 +285,8 @@ def test_all_dangerous_patterns_detected(env, dangerous_pattern):
 
 
 def test_multiline_code_with_mixed_patterns(env):
+    # [FUNCTION DOC]
+    # Multiline code containing an os import gets negative reward and a safety_violation.
     """Test code with both safe and dangerous patterns (dangerous wins)."""
     code = """
 x = 5

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests the dm_control environment's web playground drawing. Skipped without
+# dm_control.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the dm_control environment's web playground drawing."""
@@ -13,6 +16,10 @@ from dm_control_env.server.dm_control_environment import DMControlEnvironment
 
 
 def test_dm_control_web_playground():
+    # [FUNCTION DOC]
+    # After one step, skips if MuJoCo cannot render; otherwise render_web returns
+    # an <img> with a JPEG data URI without advancing physics time, and None for
+    # an empty observation.
     env = DMControlEnvironment()
     env.reset()
     obs = env.step(DMControlAction(values=[0.5])).model_dump()

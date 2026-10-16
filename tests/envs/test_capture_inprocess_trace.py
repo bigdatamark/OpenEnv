@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# In-process tests of CaptureServer's session registry: sessions minted on the
+# registry capture chat completions proxied to a stub token-returning engine,
+# exported trace entries link turns by exact token prefix, deleting releases a
+# session, and a max_model_calls budget bounds captured calls. The server is
+# never started; requests go through FastAPI's TestClient.
 # Copyright 2026 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,6 +50,9 @@ MODEL = "test-model"
 
 
 class _TokenEngine:
+    # [CLASS DOC]
+    # Stub vLLM-like upstream at capture level "tokens" whose prompt grows by each
+    # previous completion.
     """A vLLM served with `--return-tokens-as-token-ids --logprobs-mode processed_logprobs`."""
 
     served_model = MODEL
@@ -51,12 +60,18 @@ class _TokenEngine:
     capture_level = "tokens"
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Sets turn 0 and initial prompt tokens [1, 2, 3].
         self.turn = 0
         # The prompt grows by the previous turn's completion. Faking that relationship is the only
         # way the graph's prefix linking can be exercised at all.
         self._prompt = [1, 2, 3]
 
     async def completion(self, request: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Async: increments turn, returns a chat completion with prompt_token_ids
+        # equal to the current prompt, two completion token ids, logprobs -0.5 each,
+        # and usage; appends the completion to the stored prompt (mutation).
         self.turn += 1
         prompt = list(self._prompt)
         completion = [100 + self.turn, 200 + self.turn]
@@ -87,6 +102,9 @@ class _TokenEngine:
 
 @pytest.fixture
 def server():
+    # [FUNCTION DOC]
+    # Fixture: CaptureServer for the fake URL/model whose upstream pool (keyed by
+    # the Upstream cache key) and default upstream are seeded with the stub engine.
     """A `CaptureServer` that is never `start()`ed -- the registry is what this exercises.
 
     Binding a port would make the test flaky on a busy machine and would test uvicorn rather than the
@@ -108,6 +126,9 @@ def server():
 
 
 def _mint(server, **kwargs):
+    # [FUNCTION DOC]
+    # HELPER: creates a tokens-level session for the fake upstream on the
+    # registry, forwarding extra kwargs; returns the session.
     return server.registry.create(
         upstream=Upstream(llm_url=LLM_URL, model=MODEL),
         capture_level="tokens",
@@ -116,6 +137,9 @@ def _mint(server, **kwargs):
 
 
 def _chat(client: TestClient, session_id: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: posts one chat completion authenticated with the session id as a
+    # bearer token; ignores the response.
     client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {session_id}"},
@@ -124,6 +148,9 @@ def _chat(client: TestClient, session_id: str) -> None:
 
 
 def _entries(server, session):
+    # [FUNCTION DOC]
+    # HELPER: exports the session (with messages) and converts its graph to
+    # trace entries; returns them.
     document = export_session(
         session, include_messages=True, capture_level=session.capture_level
     )
@@ -131,6 +158,10 @@ def _entries(server, session):
 
 
 def test_entries_carry_the_engines_own_prompt_tokens(server):
+    # [FUNCTION DOC]
+    # Three turns give three entries with prompt/completion ids, per-token
+    # logprobs, a loss mask covering both and zero on the prompt, and turn 2's
+    # prompt equals turn 1's prompt plus completion.
     session = _mint(server)
     with TestClient(server.app) as client:
         for _ in range(3):
@@ -159,6 +190,8 @@ def test_entries_carry_the_engines_own_prompt_tokens(server):
 
 
 def test_deleting_a_session_releases_it(server):
+    # [FUNCTION DOC]
+    # registry.delete removes the session so get returns None.
     session = _mint(server)
     sid = session.session_id
     assert server.registry.get(sid) is not None
@@ -169,6 +202,8 @@ def test_deleting_a_session_releases_it(server):
 
 
 def test_a_budget_bounds_what_is_captured(server):
+    # [FUNCTION DOC]
+    # With max_model_calls 2, five requests capture only two entries.
     session = _mint(server, max_model_calls=2)
     with TestClient(server.app) as client:
         for _ in range(5):

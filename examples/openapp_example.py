@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example for the OpenApp (web apps: calendar, todo, messenger, maps) environment in two modes: Docker (client against
+# the openapp-env:latest container) running a fixed list of navigation/scroll actions, or local (directly instantiating
+# the server-side OpenAppEnvironment against an OpenApps server at OPENAPPS_URL) cycling through a few actions.
+# Side effects: sys.path change, Docker container or browser automation, network I/O, stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -58,6 +63,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def run_with_docker(num_steps: int = 15, headless: bool = True):
+    # [FUNCTION DOC]
+    # Starts the env from the Docker image, resets, executes up to num_steps of the predefined actions (0.5 s pause each,
+    # stopping when done) printing URL, reward, errors and app-state keys, then prints the final state and web UI tips.
+    # Returns 0 on success, 1 on any exception (traceback printed). Always attempts to close the env.
+    # KNOWN ISSUE: the headless argument is only printed; it does not affect the container.
+    # KNOWN ISSUE: if creating the env fails, the cleanup references an unbound variable and raises NameError.
     """Run OpenApp environment using Docker container."""
     from openapp_env import OpenAppAction, OpenAppEnv
 
@@ -180,6 +191,12 @@ def run_with_docker(num_steps: int = 15, headless: bool = True):
 
 
 def run_local(num_steps: int = 15, headless: bool = True):
+    # [FUNCTION DOC]
+    # Returns 1 with setup instructions if OPENAPPS_URL is unset or the local modules cannot be imported. Otherwise creates
+    # OpenAppEnvironment (max 50 steps), resets, runs num_steps actions cycling goto calendar / scroll / goto todo / noop,
+    # printing every 5th step or the final one, then prints the final state. Returns 0 on success, 1 on exception. Always
+    # attempts to close the env.
+    # KNOWN ISSUE: if creating the environment fails, the cleanup references an unbound variable and raises NameError.
     """Run OpenApp environment locally without Docker."""
 
     # Check if OPENAPPS_URL is set
@@ -286,6 +303,10 @@ def run_local(num_steps: int = 15, headless: bool = True):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses mode, number of steps, --headless and --show-browser; computes the headless flag and dispatches to Docker or
+    # local mode. Returns that mode's exit code.
+    # KNOWN ISSUE: the comment says headless defaults to true, but with neither flag set headless is false.
     parser = argparse.ArgumentParser(
         description="OpenApp Environment Example",
         formatter_class=argparse.RawDescriptionHelpFormatter,

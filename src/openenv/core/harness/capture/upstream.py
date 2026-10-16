@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Upstream leg of the capture proxy: an async HTTP client (InferenceClient) to one
+# OpenAI-compatible engine (vLLM / SGLang / hosted provider) or Anthropic's native
+# Messages API. Prepares requests for capture according to the endpoint's capture level
+# (tokens / logprobs / text), normalises responses (hoists prompt ids, renames reasoning,
+# checks token-id/logprob pairing), retries transient statuses with backoff, and learns
+# per-endpoint parameter fixes from provider 400s. Defines the upstream error hierarchy
+# and training-sampling validation helpers.
 """The upstream leg: one HTTP client to a vLLM- or SGLang-compatible OpenAI server.
 
 SGLang was excluded here because it genuinely could not do this: its chat route returned token
@@ -55,6 +63,10 @@ CAPTURE_LEVELS = ("tokens", "logprobs", "text")
 
 
 def auth_headers(api_key: str | None, header: str = "Authorization") -> dict[str, str]:
+    # [FUNCTION DOC]
+    # Returns {} if no api_key; otherwise {header: "Bearer <key>"} for an Authorization
+    # header (case-insensitive, default name "Authorization"), or {header: key} for any
+    # other header name.
     """The one header that authenticates us to the upstream, or `{}` when there is no key.
 
     `Authorization` gets the `Bearer ` prefix the OpenAI spec asks for; any other header name gets
@@ -81,19 +93,28 @@ def auth_headers(api_key: str | None, header: str = "Authorization") -> dict[str
 
 
 class UpstreamError(RuntimeError):
+    # [CLASS DOC]
+    # Base error for any failure talking to the engine.
     """Any failure talking to the engine. Never leaks httpx types to callers."""
 
 
 class UpstreamRequestError(UpstreamError):
+    # [CLASS DOC]
+    # Raised when a request cannot be represented by the selected backend (maps to HTTP 400).
     """The caller's request cannot be represented by the selected inference backend."""
 
 
 class UpstreamHTTPError(UpstreamError):
+    # [CLASS DOC]
+    # Raised for non-2xx engine responses; carries status_code and the parsed body.
     """Engine answered with a non-2xx status."""
 
     def __init__(
         self, status_code: int, body: dict[str, Any] | str | None = None
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores status_code and body; the message is "upstream returned <status>: <detail>",
+        # where detail is body.error.message, body.error, or the body itself (truncated to 400 chars).
         self.status_code = status_code
         self.body = body
         detail = body
@@ -104,14 +125,20 @@ class UpstreamHTTPError(UpstreamError):
 
 
 class UpstreamTimeoutError(UpstreamError):
+    # [CLASS DOC]
+    # Raised when the engine times out.
     """Engine did not answer within the liveness ceiling."""
 
 
 class UpstreamTransportError(UpstreamError):
+    # [CLASS DOC]
+    # Raised for connection-level failures (refused, reset, DNS).
     """Connection-level failure: refused, reset, DNS."""
 
 
 def normalise_engine_base(url: str) -> str:
+    # [FUNCTION DOC]
+    # Returns url without trailing slashes and without a trailing "/v1".
     """The engine root, with any trailing `/v1` removed.
 
     Every route this module builds is already `/v1/...`, so a caller who passes the OpenAI-style
@@ -154,6 +181,14 @@ NON_POLICY_SAMPLING: dict[str, float | int] = {
 
 
 def training_sampling(sampling: dict[str, Any] | None) -> dict[str, float | int]:
+    # [FUNCTION DOC]
+    # Validates an explicit training sampling policy.
+    # Inputs: sampling - None or a dict with temperature and optionally the non-policy keys.
+    # Returns: {} for None; otherwise {"temperature": float, plus every NON_POLICY_SAMPLING
+    # key at its neutral value}.
+    # Raises: ValueError for non-dicts, unknown keys, a non-finite/non-positive/bool
+    # temperature, non-numeric values, or values other than the neutral ones (top_k 0 is
+    # also accepted).
     """Validate an explicit full-vocabulary training policy for a capture session."""
     if sampling is None:
         return {}
@@ -186,6 +221,9 @@ def training_sampling(sampling: dict[str, Any] | None) -> dict[str, float | int]
 
 
 def truncating_params(request: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns {key: value} for each NON_POLICY_SAMPLING knob in request that is a non-bool
+    # number differing from its neutral value (top_k -1 and 0 both count as neutral).
     """The entries of `request` that would narrow or distort the sampling distribution.
 
     Args:
@@ -218,6 +256,13 @@ def prepare_request(
     served_model: str | None = None,
     capture_level: str = "tokens",
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Prepares a chat request for capture, mutating and returning it.
+    # tokens level: sets logprobs and return_token_ids True and resets truncating sampling
+    # params to neutral values. logprobs level: sets logprobs True. Non-text levels: sets
+    # top_logprobs to 0 if missing or None. Messages with reasoning_content are copied and
+    # the field is renamed to "reasoning" (or dropped at text level). Removes _served_model.
+    # served_model is unused.
     """Add the params that make a response capturable. Mutates and returns `request`.
 
     Only the top level of `request` is mutated. Nested message dicts are copied before they are
@@ -286,6 +331,12 @@ def prepare_request(
 
 
 def normalize_response(response: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Normalises an engine response in place and returns it: hoists choices[0].prompt_token_ids
+    # to the top level when absent there; renames message "reasoning" to "reasoning_content"
+    # when the latter is None; when token_ids and logprob entries have equal length, checks
+    # pairing and drops choice logprobs (with a warning) on mismatch, else adds token_id to
+    # each logprob entry (setdefault). Non-list choices leave the response unchanged.
     """Canonicalise the engine's response shape in place, so callers see one shape.
 
     Two engines, two placements for the same field. vLLM puts the prompt ids at the top level of the
@@ -360,6 +411,10 @@ def normalize_response(response: dict[str, Any]) -> dict[str, Any]:
 def _pairing_mismatch(
     token_ids: list[Any], entries: list[Any]
 ) -> tuple[int, Any, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns (position, token_id, declared) for the first logprob entry whose token
+    # is "token_id:<id>" with an id different from token_ids[position]; entries in other
+    # forms are skipped. None if no mismatch.
     """The first position where the two channels disagree, or `None`.
 
     Only positions whose `token` field is in the `token_id:{id}` form can be checked; a server without
@@ -379,6 +434,9 @@ def _pairing_mismatch(
 
 
 def _retry_after_seconds(response: httpx.Response) -> float | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns the Retry-After header as non-negative seconds (delta-seconds form only),
+    # or None if missing or unparsable.
     """The `Retry-After` delay a provider asked for, in seconds, if it gave a usable one.
 
     Only the delta-seconds form is honoured. The HTTP-date form is legal but rare here, and parsing
@@ -394,6 +452,11 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
 
 
 class InferenceClient:
+    # [CLASS DOC]
+    # Async client to one engine. Class constants: 900s liveness timeout, 30s connect timeout,
+    # retryable statuses 408/409/429/500/502/503/504, 3 attempts, 2s exponential backoff base,
+    # Retry-After capped at 60s. Instance state: provider, normalised base_url, served_model,
+    # api_key, auth_header, capture_level, learned param_fixes, lazily created httpx client.
     """Async client to one engine. One instance per server, shared across sessions."""
 
     # A high ceiling, not a per-request budget. Callers impose their own deadline; this exists only
@@ -421,6 +484,9 @@ class InferenceClient:
         capture_level: str = "tokens",
         provider: str = "openai",
     ) -> None:
+        # [FUNCTION DOC]
+        # Validates provider (openai/anthropic/hf/vllm, else ValueError). Anthropic forces
+        # capture_level "text" and auth header "x-api-key". Normalises base URL and stores settings.
         if provider not in ("openai", "anthropic", "hf", "vllm"):
             raise ValueError(f"unknown upstream provider: {provider}")
         self.provider = provider
@@ -439,6 +505,9 @@ class InferenceClient:
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
+        # [FUNCTION DOC]
+        # HELPER: Returns the cached httpx.AsyncClient, creating it (base URL, timeouts, auth
+        # header, and anthropic-version 2023-06-01 for Anthropic) if missing or closed.
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
@@ -457,11 +526,23 @@ class InferenceClient:
         return self._client
 
     async def aclose(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the httpx client if open and clears it.
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
         self._client = None
 
     async def completion(self, request: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Performs one non-streaming completion.
+        # Anthropic provider: converts to a native Messages request (served model or request
+        # model), forwards allowed native headers (anthropic-beta/version), posts to
+        # /v1/messages with retries, converts back to chat form (passthrough when a native request
+        # was supplied) and records the submitted temperature/top_p/top_k under
+        # "_openenv_sampling". Otherwise: prepares a copy of the request for capture, posts to
+        # /v1/chat/completions with retries and param fixes, records submitted sampling under
+        # "_openenv_sampling", and returns the normalised response.
+        # Raises: UpstreamError subclasses; ProviderConversionError for unconvertible requests.
         """One non-streaming chat completion, prepared for capture and normalised on the way back."""
         if self.provider == "anthropic":
             from .providers import anthropic_request, anthropic_response
@@ -502,6 +583,9 @@ class InferenceClient:
         return normalize_response(payload)
 
     async def list_models(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # GETs /v1/models and returns the JSON. Raises UpstreamTimeoutError/UpstreamTransportError
+        # on transport failures and UpstreamHTTPError on non-2xx.
         client = await self._get_client()
         try:
             response = await client.get("/v1/models")
@@ -511,6 +595,12 @@ class InferenceClient:
         return response.json()
 
     async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Applies all learned param fixes to body, then posts with retries. On an HTTP
+        # 400 (or a 403 refusing logprobs) and while fewer than MAX_FIXES fixes are known, asks
+        # diagnose() for a fix; if it is new and changes the body, records it and retries,
+        # otherwise re-raises. Other errors propagate.
+        # Side effects: mutates body and self.param_fixes; logs.
         """POST with two independent recovery paths: transient status, and a rejected parameter.
 
         They are separate because they mean different things. A 429 means "the same request, later";
@@ -549,6 +639,12 @@ class InferenceClient:
     async def _post_with_retries(
         self, path: str, body: dict[str, Any], *, headers: dict[str, str] | None = None
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: POSTs JSON body (with optional extra headers) up to _MAX_ATTEMPTS times.
+        # Returns parsed JSON on success. Retryable statuses are retried after Retry-After (if
+        # given) or 2s * 2^(attempt-1), capped at 60s; non-retryable statuses or the last attempt
+        # raise UpstreamHTTPError. Transport errors are raised immediately as
+        # UpstreamTimeoutError/UpstreamTransportError.
         client = await self._get_client()
         for attempt in range(1, self._MAX_ATTEMPTS + 1):
             try:
@@ -583,6 +679,9 @@ class InferenceClient:
         raise AssertionError("unreachable: the final attempt always raises or returns")
 
     async def _raise_for_status(self, response: httpx.Response) -> None:
+        # [FUNCTION DOC]
+        # HELPER: No-op on success; otherwise reads and closes the response, parses the body as
+        # JSON (falls back to text, None if empty) and raises UpstreamHTTPError.
         if response.is_success:
             return
         content = await response.aread()
@@ -598,6 +697,9 @@ class InferenceClient:
 
     @staticmethod
     def _transport_error(exc: httpx.RequestError) -> UpstreamError:
+        # [FUNCTION DOC]
+        # HELPER: Maps an httpx.RequestError to UpstreamTimeoutError (timeouts) or
+        # UpstreamTransportError (everything else); returns, does not raise.
         if isinstance(exc, httpx.TimeoutException):
             return UpstreamTimeoutError(f"engine timed out: {exc}")
         return UpstreamTransportError(f"could not reach engine: {exc}")

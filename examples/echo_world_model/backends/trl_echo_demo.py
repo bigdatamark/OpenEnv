@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Proof-of-concept script (uv inline metadata) adding the ECHO env-token cross-entropy to TRL's GRPOTrainer. A tiny
+# terminal environment is exposed to TRL as a single "run" tool; TRL marks tool output tokens with tool_mask 0, and the
+# subclass adds a weighted CE on those tokens using the policy log-probs from GRPO's own forward. Reports held-out
+# env-token CE on unseen commands before and after training. Side effects: sys.path change, model download, training,
+# writes to echo-trl-demo output dir, stdout.
+# KNOWN ISSUE: a training task and a held-out probe refer to config.ini, but the mini terminal only has config.yaml, so those commands return a "No such file" error.
 # /// script
 # dependencies = [
 #     "trl",
@@ -51,17 +58,26 @@ HELDOUT_PROBES = ["head app.log", "wc app.log", "cat config.ini"]
 
 
 class TerminalToolEnv:
+    # [CLASS DOC]
+    # Environment class for TRL's environment_factory with a single tool method; tracks a reward that is 1.0 when the last command succeeded.
     """OpenEnv-style env exposed to TRL as a single `run` tool. The tool result is
     the environment's response, which TRL marks with `tool_mask == 0`."""
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initialises reward to 0.0.
         self.reward = 0.0
 
     def reset(self, **kwargs) -> None:
+        # [FUNCTION DOC]
+        # Resets the reward to 0.0 and returns None (no initial observation). Ignores kwargs.
         self.reward = 0.0
         return None
 
     def run(self, command: str) -> str:
+        # [FUNCTION DOC]
+        # Runs the command in the mini terminal and returns its output; sets reward to 0.0 if the output starts with an error
+        # prefix (sh:, cat:, grep:, wc:, head:), else 1.0.
         """Run a shell command in a small terminal and return its output.
 
         Args:
@@ -78,10 +94,15 @@ class TerminalToolEnv:
 
 
 def reward_func(environments, **kwargs):
+    # [FUNCTION DOC]
+    # Reward function for TRL: returns each environment's current reward.
     return [env.reward for env in environments]
 
 
 class EchoGRPOTrainer(GRPOTrainer):
+    # [CLASS DOC]
+    # GRPOTrainer subclass adding world_model_coeff times the mean negative log-prob over completion tokens whose tool_mask is
+    # 0 (environment tokens). Captures the policy per-token log-probs from the gradient-carrying forward pass.
     """GRPO plus the ECHO env-token loss, reusing GRPO's own forward.
 
     Args:
@@ -90,17 +111,25 @@ class EchoGRPOTrainer(GRPOTrainer):
     """
 
     def __init__(self, *args, world_model_coeff: float = 0.1, **kwargs):
+        # [FUNCTION DOC]
+        # Initialises the base trainer and stores the coefficient and an empty captured log-prob slot.
         super().__init__(*args, **kwargs)
         self.world_model_coeff = world_model_coeff
         self._policy_logps = None
 
     def _get_per_token_logps_and_entropies(self, *args, **kwargs):
+        # [FUNCTION DOC]
+        # Calls the base implementation and, if the returned log-probs require gradients, stores them for the loss. Returns the base result unchanged.
         out = super()._get_per_token_logps_and_entropies(*args, **kwargs)
         if out[0].requires_grad:  # the policy forward we backprop through
             self._policy_logps = out[0]
         return out
 
     def _compute_loss(self, model, inputs):
+        # [FUNCTION DOC]
+        # Computes the base GRPO loss; if the coefficient is 0 or inputs lack tool_mask returns it unchanged; otherwise adds the
+        # coefficient times the env-token CE computed from the captured log-probs and completion_mask * (1 - tool_mask).
+        # KNOWN ISSUE: relies on the captured log-probs from the most recent gradient forward; if none was captured (None), it raises AttributeError.
         loss = super()._compute_loss(model, inputs)
         if self.world_model_coeff == 0 or "tool_mask" not in inputs:
             return loss
@@ -114,6 +143,9 @@ class EchoGRPOTrainer(GRPOTrainer):
 
 @torch.no_grad()
 def heldout_env_ce(model, tokenizer) -> float:
+    # [FUNCTION DOC]
+    # Without gradients, for each held-out probe command computes the model's mean CE on the command output tokens given a
+    # "$ <cmd>" prefix, and returns the average across probes (nats/token).
     """Mean cross-entropy on held-out terminal output (nats/token, lower is better)."""
     device = next(model.parameters()).device
     ces = []
@@ -130,6 +162,9 @@ def heldout_env_ce(model, tokenizer) -> float:
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses model, coefficient and steps; builds a 256-prompt dataset from the four tasks, a small GRPOConfig (no
+    # checkpoints, thinking disabled), and the EchoGRPOTrainer with TerminalToolEnv; measures held-out CE, trains, measures again and prints both.
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--world-model-coeff", type=float, default=0.1)

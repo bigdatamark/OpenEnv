@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 10): 256-bit modular exponentiation. Inputs are
+# little-endian 64-bit limb tensors; the reference converts to Python integers
+# and runs square-and-multiply.
 """
 Modular Exponentiation (Big Integer)
 
@@ -23,6 +27,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model parameterized by the integer width (num_bits, default 256)
+    # and the derived number of 64-bit limbs.
     """
     Modular exponentiation for large integers.
 
@@ -31,11 +38,17 @@ class Model(nn.Module):
     """
 
     def __init__(self, num_bits: int = 256):
+        # [FUNCTION DOC]
+        # Stores num_bits and words_per_int = ceil(num_bits / 64).
         super(Model, self).__init__()
         self.num_bits = num_bits
         self.words_per_int = (num_bits + 63) // 64
 
     def _to_limbs(self, x: int, device) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Splits a non-negative Python int into words_per_int little-endian
+        # 64-bit limbs stored in an int64 tensor on the device.
+        # KNOWN ISSUE: limbs >= 2^63 do not fit in int64 and raise an overflow error.
         """Convert integer to tensor of 64-bit limbs."""
         limbs = torch.zeros(self.words_per_int, dtype=torch.int64, device=device)
         for i in range(self.words_per_int):
@@ -44,6 +57,9 @@ class Model(nn.Module):
         return limbs
 
     def _from_limbs(self, limbs: torch.Tensor) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Reassembles a Python int from little-endian limbs (negative int64
+        # limbs would corrupt the result).
         """Convert tensor of limbs back to integer."""
         result = 0
         for i in range(len(limbs) - 1, -1, -1):
@@ -53,6 +69,10 @@ class Model(nn.Module):
     def forward(
         self, base: torch.Tensor, exponent: torch.Tensor, modulus: torch.Tensor
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Converts base, exponent and modulus limbs to ints; returns zeros if the
+        # modulus is 0; otherwise computes base^exponent mod modulus by binary
+        # square-and-multiply (LSB first) and returns it as limbs.
         """
         Compute base^exponent mod modulus.
 
@@ -94,6 +114,11 @@ words_per_int = (num_bits + 63) // 64
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Draws random 256-bit base, exponent and modulus (each >= 2) with Python's
+    # random module and returns them as int64 limb tensors via a local helper.
+    # KNOWN ISSUE: random 64-bit limbs exceed the int64 range about half the time,
+    # so tensor creation can overflow.
     import random
 
     # Generate random large integers
@@ -103,6 +128,9 @@ def get_inputs():
 
     # Convert to limbs
     def to_limbs(x):
+        # [FUNCTION DOC]
+        # HELPER: Splits an int into words_per_int little-endian 64-bit limbs and
+        # returns them as an int64 tensor.
         limbs = []
         for _ in range(words_per_int):
             limbs.append(x & ((1 << 64) - 1))
@@ -117,4 +145,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [num_bits] (256).
     return [num_bits]

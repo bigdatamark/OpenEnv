@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example running an LLM (any OpenAI-compatible API; defaults to the Hugging Face router) on the FinQA environment
+# started from a Docker image: discovers MCP tools, converts them to OpenAI function format, plays MAX_EPISODES
+# episodes with forced tool calls until the environment reports done, and prints accuracy and average steps.
+# Side effects: sys.path change, Docker container, network calls, stdout.
 """Play FinQA with an LLM via any OpenAI-compatible API.
 
 FinQA is a financial question-answering benchmark that evaluates LLMs on their
@@ -62,6 +67,9 @@ When submitting your final answer:
 
 
 def _tools_to_openai_format(tools) -> List[dict]:
+    # [FUNCTION DOC]
+    # HELPER: Converts MCP tool objects into OpenAI function tool definitions, keeping only each property's type (default
+    # "string") and description, plus the required list. Returns the list of definitions.
     """Convert MCP tools to OpenAI function-calling format."""
     openai_tools = []
     for tool in tools:
@@ -103,6 +111,14 @@ async def play_finqa_episode(
     tools: List[dict],
     episode_num: int,
 ) -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Plays one episode: resets, reads question and company from metadata, then loops until done: requests a completion with
+    # tool_choice "required"; without tool calls submits the text (or "unknown") as submit_answer; otherwise uses the first
+    # tool call (arguments JSON-decoded). Records the assistant tool call, replaces unknown tool names with submit_answer
+    # "unknown", steps the env with a CallToolAction, and appends the tool result to the history if not done.
+    # Returns: dict with episode number, company, question, reward (0.0 if None) and step count.
+    # KNOWN ISSUE: the reset result is used directly as an observation (metadata/done), whereas the env client's reset elsewhere returns a step result wrapping the observation.
+    # KNOWN ISSUE: invalid JSON in tool-call arguments raises JSONDecodeError and aborts the run.
     """Play a single FinQA episode."""
     tool_names = [t["function"]["name"] for t in tools]
 
@@ -215,6 +231,9 @@ async def play_finqa_episode(
 
 
 async def async_main() -> None:
+    # [FUNCTION DOC]
+    # Requires API_KEY or HF_TOKEN (SystemExit otherwise); starts the env from the finqa-env:latest image, lists and converts
+    # tools, plays the episodes and prints a summary.
     if not API_KEY:
         raise SystemExit("API_KEY (or HF_TOKEN) must be set to query the model.")
 
@@ -252,6 +271,8 @@ async def async_main() -> None:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Synchronous entry point running async_main with asyncio.run.
     asyncio.run(async_main())
 
 

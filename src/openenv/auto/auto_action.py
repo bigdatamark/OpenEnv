@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Defines AutoAction, a non-instantiable factory that resolves an environment's Action class
+# from an installed openenv-* package (via the discovery module) or from a Hugging Face Hub
+# repo (installing the package through AutoEnv's Hub helper first).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -38,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 
 class AutoAction:
+    # [CLASS DOC]
+    # Factory class with class methods only; resolves action classes and prints/returns action
+    # metadata from discovery.
     """
     AutoAction automatically retrieves the correct Action class based on
     environment names or HuggingFace Hub repositories.
@@ -69,6 +76,8 @@ class AutoAction:
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Always raises TypeError: the class must not be instantiated.
         """AutoAction should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoAction is a factory class and should not be instantiated directly. "
@@ -77,6 +86,14 @@ class AutoAction:
 
     @classmethod
     def from_env(cls, name: str, skip_install: bool = False) -> Type:
+        # [FUNCTION DOC]
+        # Returns the action class for an environment name or Hub repo id/URL. With skip_install,
+        # returns GenericAction immediately (logged) without any lookup. For Hub names, ensures the
+        # package is installed (may download and pip-install) and uses the returned env name. Looks up
+        # the environment by flexible name.
+        # Returns: the action class (not an instance).
+        # Raises: ValueError if no environments are installed or the name is unknown (with close-match
+        # suggestions); ImportError (with a reinstall hint) if the action class cannot be imported.
         """
         Get the Action class from environment name or HuggingFace Hub repository.
 
@@ -181,6 +198,8 @@ class AutoAction:
 
     @classmethod
     def from_hub(cls, env_name: str, skip_install: bool = False) -> Type:
+        # [FUNCTION DOC]
+        # Alias of from_env with the same arguments and behavior.
         """
         Get the Action class from environment name.
 
@@ -202,6 +221,10 @@ class AutoAction:
 
     @classmethod
     def get_action_info(cls, name: str) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Looks up an environment by flexible name and returns a dict with env_key, env_name, package,
+        # action_class, observation_class and module (client module path), without importing anything.
+        # Raises: ValueError if the environment is unknown.
         """
         Get detailed information about an action class.
 
@@ -238,6 +261,9 @@ class AutoAction:
 
     @classmethod
     def list_actions(cls) -> None:
+        # [FUNCTION DOC]
+        # Prints every discovered environment's key, action class name and package, plus a total, or
+        # an install hint if none are found. Side effects: stdout, discovery scan/cache.
         """
         Print a formatted list of all available action classes.
 

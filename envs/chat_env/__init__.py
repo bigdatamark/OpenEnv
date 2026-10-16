@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Chat environment package: token-based chat environment for LLMs. Re-exports the ChatEnv client
+# and the ChatAction, ChatObservation and ChatState models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

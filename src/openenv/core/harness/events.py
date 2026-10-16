@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic event and response types for harness turns: event type enum, HarnessEvent,
+# HarnessResponse, the /harness WebSocket client frame and protocol-error frame, and a
+# converter of events into JSON-safe observation metadata.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Event and response types for agentic harness turns (RFC 005)."""
@@ -12,6 +16,9 @@ from pydantic import BaseModel, Field
 
 
 class HarnessEventType(str, Enum):
+    # [CLASS DOC]
+    # String enum of turn event types: llm_request, llm_response, llm_chunk, tool_call,
+    # tool_result, text_output, error, turn_complete.
     """Types of events emitted while a harness processes one turn."""
 
     LLM_REQUEST = "llm_request"
@@ -25,6 +32,9 @@ class HarnessEventType(str, Enum):
 
 
 class HarnessEvent(BaseModel):
+    # [CLASS DOC]
+    # One turn event: type, timestamp (defaults to current Unix time), and a type-specific
+    # data dict.
     """
     A single event from a harness turn.
 
@@ -52,6 +62,8 @@ class HarnessEvent(BaseModel):
 
 
 class HarnessResponse(BaseModel):
+    # [CLASS DOC]
+    # Result of one turn: response text, list of events, and done flag (default False).
     """
     Complete response from a single conversational turn.
 
@@ -70,6 +82,8 @@ class HarnessResponse(BaseModel):
 
 
 class HarnessClientMessage(BaseModel):
+    # [CLASS DOC]
+    # Client frame on the /harness WebSocket: type must be "message"; content is the user text.
     """
     One client frame on the production `/harness` WebSocket.
 
@@ -85,6 +99,9 @@ class HarnessClientMessage(BaseModel):
 
 
 class HarnessProtocolError(BaseModel):
+    # [CLASS DOC]
+    # Recoverable rejection of a client frame: type fixed to "protocol_error", data with
+    # message and code.
     """
     A recoverable rejection of a client frame on `/harness`.
 
@@ -102,6 +119,8 @@ class HarnessProtocolError(BaseModel):
 
 
 def events_to_metadata(events: list[HarnessEvent]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Returns each event dumped to a JSON-compatible dict (pydantic json mode).
     """
     Convert harness events to JSON-serializable dicts for observation metadata.
 

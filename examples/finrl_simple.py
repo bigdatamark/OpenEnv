@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Simple example for the FinRL trading environment: connects to a server at localhost:8000, prints its configuration,
+# runs up to 20 steps of random per-stock actions, prints portfolio value and reward progress and a summary, saves a
+# portfolio chart PNG if matplotlib is available, and closes. Exit status reflects success.
 """
 Simple example showing how to use the FinRL environment with OpenEnv.
 
@@ -21,6 +25,11 @@ from finrl_env import FinRLAction, FinRLEnv
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the example described in the module doc. Returns False if creating the client fails, True on completion.
+    # Side effects: network calls, stdout, writes finrl_portfolio_history.png.
+    # KNOWN ISSUE: if fetching the config fails, the later per-step use of the config variable raises NameError.
+    # KNOWN ISSUE: the reward print uses a float format, which fails if the reward is None.
     """Run a simple FinRL environment example."""
     print("=" * 70)
     print("FinRL Environment - Simple Example")

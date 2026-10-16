@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Coding tools environment server package. Re-exports CodingToolsEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

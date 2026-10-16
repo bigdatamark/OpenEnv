@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Coding environment server package. Re-exports PythonCodeActEnv.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

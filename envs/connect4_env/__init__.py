@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Connect4 environment package. Re-exports the Connect4Env client and Connect4Action, Connect4Observation
+# and Connect4State models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

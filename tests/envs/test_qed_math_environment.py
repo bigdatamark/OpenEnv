@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Tests for qed_math_env: rubric helpers (parse_schema, length_penalty, apply_score_threshold),
+# MathProofRubric (normalisation, response parsing, prompt building, grading with mocked LLM, retries,
+# token usage), QEDMathEnvironment (dataset loading, reset, payloads, answer verification via
+# MathVerifierService, reward shaping, reasoning stripping, proof submission, multi-step attempts,
+# gold-answer cache, config defaults, problem-type detection, reward presets, success threshold),
+# MCP tool registration, models, the QEDMathEnv client, and integration tests against a running
+# server (marked integration). Skipped without math_verify or fastmcp. Side effect at import: prepends
+# src and envs to sys.path. Many tests start and stop the verifier's process pool.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -46,6 +55,9 @@ sys.path.insert(0, str(REPO_ROOT / "envs"))
 # use) can grade without a real OPENAI_API_KEY in the environment.
 @pytest.fixture(autouse=True)
 def _patch_openai_client(monkeypatch):
+    # [FUNCTION DOC]
+    # HELPER: Autouse fixture replacing openai.AsyncOpenAI with a factory returning one MagicMock client
+    # whose responses.create and chat.completions.create are AsyncMocks; yields that mock.
     """Replace openai.AsyncOpenAI with a MagicMock for the duration of each test."""
     mock_client = MagicMock()
     # Ensure async methods on the mock return coroutines
@@ -126,11 +138,16 @@ MULTI_STEP_PROBLEM = {
 
 
 def _make_env(**kwargs) -> QEDMathEnvironment:
+    # [FUNCTION DOC]
+    # HELPER: Returns a QEDMathEnvironment built with the given kwargs (bootstrap problems by default).
     """Create an environment with bootstrap problems (no dataset needed)."""
     return QEDMathEnvironment(**kwargs)
 
 
 def _make_env_with_problem(raw_problem: dict) -> QEDMathEnvironment:
+    # [FUNCTION DOC]
+    # HELPER: Builds an environment whose problem list is replaced by the single normalised raw problem,
+    # updates the gold cache problem count and rebuilds the gold-answer cache.
     """Create an environment pre-loaded with a single synthetic problem."""
     env = _make_env()
     normalized = _normalize_problem(
@@ -146,13 +163,21 @@ def _make_env_with_problem(raw_problem: dict) -> QEDMathEnvironment:
 
 
 class TestParseSchema:
+    # [CLASS DOC]
+    # parse_schema conversions and errors.
     def test_string_passthrough(self):
+        # [FUNCTION DOC]
+        # A string is returned unchanged.
         assert parse_schema("plain text") == "plain text"
 
     def test_empty_string(self):
+        # [FUNCTION DOC]
+        # An empty string stays empty.
         assert parse_schema("") == ""
 
     def test_list_of_criteria(self):
+        # [FUNCTION DOC]
+        # A list of criteria renders "# <title> (<points> points)" headers with desc/description text.
         schema = [
             {"title": "Correctness", "points": 4, "desc": "Is it correct?"},
             {"title": "Clarity", "points": 3, "description": "Is it clear?"},
@@ -164,14 +189,20 @@ class TestParseSchema:
         assert "Is it clear?" in result
 
     def test_invalid_type_raises(self):
+        # [FUNCTION DOC]
+        # A non-string non-list raises TypeError.
         with pytest.raises(TypeError):
             parse_schema(42)
 
     def test_list_missing_keys_raises(self):
+        # [FUNCTION DOC]
+        # A criterion missing keys raises ValueError.
         with pytest.raises(ValueError):
             parse_schema([{"title": "X"}])  # missing points/desc
 
     def test_list_non_dict_entry_raises(self):
+        # [FUNCTION DOC]
+        # A non-dict entry raises ValueError.
         with pytest.raises(ValueError):
             parse_schema(["not a dict"])
 
@@ -180,24 +211,36 @@ class TestParseSchema:
 
 
 class TestLengthPenalty:
+    # [CLASS DOC]
+    # length_penalty behaviour.
     def test_zero_buffer_always_zero(self):
+        # [FUNCTION DOC]
+        # Zero buffer means no penalty.
         assert length_penalty(1000, 999, 0) == 0.0
         assert length_penalty(1000, 1, 0) == 0.0
 
     def test_inside_buffer_zone(self):
         # buffer=100, max=1000 → penalty zone is 900-1000
+        # [FUNCTION DOC]
+        # Inside the buffer zone the penalty is negative.
         penalty = length_penalty(1000, 950, 100)
         assert penalty < 0.0
 
     def test_outside_buffer_zone(self):
         # sequence_length <= max_length - buffer_tokens → no penalty
+        # [FUNCTION DOC]
+        # Below the zone there is no penalty.
         assert length_penalty(1000, 800, 100) == 0.0
 
     def test_at_boundary(self):
         # sequence_length == max_length - buffer_tokens → no penalty (boundary inclusive at 0)
+        # [FUNCTION DOC]
+        # Exactly at max minus buffer there is no penalty.
         assert length_penalty(1000, 900, 100) == 0.0
 
     def test_penalty_increases_toward_max(self):
+        # [FUNCTION DOC]
+        # The penalty grows closer to the maximum.
         p1 = length_penalty(1000, 910, 100)
         p2 = length_penalty(1000, 960, 100)
         assert p2 < p1  # closer to max → more negative
@@ -207,14 +250,22 @@ class TestLengthPenalty:
 
 
 class TestApplyScoreThreshold:
+    # [CLASS DOC]
+    # apply_score_threshold mapping.
     def test_zero(self):
+        # [FUNCTION DOC]
+        # 0 stays 0.
         assert apply_score_threshold(0) == 0.0
 
     def test_partial_credit_collapses_to_one(self):
+        # [FUNCTION DOC]
+        # Scores 1..5 become 1.
         for s in [1, 2, 3, 4, 5]:
             assert apply_score_threshold(float(s)) == 1.0
 
     def test_high_scores_pass_through(self):
+        # [FUNCTION DOC]
+        # 6 and 7 pass through.
         assert apply_score_threshold(6.0) == 6.0
         assert apply_score_threshold(7.0) == 7.0
 
@@ -223,19 +274,29 @@ class TestApplyScoreThreshold:
 
 
 class TestMathProofRubricNormalizeReward:
+    # [CLASS DOC]
+    # MathProofRubric.normalize_reward.
     def test_score_zero(self):
+        # [FUNCTION DOC]
+        # 0 maps to 0.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         assert rubric.normalize_reward(0) == pytest.approx(0.0)
 
     def test_score_max(self):
+        # [FUNCTION DOC]
+        # MAX_SCORE maps to 1.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         assert rubric.normalize_reward(MAX_SCORE) == pytest.approx(1.0)
 
     def test_score_mid(self):
+        # [FUNCTION DOC]
+        # 3 maps to 3/7.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         assert rubric.normalize_reward(3) == pytest.approx(3 / 7)
 
     def test_custom_threshold_collapses_partial(self):
+        # [FUNCTION DOC]
+        # With custom_threshold, scores 1..5 map to 1/7.
         rubric = MathProofRubric(
             grader_model="test", api_key="x", custom_threshold=True
         )
@@ -244,6 +305,8 @@ class TestMathProofRubricNormalizeReward:
             assert rubric.normalize_reward(score) == pytest.approx(1 / 7)
 
     def test_custom_threshold_preserves_high(self):
+        # [FUNCTION DOC]
+        # With custom_threshold, 6 and 7 map to 6/7 and 1.
         rubric = MathProofRubric(
             grader_model="test", api_key="x", custom_threshold=True
         )
@@ -252,9 +315,14 @@ class TestMathProofRubricNormalizeReward:
 
 
 def test_grader_client_created_on_first_use(monkeypatch, _patch_openai_client):
+    # [FUNCTION DOC]
+    # Reset works while AsyncOpenAI construction would fail; the rubric's client is created lazily on
+    # first access after the constructor is restored.
     """The environment starts without grader credentials, the client is built lazily."""
 
     def missing_credentials(**kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Raises RuntimeError("Missing credentials").
         raise RuntimeError("Missing credentials")
 
     monkeypatch.setattr("openai.AsyncOpenAI", missing_credentials)
@@ -266,21 +334,32 @@ def test_grader_client_created_on_first_use(monkeypatch, _patch_openai_client):
 
 
 class TestMathProofRubricParseResponse:
+    # [CLASS DOC]
+    # _parse_response score extraction.
     def _rubric(self):
+        # [FUNCTION DOC]
+        # HELPER: Returns a MathProofRubric with test model and dummy key.
         return MathProofRubric(grader_model="test", api_key="x")
 
     def test_parses_score_tag(self):
+        # [FUNCTION DOC]
+        # Extracts 5 and returns the full text as feedback.
         rubric = self._rubric()
         score, feedback = rubric._parse_response("Good proof. <score>5</score>")
         assert score == 5
         assert "<score>5</score>" in feedback
 
     def test_clamps_above_max(self):
+        # [FUNCTION DOC]
+        # Scores above MAX_SCORE are clamped.
         rubric = self._rubric()
         score, _ = rubric._parse_response("<score>99</score>")
         assert score == MAX_SCORE
 
     def test_clamps_below_zero(self):
+        # [FUNCTION DOC]
+        # A score tag of 0 parses as 0.
+        # KNOWN ISSUE: despite its name it never passes a negative score, so below-zero clamping is untested.
         rubric = self._rubric()
         # Negative values are clamped by max(0, ...) — regex only matches digits
         # so a missing tag falls through to 0.
@@ -288,6 +367,8 @@ class TestMathProofRubricParseResponse:
         assert score == 0
 
     def test_missing_tag_returns_zero(self):
+        # [FUNCTION DOC]
+        # No tag gives score 0 and the text as feedback.
         rubric = self._rubric()
         score, feedback = rubric._parse_response("No tag here.")
         assert score == 0
@@ -295,18 +376,26 @@ class TestMathProofRubricParseResponse:
 
 
 class TestMathProofRubricBuildPrompt:
+    # [CLASS DOC]
+    # _build_prompt fallback and template substitution.
     def _rubric(self, template: str = "") -> MathProofRubric:
+        # [FUNCTION DOC]
+        # HELPER: Returns a rubric with the given prompt template.
         return MathProofRubric(
             grader_model="test", api_key="x", prompt_template=template
         )
 
     def test_fallback_prompt_contains_proof(self):
+        # [FUNCTION DOC]
+        # The fallback prompt contains the proof and the problem.
         rubric = self._rubric()
         prompt = rubric._build_prompt("My proof", "Problem X", "Ref sol", "Rubric")
         assert "My proof" in prompt
         assert "Problem X" in prompt
 
     def test_template_substitution(self):
+        # [FUNCTION DOC]
+        # Template placeholders are substituted with all four values.
         template = "P:{problem} S:{solution} R:{marking_scheme} H:{human_solution}"
         rubric = self._rubric(template)
         prompt = rubric._build_prompt("my_proof", "my_problem", "my_ref", "my_rubric")
@@ -317,13 +406,19 @@ class TestMathProofRubricBuildPrompt:
 
 
 class TestMathProofRubricGrade:
+    # [CLASS DOC]
+    # grade() with _call_llm mocked.
     """Tests for MathProofRubric.grade() — LLM calls are mocked."""
 
     def _rubric(self, **kwargs) -> MathProofRubric:
+        # [FUNCTION DOC]
+        # HELPER: Returns a rubric with extra kwargs.
         return MathProofRubric(grader_model="test", api_key="x", **kwargs)
 
     @pytest.mark.asyncio
     async def test_successful_grade(self):
+        # [FUNCTION DOC]
+        # Score 7 gives reward 1 and a success metric.
         rubric = self._rubric()
         response_text = "The proof is correct. <score>7</score>"
         with patch.object(
@@ -336,6 +431,8 @@ class TestMathProofRubricGrade:
 
     @pytest.mark.asyncio
     async def test_score_normalized(self):
+        # [FUNCTION DOC]
+        # Score 3 gives reward 3/7.
         rubric = self._rubric()
         response_text = "<score>3</score>"
         with patch.object(
@@ -347,6 +444,8 @@ class TestMathProofRubricGrade:
 
     @pytest.mark.asyncio
     async def test_empty_proof_fast_path(self):
+        # [FUNCTION DOC]
+        # A blank proof returns 0 without calling the LLM, recording no_input failure.
         rubric = self._rubric()
         result = await rubric.grade("   ", "Problem", "Ref", "Guidelines")
         assert result.score == 0
@@ -356,6 +455,8 @@ class TestMathProofRubricGrade:
 
     @pytest.mark.asyncio
     async def test_missing_score_tag_records_metric(self):
+        # [FUNCTION DOC]
+        # A reply without tag records no_score_tag and failure.
         rubric = self._rubric()
         response_text = "Looks good but I forgot the tag."
         with patch.object(
@@ -367,6 +468,8 @@ class TestMathProofRubricGrade:
 
     @pytest.mark.asyncio
     async def test_all_attempts_exhausted(self):
+        # [FUNCTION DOC]
+        # Persistent RateLimitError gives 0 with all_attempts_failed and rate_limit metrics.
         import openai as _openai
 
         rubric = self._rubric(max_retries=2, retry_backoff=[0, 0])
@@ -387,6 +490,8 @@ class TestMathProofRubricGrade:
 
     @pytest.mark.asyncio
     async def test_custom_threshold_applied(self):
+        # [FUNCTION DOC]
+        # With custom_threshold, score 4 gives reward 1/7.
         rubric = self._rubric(custom_threshold=True)
         response_text = "<score>4</score>"
         with patch.object(
@@ -398,6 +503,8 @@ class TestMathProofRubricGrade:
 
     @pytest.mark.asyncio
     async def test_verifier_metrics_present(self):
+        # [FUNCTION DOC]
+        # All standard verifier metric keys are present.
         rubric = self._rubric()
         with patch.object(
             rubric, "_call_llm", new=AsyncMock(return_value="<score>5</score>")
@@ -422,23 +529,35 @@ class TestMathProofRubricGrade:
 
 
 class TestRemoveReasoning:
+    # [CLASS DOC]
+    # remove_reasoning behaviour.
     def test_no_delimiter_returns_original(self):
+        # [FUNCTION DOC]
+        # Without delimiters the text is returned.
         assert remove_reasoning("hello world") == "hello world"
 
     def test_empty_delimiters_returns_original(self):
+        # [FUNCTION DOC]
+        # An empty delimiter list returns the text.
         assert remove_reasoning("hello", []) == "hello"
 
     def test_delimiter_present_strips_before(self):
+        # [FUNCTION DOC]
+        # Text up to and including the delimiter is removed.
         text = "<think>step1 step2</think>Final answer."
         result = remove_reasoning(text, ["</think>"])
         assert result == "Final answer."
 
     def test_delimiter_absent_returns_empty_string(self):
         # When delimiters are configured but none present → empty (signal to grade full text)
+        # [FUNCTION DOC]
+        # Configured but absent delimiters give the empty string.
         result = remove_reasoning("No think tag here.", ["</think>"])
         assert result == ""
 
     def test_multiple_delimiters_first_match_wins(self):
+        # [FUNCTION DOC]
+        # With several delimiters the present one is used.
         text = "<think>reasoning</think>answer"
         result = remove_reasoning(text, ["</think>", "</reason>"])
         assert result == "answer"
@@ -448,12 +567,18 @@ class TestRemoveReasoning:
 
 
 class TestLoadProblems:
+    # [CLASS DOC]
+    # load_problems and dataset selection.
     def test_bootstrap_when_no_dataset(self):
+        # [FUNCTION DOC]
+        # No path yields bootstrap problems.
         problems = load_problems(None)
         assert len(problems) >= 1
         assert all("problem" in p for p in problems)
 
     def test_load_local_jsonl(self, tmp_path):
+        # [FUNCTION DOC]
+        # A JSONL file loads in order. Writes under tmp_path.
         jsonl_file = tmp_path / "problems.jsonl"
         rows = [
             {
@@ -477,6 +602,8 @@ class TestLoadProblems:
         assert problems[1]["problem_id"] == "p002"
 
     def test_load_local_json_list(self, tmp_path):
+        # [FUNCTION DOC]
+        # A JSON list file loads.
         json_file = tmp_path / "problems.json"
         rows = [
             {"problem": "P1", "reference_solution": "S1"},
@@ -487,6 +614,8 @@ class TestLoadProblems:
         assert len(problems) == 2
 
     def test_answer_mode_boxed_wrapping(self, tmp_path):
+        # [FUNCTION DOC]
+        # Answer-mode reference solutions are wrapped in a boxed expression.
         jsonl_file = tmp_path / "answers.jsonl"
         row = {
             "problem": "2+2=?",
@@ -499,6 +628,8 @@ class TestLoadProblems:
         assert "\\boxed{4}" in problems[0]["reference_solution"]
 
     def test_select_by_problem_id(self, tmp_path):
+        # [FUNCTION DOC]
+        # reset(problem_id=...) selects that problem from a dataset file.
         jsonl_file = tmp_path / "probs.jsonl"
         rows = [
             {"problem": "P1", "problem_id": "id_alpha"},
@@ -516,7 +647,11 @@ class TestLoadProblems:
 
 
 class TestQEDMathEnvironmentReset:
+    # [CLASS DOC]
+    # reset behaviour.
     def test_reset_returns_problem_observation(self):
+        # [FUNCTION DOC]
+        # reset returns a non-done ProblemObservation with reward 0.
         env = _make_env()
         obs = env.reset()
         assert isinstance(obs, ProblemObservation)
@@ -525,6 +660,8 @@ class TestQEDMathEnvironmentReset:
         assert obs.reward == 0.0
 
     def test_reset_fields_populated(self):
+        # [FUNCTION DOC]
+        # id, source and max_attempts are populated.
         env = _make_env()
         obs = env.reset()
         assert obs.problem_id != ""
@@ -532,12 +669,16 @@ class TestQEDMathEnvironmentReset:
         assert obs.max_attempts >= 1
 
     def test_reset_increments_counter(self):
+        # [FUNCTION DOC]
+        # Two resets give a reset count of 2.
         env = _make_env()
         env.reset()
         env.reset()
         assert env._reset_count == 2
 
     def test_reset_clears_attempt_count(self):
+        # [FUNCTION DOC]
+        # reset zeroes the attempt counter.
         env = _make_env()
         env.reset()
         env._attempt_count = 99
@@ -549,12 +690,18 @@ class TestQEDMathEnvironmentReset:
 
 
 class TestGetProblemPayload:
+    # [CLASS DOC]
+    # Problem and guideline payloads.
     def test_without_reset_returns_error(self):
+        # [FUNCTION DOC]
+        # Before reset the payload has an error.
         env = _make_env()
         payload = env.get_problem_payload()
         assert "error" in payload
 
     def test_after_reset_returns_problem(self):
+        # [FUNCTION DOC]
+        # After reset the payload has problem and id but no reference solution (proof mode).
         env = _make_env()
         env.reset()
         payload = env.get_problem_payload()
@@ -564,17 +711,23 @@ class TestGetProblemPayload:
         assert "reference_solution" not in payload
 
     def test_answer_mode_includes_reference_solution(self):
+        # [FUNCTION DOC]
+        # Answer mode includes the boxed reference solution.
         env = _make_env_with_problem(ANSWER_PROBLEM)
         env.reset()
         payload = env.get_problem_payload()
         assert payload["reference_solution"] == r"\boxed{4}"
 
     def test_grading_guidelines_payload_without_reset(self):
+        # [FUNCTION DOC]
+        # Guidelines before reset return an error.
         env = _make_env()
         payload = env.get_grading_guidelines_payload()
         assert "error" in payload
 
     def test_grading_guidelines_payload_after_reset(self):
+        # [FUNCTION DOC]
+        # Guidelines after reset are returned.
         env = _make_env()
         env.reset()
         payload = env.get_grading_guidelines_payload()
@@ -586,19 +739,29 @@ class TestGetProblemPayload:
 
 
 class TestVerifyMath:
+    # [CLASS DOC]
+    # _verify_math status classification.
     def test_correct_answer(self):
+        # [FUNCTION DOC]
+        # Matching boxed answers are "correct".
         result = QEDMathEnvironment._verify_math(r"\boxed{4}", r"\boxed{4}")
         assert result == "correct"
 
     def test_wrong_answer(self):
+        # [FUNCTION DOC]
+        # Different answers are "wrong".
         result = QEDMathEnvironment._verify_math(r"\boxed{5}", r"\boxed{4}")
         assert result == "wrong"
 
     def test_no_boxed_returns_no_answer(self):
+        # [FUNCTION DOC]
+        # No boxed answer gives "no_answer".
         result = QEDMathEnvironment._verify_math("The answer is 4.", r"\boxed{4}")
         assert result == "no_answer"
 
     def test_empty_boxed_returns_unparsable(self):
+        # [FUNCTION DOC]
+        # An empty boxed answer is "unparsable".
         result = QEDMathEnvironment._verify_math(r"\boxed{}", r"\boxed{4}")
         assert result == "unparsable"
 
@@ -608,7 +771,11 @@ class TestVerifyMath:
 
 class TestGradeAnswerSubmission:
     @pytest.mark.asyncio
+    # [CLASS DOC]
+    # _grade_answer_submission via the verifier service; each test stops the service.
     async def test_correct_gives_max_reward(self):
+        # [FUNCTION DOC]
+        # Correct answer gives score 7, reward 1 and success.
         env = _make_env()
         try:
             result = await env._grade_answer_submission(r"\boxed{4}", r"\boxed{4}")
@@ -620,6 +787,8 @@ class TestGradeAnswerSubmission:
 
     @pytest.mark.asyncio
     async def test_wrong_gives_zero(self):
+        # [FUNCTION DOC]
+        # Wrong answer gives 0 and failure.
         env = _make_env()
         try:
             result = await env._grade_answer_submission(r"\boxed{5}", r"\boxed{4}")
@@ -631,6 +800,8 @@ class TestGradeAnswerSubmission:
 
     @pytest.mark.asyncio
     async def test_missing_boxed_gives_zero(self):
+        # [FUNCTION DOC]
+        # Missing boxed answer gives 0.
         env = _make_env()
         try:
             result = await env._grade_answer_submission(
@@ -643,6 +814,8 @@ class TestGradeAnswerSubmission:
 
     @pytest.mark.asyncio
     async def test_answer_grading_uses_verifier_service(self):
+        # [FUNCTION DOC]
+        # Grading starts the verifier's executor.
         env = _make_env()
         try:
             result = await env._grade_answer_submission(r"\boxed{4}", r"\boxed{4}")
@@ -654,6 +827,8 @@ class TestGradeAnswerSubmission:
 
     @pytest.mark.asyncio
     async def test_answer_grading_wrong_answer_via_service(self):
+        # [FUNCTION DOC]
+        # Wrong answer via the service gives 0.
         env = _make_env()
         try:
             result = await env._grade_answer_submission(r"\boxed{5}", r"\boxed{4}")
@@ -664,6 +839,8 @@ class TestGradeAnswerSubmission:
 
     @pytest.mark.asyncio
     async def test_timeout_metrics_from_service(self):
+        # [FUNCTION DOC]
+        # A mocked timeout response yields score 0 with timeout, retries, latency, worker and queue metrics.
         env = _make_env()
         try:
             timeout_response = VerifyResponse(
@@ -694,6 +871,8 @@ class TestGradeAnswerSubmission:
 
     @pytest.mark.asyncio
     async def test_shutdown_verifier_service_hook(self):
+        # [FUNCTION DOC]
+        # shutdown_verifier_service stops the executor.
         env = _make_env()
         await env._grade_answer_submission(r"\boxed{4}", r"\boxed{4}")
         assert env._verifier_service._executor is not None
@@ -705,18 +884,26 @@ class TestGradeAnswerSubmission:
 
 
 class TestRewardShaping:
+    # [CLASS DOC]
+    # _apply_reward_shaping discount and length penalty.
     def test_no_tokens_no_shaping(self):
+        # [FUNCTION DOC]
+        # Zero tokens leave the reward unchanged.
         env = _make_env()
         env._discount_factor = 0.99
         assert env._apply_reward_shaping(1.0, 0) == pytest.approx(1.0)
 
     def test_discount_factor_applied(self):
+        # [FUNCTION DOC]
+        # Reward is multiplied by discount^tokens.
         env = _make_env()
         env._discount_factor = 0.99
         shaped = env._apply_reward_shaping(1.0, 10)
         assert shaped == pytest.approx(0.99**10)
 
     def test_discount_decreases_reward_with_tokens(self):
+        # [FUNCTION DOC]
+        # More tokens give a lower reward.
         env = _make_env()
         env._discount_factor = 0.999
         r1 = env._apply_reward_shaping(1.0, 100)
@@ -724,6 +911,8 @@ class TestRewardShaping:
         assert r2 < r1
 
     def test_length_penalty_applied_inside_buffer(self):
+        # [FUNCTION DOC]
+        # Tokens inside the buffer zone reduce the reward.
         env = _make_env()
         env._discount_factor = 1.0
         env._max_tokens = 1000
@@ -733,6 +922,8 @@ class TestRewardShaping:
         assert shaped < 1.0
 
     def test_length_penalty_zero_outside_buffer(self):
+        # [FUNCTION DOC]
+        # Tokens below the zone leave the reward unchanged.
         env = _make_env()
         env._discount_factor = 1.0
         env._max_tokens = 1000
@@ -742,6 +933,10 @@ class TestRewardShaping:
         assert shaped == pytest.approx(1.0)
 
     def test_score_thresholding_via_rubric(self):
+        # [FUNCTION DOC]
+        # A custom-threshold rubric maps scores 1..5 to 1/7.
+        # KNOWN ISSUE: it assigns the rubric to the env but only calls rubric.normalize_reward directly, so
+        # the environment's shaping path is not exercised.
         env = _make_env()
         # Mimic custom_threshold=True: scores 1-5 → reward = 1/7
         rubric = MathProofRubric(
@@ -756,19 +951,27 @@ class TestRewardShaping:
 
 
 class TestReasoningStripping:
+    # [CLASS DOC]
+    # _strip_reasoning and grading fallback.
     def test_strip_think_tag(self):
+        # [FUNCTION DOC]
+        # The think block is stripped.
         env = _make_env()
         env._reasoning_delimiters = ["</think>"]
         result = env._strip_reasoning("<think>step by step</think>Final answer.")
         assert result == "Final answer."
 
     def test_no_delimiter_configured_passthrough(self):
+        # [FUNCTION DOC]
+        # With no delimiters the text passes through.
         env = _make_env()
         env._reasoning_delimiters = None
         result = env._strip_reasoning("Some text.")
         assert result == "Some text."
 
     def test_delimiter_absent_returns_empty(self):
+        # [FUNCTION DOC]
+        # Absent delimiter gives empty string.
         env = _make_env()
         env._reasoning_delimiters = ["</think>"]
         result = env._strip_reasoning("No think tag here.")
@@ -776,6 +979,8 @@ class TestReasoningStripping:
 
     @pytest.mark.asyncio
     async def test_grading_falls_back_to_full_text_when_strip_empty(self):
+        # [FUNCTION DOC]
+        # When stripping yields empty, _grade_submission grades the full text.
         """When stripping produces empty output, the full proof text is graded."""
         env = _make_env_with_problem(BOOTSTRAP_PROBLEM)
         env.reset()
@@ -784,6 +989,8 @@ class TestReasoningStripping:
         graded_input: list[str] = []
 
         async def mock_grade(proof, *args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Records the proof and returns a full-score GradingResult.
             graded_input.append(proof)
             return GradingResult(score=7, feedback="ok", reward=1.0)
 
@@ -799,7 +1006,11 @@ class TestReasoningStripping:
 
 class TestSubmitProofPayload:
     @pytest.mark.asyncio
+    # [CLASS DOC]
+    # submit_proof_payload with mocked grader.
     async def test_no_active_problem(self):
+        # [FUNCTION DOC]
+        # Without reset the payload is done with score 0 and an error in metadata.
         env = _make_env()
         payload = await env.submit_proof_payload("Some proof.")
         assert payload["score"] == 0
@@ -808,6 +1019,8 @@ class TestSubmitProofPayload:
 
     @pytest.mark.asyncio
     async def test_successful_submission(self):
+        # [FUNCTION DOC]
+        # A full-score grade gives score 7, reward 1, done and correct.
         env = _make_env_with_problem(BOOTSTRAP_PROBLEM)
         env.reset()
 
@@ -824,6 +1037,8 @@ class TestSubmitProofPayload:
 
     @pytest.mark.asyncio
     async def test_empty_proof_returns_zero(self):
+        # [FUNCTION DOC]
+        # A blank proof scores 0.
         env = _make_env_with_problem(BOOTSTRAP_PROBLEM)
         env.reset()
         payload = await env.submit_proof_payload("   ")
@@ -832,6 +1047,8 @@ class TestSubmitProofPayload:
 
     @pytest.mark.asyncio
     async def test_attempt_number_increments(self):
+        # [FUNCTION DOC]
+        # Attempt numbers go 1, 2 on a multi-step problem.
         env = _make_env_with_problem(MULTI_STEP_PROBLEM)
         env.reset()
 
@@ -847,6 +1064,8 @@ class TestSubmitProofPayload:
 
     @pytest.mark.asyncio
     async def test_verifier_metrics_in_metadata(self):
+        # [FUNCTION DOC]
+        # Grader metrics appear under metadata verifier_metrics.
         env = _make_env_with_problem(BOOTSTRAP_PROBLEM)
         env.reset()
 
@@ -883,7 +1102,11 @@ class TestSubmitProofPayload:
 
 class TestMultiStepProblems:
     @pytest.mark.asyncio
+    # [CLASS DOC]
+    # Multi-attempt episodes.
     async def test_first_attempt_not_done(self):
+        # [FUNCTION DOC]
+        # A partial first attempt leaves the episode open with attempts remaining.
         env = _make_env_with_problem(MULTI_STEP_PROBLEM)
         env.reset()
 
@@ -899,6 +1122,8 @@ class TestMultiStepProblems:
 
     @pytest.mark.asyncio
     async def test_exhausting_attempts_sets_done(self):
+        # [FUNCTION DOC]
+        # The third failing attempt ends the episode with 0 remaining.
         env = _make_env_with_problem(MULTI_STEP_PROBLEM)
         env.reset()
 
@@ -916,6 +1141,8 @@ class TestMultiStepProblems:
 
     @pytest.mark.asyncio
     async def test_correct_submission_ends_episode(self):
+        # [FUNCTION DOC]
+        # A full score ends the episode immediately as correct.
         env = _make_env_with_problem(MULTI_STEP_PROBLEM)
         env.reset()
 
@@ -935,7 +1162,11 @@ class TestMultiStepProblems:
 
 class TestOriginalProblemField:
     @pytest.mark.asyncio
+    # [CLASS DOC]
+    # original_problem handling.
     async def test_original_problem_used_for_grading(self):
+        # [FUNCTION DOC]
+        # original_problem is passed to the rubric instead of the displayed problem.
         """When original_problem is set it should be passed to the rubric."""
         raw = dict(BOOTSTRAP_PROBLEM)
         raw["original_problem"] = "The ORIGINAL phrasing of the problem."
@@ -945,6 +1176,8 @@ class TestOriginalProblemField:
         graded_problems: list[str] = []
 
         async def mock_grade(proof, problem, *args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Records the problem argument and returns a 5/7 result.
             graded_problems.append(problem)
             return GradingResult(score=5, feedback="ok", reward=5 / 7)
 
@@ -954,12 +1187,16 @@ class TestOriginalProblemField:
         assert graded_problems[0] == "The ORIGINAL phrasing of the problem."
 
     def test_normalize_problem_preserves_original_problem(self):
+        # [FUNCTION DOC]
+        # _normalize_problem keeps original_problem.
         raw = dict(BOOTSTRAP_PROBLEM)
         raw["original_problem"] = "Original phrasing."
         normalized = _normalize_problem(raw, 0, "test")
         assert normalized["original_problem"] == "Original phrasing."
 
     def test_normalize_problem_original_problem_none_when_absent(self):
+        # [FUNCTION DOC]
+        # original_problem defaults to None.
         normalized = _normalize_problem(BOOTSTRAP_PROBLEM, 0, "test")
         assert normalized["original_problem"] is None
 
@@ -968,13 +1205,19 @@ class TestOriginalProblemField:
 
 
 class TestModels:
+    # [CLASS DOC]
+    # Observation model defaults and round trips.
     def test_problem_observation_defaults(self):
+        # [FUNCTION DOC]
+        # ProblemObservation defaults: empty problem, proof type, 1 attempt.
         obs = ProblemObservation()
         assert obs.problem == ""
         assert obs.problem_type == "proof"
         assert obs.max_attempts == 1
 
     def test_proof_submission_observation_defaults(self):
+        # [FUNCTION DOC]
+        # ProofSubmissionObservation defaults: score 0, reward 0, done, not correct.
         obs = ProofSubmissionObservation()
         assert obs.score == 0
         assert obs.reward == 0.0
@@ -982,6 +1225,8 @@ class TestModels:
         assert obs.is_correct is False
 
     def test_problem_observation_round_trips(self):
+        # [FUNCTION DOC]
+        # model_dump and reconstruct preserve fields.
         obs = ProblemObservation(
             problem="P",
             reference_solution="R",
@@ -996,6 +1241,8 @@ class TestModels:
         assert restored.max_attempts == 2
 
     def test_proof_submission_observation_round_trips(self):
+        # [FUNCTION DOC]
+        # model_dump and reconstruct preserve fields.
         obs = ProofSubmissionObservation(
             proof="proof text",
             score=5,
@@ -1015,7 +1262,11 @@ class TestModels:
 
 
 class TestMCPToolRegistration:
+    # [CLASS DOC]
+    # MCP tools exposed by the environment.
     def test_tools_registered_on_init(self):
+        # [FUNCTION DOC]
+        # get_problem, submit_proof and get_grading_guidelines are registered.
         env = _make_env()
         tools = get_server_tools(env.mcp_server)
         assert "get_problem" in tools
@@ -1023,12 +1274,18 @@ class TestMCPToolRegistration:
         assert "get_grading_guidelines" in tools
 
     def test_get_problem_tool_callable_after_reset(self):
+        # [FUNCTION DOC]
+        # get_problem is registered after reset.
+        # KNOWN ISSUE: the name says "callable" but the tool is never called.
         env = _make_env()
         env.reset()
         tools = get_server_tools(env.mcp_server)
         assert "get_problem" in tools
 
     def test_get_grading_guidelines_tool_callable_after_reset(self):
+        # [FUNCTION DOC]
+        # After reset the guidelines payload contains grading_guidelines.
+        # KNOWN ISSUE: it calls the payload method directly, not the MCP tool.
         env = _make_env()
         env.reset()
         payload = env.get_grading_guidelines_payload()
@@ -1039,9 +1296,13 @@ class TestMCPToolRegistration:
 
 
 class TestVerifyAnswerWorker:
+    # [CLASS DOC]
+    # _verify_answer_worker statuses (runs in-process).
     """Tests for the _verify_answer_worker function (process worker entry point)."""
 
     def test_correct_answer(self):
+        # [FUNCTION DOC]
+        # Correct prediction returns "correct" with the request id and non-negative elapsed time.
         request = VerifyRequest(
             request_id="req-1",
             prediction=r"\boxed{4}",
@@ -1055,6 +1316,8 @@ class TestVerifyAnswerWorker:
         assert response.elapsed_ms >= 0
 
     def test_wrong_answer(self):
+        # [FUNCTION DOC]
+        # Wrong prediction returns "wrong".
         request = VerifyRequest(
             request_id="req-2",
             prediction=r"\boxed{5}",
@@ -1066,6 +1329,8 @@ class TestVerifyAnswerWorker:
         assert response.status == "wrong"
 
     def test_no_boxed_answer(self):
+        # [FUNCTION DOC]
+        # No boxed answer returns "no_answer".
         request = VerifyRequest(
             request_id="req-3",
             prediction="The answer is 4",
@@ -1077,6 +1342,8 @@ class TestVerifyAnswerWorker:
         assert response.status == "no_answer"
 
     def test_empty_boxed(self):
+        # [FUNCTION DOC]
+        # Empty boxed returns "unparsable".
         request = VerifyRequest(
             request_id="req-4",
             prediction=r"\boxed{}",
@@ -1088,6 +1355,8 @@ class TestVerifyAnswerWorker:
         assert response.status == "unparsable"
 
     def test_unparsable_prediction(self):
+        # [FUNCTION DOC]
+        # Garbage prediction returns "unparsable" or "internal_error".
         request = VerifyRequest(
             request_id="req-5",
             prediction=r"\boxed{@#$%^&*()}",
@@ -1100,6 +1369,8 @@ class TestVerifyAnswerWorker:
         assert response.status in {"unparsable", "internal_error"}
 
     def test_unparsable_gold(self):
+        # [FUNCTION DOC]
+        # Garbage gold returns "unparsable".
         request = VerifyRequest(
             request_id="req-6",
             prediction=r"\boxed{4}",
@@ -1111,6 +1382,8 @@ class TestVerifyAnswerWorker:
         assert response.status == "unparsable"
 
     def test_prediction_too_long(self):
+        # [FUNCTION DOC]
+        # Predictions over max_prediction_length are "unparsable".
         request = VerifyRequest(
             request_id="req-7",
             prediction=r"\boxed{" + "x" * 2000 + "}",
@@ -1123,6 +1396,8 @@ class TestVerifyAnswerWorker:
         assert response.status == "unparsable"
 
     def test_nested_braces(self):
+        # [FUNCTION DOC]
+        # Nested braces in boxed parse to "correct" or "wrong".
         """Test that nested braces in \\boxed{...} are handled correctly."""
         request = VerifyRequest(
             request_id="req-8",
@@ -1137,10 +1412,14 @@ class TestVerifyAnswerWorker:
 
 
 class TestMathVerifierService:
+    # [CLASS DOC]
+    # MathVerifierService process-pool behaviour.
     """Tests for the MathVerifierService async interface."""
 
     @pytest.mark.asyncio
     async def test_service_initialization(self):
+        # [FUNCTION DOC]
+        # Constructor stores workers, queue size and timeout.
         service = MathVerifierService(
             max_workers=2,
             queue_size=50,
@@ -1152,6 +1431,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_start_and_stop(self):
+        # [FUNCTION DOC]
+        # start is idempotent and stop clears the executor.
         service = MathVerifierService(max_workers=1)
         # Start should be idempotent
         await service.start()
@@ -1162,6 +1443,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_verify_answer_without_start(self):
+        # [FUNCTION DOC]
+        # verify_answer auto-starts the pool.
         """verify_answer should auto-start the process pool when needed."""
         service = MathVerifierService(max_workers=1)
         response = await service.verify_answer(
@@ -1175,6 +1458,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_verify_answer_correct(self):
+        # [FUNCTION DOC]
+        # Correct answer with a "req-" prefixed id.
         service = MathVerifierService(max_workers=1)
         await service.start()
         try:
@@ -1191,6 +1476,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_verify_answer_wrong(self):
+        # [FUNCTION DOC]
+        # Wrong answer status.
         service = MathVerifierService(max_workers=1)
         await service.start()
         try:
@@ -1205,6 +1492,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_verify_answer_no_answer(self):
+        # [FUNCTION DOC]
+        # No-answer status.
         service = MathVerifierService(max_workers=1)
         await service.start()
         try:
@@ -1219,6 +1508,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_verify_answer_timeout(self):
+        # [FUNCTION DOC]
+        # Exercises a very short client timeout; only checks the response id prefix.
         """Test that client-side timeout is triggered."""
         service = MathVerifierService(
             max_workers=1,
@@ -1238,6 +1529,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_concurrent_requests(self):
+        # [FUNCTION DOC]
+        # Four concurrent requests all succeed with unique ids.
         """Test multiple concurrent verification requests."""
         import asyncio
 
@@ -1260,6 +1553,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_default_strict_mode(self):
+        # [FUNCTION DOC]
+        # strict=True is stored and a request is handled.
         """Test that default strict mode is applied."""
         service = MathVerifierService(max_workers=1, strict=True)
         assert service.strict is True
@@ -1277,6 +1572,9 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_queue_backpressure_rejects_when_saturated(self):
+        # [FUNCTION DOC]
+        # With queue size 1 and a blocked request in flight, a second request returns internal_error
+        # QueueFull; the first completes after release.
         import asyncio
 
         service = MathVerifierService(max_workers=1, queue_size=1)
@@ -1286,6 +1584,8 @@ class TestMathVerifierService:
         gate_release = asyncio.Event()
 
         async def slow_once(request):
+            # [FUNCTION DOC]
+            # HELPER: Signals start, waits for release, then verifies in-process.
             gate_started.set()
             await gate_release.wait()
             return _verify_answer_worker(request)
@@ -1307,11 +1607,15 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_retry_policy_retries_transient_timeout(self):
+        # [FUNCTION DOC]
+        # A first timeout is retried once and the second attempt succeeds.
         service = MathVerifierService(max_workers=1, max_retries=1)
         await service.start()
         call_count = 0
 
         async def flaky_once(request):
+            # [FUNCTION DOC]
+            # HELPER: Returns a timeout response on the first call, then verifies in-process.
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1338,6 +1642,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_worker_crash_restarts_pool_and_redispatches(self):
+        # [FUNCTION DOC]
+        # A BrokenProcessPool error restarts the pool once and retries; health reports a restart.
         service = MathVerifierService(max_workers=1, max_retries=1)
         await service.start()
         call_count = 0
@@ -1345,6 +1651,8 @@ class TestMathVerifierService:
         original_restart = service._restart_pool
 
         async def crashing_once(request):
+            # [FUNCTION DOC]
+            # HELPER: Returns a BrokenProcessPool error on the first call, then verifies in-process.
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1358,6 +1666,8 @@ class TestMathVerifierService:
             return _verify_answer_worker(request)
 
         async def restart_wrapper():
+            # [FUNCTION DOC]
+            # HELPER: Counts restarts and delegates to the original restart.
             restart_calls["count"] += 1
             await original_restart()
 
@@ -1380,11 +1690,15 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_no_retry_for_unparsable_outputs(self):
+        # [FUNCTION DOC]
+        # Unparsable responses are not retried.
         service = MathVerifierService(max_workers=1, max_retries=3)
         await service.start()
         call_count = 0
 
         async def unparsable_once(request):
+            # [FUNCTION DOC]
+            # HELPER: Counts calls and returns an unparsable response.
             nonlocal call_count
             call_count += 1
             return VerifyResponse(
@@ -1409,6 +1723,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_health_probe_reports_runtime_state(self):
+        # [FUNCTION DOC]
+        # health_probe reports stopped before start and healthy with config after.
         service = MathVerifierService(max_workers=1, queue_size=3)
         before_start = await service.health_probe()
         assert before_start["status"] == "stopped"
@@ -1426,6 +1742,8 @@ class TestMathVerifierService:
 
     @pytest.mark.asyncio
     async def test_metrics_snapshot_tracks_rollout_counters(self):
+        # [FUNCTION DOC]
+        # metrics_snapshot reports request counts and non-negative timing/error metrics.
         service = MathVerifierService(max_workers=1, queue_size=4)
         await service.start()
         try:
@@ -1445,7 +1763,11 @@ class TestMathVerifierService:
 
 class TestGoldCache:
     @pytest.mark.asyncio
+    # [CLASS DOC]
+    # Gold-answer cache.
     async def test_answer_mode_grading_uses_cached_gold(self):
+        # [FUNCTION DOC]
+        # _grade_submission uses the cached gold answer rather than the reference.
         env = _make_env_with_problem(ANSWER_PROBLEM)
         env.reset()
 
@@ -1459,6 +1781,8 @@ class TestGoldCache:
             expected_answer: str,
             problem_id: str = "",
         ):
+            # [FUNCTION DOC]
+            # HELPER: Captures the expected answer and returns a full-score result.
             captured_expected["value"] = expected_answer
             return GradingResult(score=7, feedback="ok", reward=1.0)
 
@@ -1473,6 +1797,8 @@ class TestGoldCache:
         await env._verifier_service.stop()
 
     def test_gold_cache_invalidation_on_config_change(self):
+        # [FUNCTION DOC]
+        # Changing numeric precision changes the cache signature and rebuilds entries.
         env = _make_env_with_problem(ANSWER_PROBLEM)
         old_signature = env._gold_cache_signature
 
@@ -1486,6 +1812,8 @@ class TestGoldCache:
 
     @pytest.mark.asyncio
     async def test_cache_hit_rate_surfaces_in_verifier_metrics(self):
+        # [FUNCTION DOC]
+        # verifier metrics include a cache hit rate in [0, 1].
         env = _make_env_with_problem(ANSWER_PROBLEM)
         env.reset()
 
@@ -1504,26 +1832,40 @@ class TestGoldCache:
 
 
 class TestConfigDefaults:
+    # [CLASS DOC]
+    # QEDMathConfig defaults and prompt files.
     def test_default_prompt_is_v1(self):
+        # [FUNCTION DOC]
+        # Default prompt name is v1.
         assert QEDMathConfig().prompt_name == "v1"
 
     def test_default_reasoning_delimiters(self):
+        # [FUNCTION DOC]
+        # Default delimiters are ["</think>"].
         assert QEDMathConfig().reasoning_delimiters == ["</think>"]
 
     def test_default_answer_reward_preset(self):
+        # [FUNCTION DOC]
+        # Default answer preset is pure_success.
         assert QEDMathConfig().answer_reward_preset == "pure_success"
 
     def test_grader_sampling_defaults(self):
+        # [FUNCTION DOC]
+        # Grader temperature 1.0 and no max output tokens by default.
         cfg = QEDMathConfig()
         assert cfg.grader_temperature == 1.0
         assert cfg.grader_max_output_tokens is None
 
     def test_env_strips_think_by_default(self):
+        # [FUNCTION DOC]
+        # The env strips think blocks by default.
         env = _make_env()
         assert env._reasoning_delimiters == ["</think>"]
         assert env._strip_reasoning("<think>reasoning</think>Answer.") == "Answer."
 
     def test_v1_prompt_loads_from_disk(self):
+        # [FUNCTION DOC]
+        # v1 prompt has problem/solution/marking_scheme placeholders and mentions a grader.
         prompt = load_evaluator_prompt("v1")
         assert "{problem}" in prompt
         assert "{solution}" in prompt
@@ -1531,6 +1873,8 @@ class TestConfigDefaults:
         assert "grader" in prompt.lower()
 
     def test_v0_prompt_loads_from_disk(self):
+        # [FUNCTION DOC]
+        # v0 prompt has a human_solution placeholder.
         prompt = load_evaluator_prompt("v0")
         assert "{human_solution}" in prompt
 
@@ -1539,15 +1883,23 @@ class TestConfigDefaults:
 
 
 class TestProblemTypeDetection:
+    # [CLASS DOC]
+    # _normalize_problem type detection.
     def test_rubric_list_present_is_proof(self):
+        # [FUNCTION DOC]
+        # A rubric list makes the problem a proof.
         row = {"problem": "P", "rubrics": [{"title": "t", "points": 1, "desc": "d"}]}
         assert _normalize_problem(row, 0, "test")["problem_type"] == "proof"
 
     def test_string_guidelines_is_proof(self):
+        # [FUNCTION DOC]
+        # Non-empty guidelines make it a proof.
         row = {"problem": "P", "grading_guidelines": "Award credit for rigor."}
         assert _normalize_problem(row, 0, "test")["problem_type"] == "proof"
 
     def test_no_schema_is_answer(self):
+        # [FUNCTION DOC]
+        # No schema makes it an answer problem with boxed reference.
         row = {"problem": "P", "reference_solution": "4"}
         norm = _normalize_problem(row, 0, "test")
         assert norm["problem_type"] == "answer"
@@ -1556,10 +1908,14 @@ class TestProblemTypeDetection:
         assert norm["reference_solution"] == r"\boxed{4}"
 
     def test_empty_guidelines_is_answer(self):
+        # [FUNCTION DOC]
+        # Empty guidelines make it an answer problem.
         row = {"problem": "P", "grading_guidelines": "", "reference_solution": "4"}
         assert _normalize_problem(row, 0, "test")["problem_type"] == "answer"
 
     def test_explicit_proof_type_overrides_missing_schema(self):
+        # [FUNCTION DOC]
+        # An explicit proof type wins.
         row = {"problem": "P", "problem_type": "proof", "reference_solution": "4"}
         assert _normalize_problem(row, 0, "test")["problem_type"] == "proof"
 
@@ -1568,12 +1924,18 @@ class TestProblemTypeDetection:
 
 
 class TestAnswerRewardPresets:
+    # [CLASS DOC]
+    # answer_reward_for_status presets.
     def test_pure_success_table(self):
+        # [FUNCTION DOC]
+        # pure_success: 1 for correct, 0 otherwise.
         assert answer_reward_for_status("correct", "pure_success") == 1.0
         assert answer_reward_for_status("wrong", "pure_success") == 0.0
         assert answer_reward_for_status("no_answer", "pure_success") == 0.0
 
     def test_base_table_penalties(self):
+        # [FUNCTION DOC]
+        # base: 1 correct, -0.5 wrong, -1 no_answer/unparsable, 0 for infra failures.
         assert answer_reward_for_status("correct", "base") == 1.0
         assert answer_reward_for_status("wrong", "base") == -0.5
         assert answer_reward_for_status("no_answer", "base") == -1.0
@@ -1583,10 +1945,14 @@ class TestAnswerRewardPresets:
         assert answer_reward_for_status("internal_error", "base") == 0.0
 
     def test_unknown_preset_falls_back_to_pure_success(self):
+        # [FUNCTION DOC]
+        # Unknown presets behave as pure_success.
         assert answer_reward_for_status("wrong", "does_not_exist") == 0.0
 
     @pytest.mark.asyncio
     async def test_base_preset_negative_reward_for_wrong(self):
+        # [FUNCTION DOC]
+        # With the base preset, a wrong answer gives reward -0.5.
         env = QEDMathEnvironment(config=QEDMathConfig(answer_reward_preset="base"))
         normalized = _normalize_problem(ANSWER_PROBLEM, 0, "test")
         env._problems = [normalized]
@@ -1603,12 +1969,18 @@ class TestAnswerRewardPresets:
 
 
 class TestSuccessThreshold:
+    # [CLASS DOC]
+    # Success threshold of 7.
     def test_default_threshold_is_seven(self):
+        # [FUNCTION DOC]
+        # Normalised problems default to threshold 7.
         norm = _normalize_problem(BOOTSTRAP_PROBLEM, 0, "test")
         assert norm["success_score_threshold"] == 7
 
     @pytest.mark.asyncio
     async def test_score_six_is_not_correct(self):
+        # [FUNCTION DOC]
+        # Score 6 is not correct.
         env = _make_env_with_problem(BOOTSTRAP_PROBLEM)
         env.reset()
         mock_result = GradingResult(score=6, feedback="Almost.", reward=6 / 7)
@@ -1620,6 +1992,8 @@ class TestSuccessThreshold:
 
     @pytest.mark.asyncio
     async def test_score_seven_is_correct(self):
+        # [FUNCTION DOC]
+        # Score 7 is correct.
         env = _make_env_with_problem(BOOTSTRAP_PROBLEM)
         env.reset()
         mock_result = GradingResult(score=7, feedback="Perfect.", reward=1.0)
@@ -1634,13 +2008,19 @@ class TestSuccessThreshold:
 
 
 class TestGraderSamplingParams:
+    # [CLASS DOC]
+    # Grader call parameters and token usage.
     def test_rubric_defaults(self):
+        # [FUNCTION DOC]
+        # Rubric defaults: temperature 1.0, no max output tokens.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         assert rubric.temperature == 1.0
         assert rubric.max_output_tokens is None
 
     @pytest.mark.asyncio
     async def test_call_llm_forwards_temperature(self):
+        # [FUNCTION DOC]
+        # _call_llm passes temperature and model to responses.create (mocked client).
         rubric = MathProofRubric(grader_model="test", api_key="x", temperature=0.3)
         await rubric._call_llm("prompt text")
         kwargs = rubric._client.responses.create.call_args.kwargs
@@ -1649,6 +2029,8 @@ class TestGraderSamplingParams:
 
     @pytest.mark.asyncio
     async def test_call_llm_forwards_max_output_tokens(self):
+        # [FUNCTION DOC]
+        # max_output_tokens is forwarded when set.
         rubric = MathProofRubric(
             grader_model="test", api_key="x", max_output_tokens=256
         )
@@ -1658,12 +2040,16 @@ class TestGraderSamplingParams:
 
     @pytest.mark.asyncio
     async def test_call_llm_omits_max_output_tokens_when_none(self):
+        # [FUNCTION DOC]
+        # max_output_tokens is omitted when unset.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         await rubric._call_llm("prompt")
         kwargs = rubric._client.responses.create.call_args.kwargs
         assert "max_output_tokens" not in kwargs
 
     def test_capture_usage_responses_api(self):
+        # [FUNCTION DOC]
+        # _capture_usage reads input/output tokens from a Responses API usage.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         usage = MagicMock()
         usage.input_tokens = 11
@@ -1675,6 +2061,8 @@ class TestGraderSamplingParams:
         assert rubric._last_output_tokens == 22
 
     def test_capture_usage_chat_completions(self):
+        # [FUNCTION DOC]
+        # _capture_usage reads prompt/completion tokens from chat usage.
         rubric = MathProofRubric(grader_model="test", api_key="x")
         usage = MagicMock()
         usage.prompt_tokens = 7
@@ -1687,9 +2075,13 @@ class TestGraderSamplingParams:
 
     @pytest.mark.asyncio
     async def test_grade_uses_real_token_usage_when_available(self):
+        # [FUNCTION DOC]
+        # grade reports the captured token counts in metrics.
         rubric = MathProofRubric(grader_model="test", api_key="x")
 
         async def fake_call(prompt):
+            # [FUNCTION DOC]
+            # HELPER: Sets token counts on the rubric and returns a full score tag.
             rubric._last_input_tokens = 111
             rubric._last_output_tokens = 222
             return "<score>7</score>"
@@ -1701,7 +2093,11 @@ class TestGraderSamplingParams:
 
 
 class TestQEDMathEnvClient:
+    # [CLASS DOC]
+    # QEDMathEnv client behaviour (no server).
     def test_default_message_timeout_matches_submit_proof_timeout(self):
+        # [FUNCTION DOC]
+        # Default message timeout is 600 seconds.
         from qed_math_env.client import QEDMathEnv
 
         client = QEDMathEnv(base_url="http://localhost:8000")
@@ -1709,12 +2105,17 @@ class TestQEDMathEnvClient:
         assert client._message_timeout == pytest.approx(600.0)
 
     def test_reset_uses_dispatcher_not_async_only_method(self):
+        # [FUNCTION DOC]
+        # reset is not a coroutine function.
         from qed_math_env.client import QEDMathEnv
 
         assert not inspect.iscoroutinefunction(QEDMathEnv.reset)
 
     @pytest.mark.asyncio
     async def test_reset_normalizes_problem_observation(self):
+        # [FUNCTION DOC]
+        # reset with a mocked transport parses a ProblemObservation, passes metadata and sends the reset
+        # message with problem_id.
         from qed_math_env.client import QEDMathEnv
 
         client = QEDMathEnv(base_url="http://localhost:8000")
@@ -1747,6 +2148,8 @@ class TestQEDMathEnvClient:
         )
 
     def test_get_state_sync_uses_current_session(self, monkeypatch):
+        # [FUNCTION DOC]
+        # get_state_sync calls state on the current client and never opens a new sync session.
         from qed_math_env.client import QEDMathEnv
 
         client = QEDMathEnv(base_url="http://localhost:8000")
@@ -1766,6 +2169,9 @@ class TestQEDMathEnvClient:
 
 @pytest.mark.integration
 class TestQEDMathServerIntegration:
+    # [CLASS DOC]
+    # Integration tests against a server at http://localhost:8000 (marked integration).
+    # KNOWN ISSUE: the docstring says the URL comes from QED_MATH_URL, but BASE_URL is hard-coded.
     """Full HTTP/WebSocket stack smoke test.
 
     Requires a running QED Math server at QED_MATH_URL (default: http://localhost:8000).
@@ -1781,31 +2187,43 @@ class TestQEDMathServerIntegration:
 
     @pytest.fixture
     def env(self):
+        # [FUNCTION DOC]
+        # HELPER: Fixture yielding a connected sync QEDMathEnv client; closes it afterwards. Network I/O.
         from qed_math_env.client import QEDMathEnv
 
         with QEDMathEnv(base_url=self.BASE_URL).sync() as e:
             yield e
 
     def test_reset_returns_problem(self, env):
+        # [FUNCTION DOC]
+        # reset returns something.
         obs = env.reset()
         assert obs is not None
 
     def test_list_tools_returns_three_tools(self, env):
+        # [FUNCTION DOC]
+        # The three tools are listed.
         tools = env.list_tools()
         names = {t.name for t in tools}
         assert {"get_problem", "submit_proof", "get_grading_guidelines"}.issubset(names)
 
     def test_get_problem_tool(self, env):
+        # [FUNCTION DOC]
+        # get_problem returns a result.
         env.reset()
         result = env.call_tool("get_problem")
         assert result is not None
 
     def test_get_grading_guidelines_tool(self, env):
+        # [FUNCTION DOC]
+        # get_grading_guidelines returns a result.
         env.reset()
         result = env.call_tool("get_grading_guidelines")
         assert result is not None
 
     def test_submit_proof_tool_returns_observation(self, env):
+        # [FUNCTION DOC]
+        # submit_proof returns a result. Calls the real grader on the server.
         env.reset()
         result = env.call_tool(
             "submit_proof", proof="Let a=2m and b=2n, so a+b=2(m+n)."

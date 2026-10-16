@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests for MCPClientBase payload building/result parsing and MCPToolClient tool discovery,
+# invocation, caching and lookup helpers. Clients are created without running __init__ (no
+# connection) and step is replaced with an AsyncMock. Also checks EchoEnv inherits MCPToolClient.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -33,6 +38,8 @@ from openenv.core.mcp_client import MCPClientBase, MCPToolClient
 
 @pytest.fixture
 def mock_tools():
+    # [FUNCTION DOC]
+    # Fixture returning two Tool definitions: add (integers a, b) and greet (string name).
     """Create mock tools for testing."""
     return [
         Tool(
@@ -67,9 +74,13 @@ def mock_tools():
 
 
 class TestMCPClientBase:
+    # [CLASS DOC]
+    # Tests MCPClientBase._step_payload and _parse_result.
     """Tests for MCPClientBase class."""
 
     def test_step_payload_list_tools(self):
+        # [FUNCTION DOC]
+        # ListToolsAction serializes to a list_tools payload.
         """Test _step_payload for ListToolsAction."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -81,6 +92,8 @@ class TestMCPClientBase:
         assert payload == {"type": "list_tools"}
 
     def test_step_payload_call_tool(self):
+        # [FUNCTION DOC]
+        # CallToolAction serializes to a call_tool payload with tool name and arguments.
         """Test _step_payload for CallToolAction."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -99,6 +112,8 @@ class TestMCPClientBase:
         }
 
     def test_parse_result_list_tools_observation(self, mock_tools):
+        # [FUNCTION DOC]
+        # A payload with a tools list parses into a StepResult with a ListToolsObservation.
         """Test _parse_result for ListToolsObservation."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -127,6 +142,8 @@ class TestMCPClientBase:
         assert result.done is False
 
     def test_parse_result_list_tools_accepts_input_schema_alias(self):
+        # [FUNCTION DOC]
+        # The MCP-style inputSchema key is accepted for tool schemas.
         """Test _parse_result accepts MCP-style inputSchema tool payloads."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -150,6 +167,8 @@ class TestMCPClientBase:
         assert result.observation.tools[0].input_schema == {"type": "object"}
 
     def test_parse_result_call_tool_observation(self):
+        # [FUNCTION DOC]
+        # A tool_name/result payload parses into a CallToolObservation without error.
         """Test _parse_result for CallToolObservation."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -173,6 +192,8 @@ class TestMCPClientBase:
         assert result.observation.error is None
 
     def test_parse_result_call_tool_with_error(self):
+        # [FUNCTION DOC]
+        # An error payload parses into a ToolError with the right type.
         """Test _parse_result for CallToolObservation with error."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -200,6 +221,8 @@ class TestMCPClientBase:
         assert result.observation.error.error_type == ToolErrorType.TOOL_NOT_FOUND
 
     def test_parse_result_generic_observation_preserves_custom_fields(self):
+        # [FUNCTION DOC]
+        # Other observations keep environment-specific extra fields and metadata.
         """Test _parse_result keeps env-specific observation fields on reset/step."""
         client = MCPClientBase.__new__(MCPClientBase)
         client._ws = None
@@ -230,10 +253,14 @@ class TestMCPClientBase:
 
 
 class TestMCPToolClient:
+    # [CLASS DOC]
+    # Tests MCPToolClient helpers.
     """Tests for MCPToolClient class."""
 
     @pytest.mark.asyncio
     async def test_call_tool_success(self, mock_tools):
+        # [FUNCTION DOC]
+        # call_tool sends a CallToolAction with keyword arguments and returns the result.
         """Test call_tool returns result on success."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -259,6 +286,8 @@ class TestMCPToolClient:
 
     @pytest.mark.asyncio
     async def test_call_tool_raises_on_error(self):
+        # [FUNCTION DOC]
+        # A tool error raises RuntimeError mentioning the tool and message.
         """Test call_tool raises RuntimeError on tool error."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -284,6 +313,8 @@ class TestMCPToolClient:
 
     @pytest.mark.asyncio
     async def test_list_tools_caching(self, mock_tools):
+        # [FUNCTION DOC]
+        # list_tools caches results; use_cache=False forces a refresh.
         """Test list_tools caches results."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -311,6 +342,8 @@ class TestMCPToolClient:
 
     @pytest.mark.asyncio
     async def test_get_tool_found(self, mock_tools):
+        # [FUNCTION DOC]
+        # get_tool returns the cached tool by name.
         """Test get_tool returns tool when found."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -324,6 +357,8 @@ class TestMCPToolClient:
 
     @pytest.mark.asyncio
     async def test_get_tool_not_found(self, mock_tools):
+        # [FUNCTION DOC]
+        # get_tool returns None for unknown names.
         """Test get_tool returns None when not found."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -335,6 +370,8 @@ class TestMCPToolClient:
 
     @pytest.mark.asyncio
     async def test_has_tool_true(self, mock_tools):
+        # [FUNCTION DOC]
+        # has_tool returns True for known tools.
         """Test has_tool returns True when tool exists."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -345,6 +382,8 @@ class TestMCPToolClient:
 
     @pytest.mark.asyncio
     async def test_has_tool_false(self, mock_tools):
+        # [FUNCTION DOC]
+        # has_tool returns False for unknown tools.
         """Test has_tool returns False when tool doesn't exist."""
         client = MCPToolClient.__new__(MCPToolClient)
         client._ws = None
@@ -359,15 +398,21 @@ class TestMCPToolClient:
 
 
 class TestEchoEnvAsMCPToolClient:
+    # [CLASS DOC]
+    # Tests that EchoEnv is an MCPToolClient.
     """Tests verifying EchoEnv works as an MCPToolClient."""
 
     def test_echo_env_is_mcp_tool_client(self):
+        # [FUNCTION DOC]
+        # EchoEnv subclasses MCPToolClient.
         """Test EchoEnv is a subclass of MCPToolClient."""
         from echo_env import EchoEnv
 
         assert issubclass(EchoEnv, MCPToolClient)
 
     def test_echo_env_inherits_mcp_methods(self):
+        # [FUNCTION DOC]
+        # EchoEnv exposes list_tools, call_tool, get_tool, has_tool, reset and step.
         """Test EchoEnv has all MCPToolClient methods."""
         from echo_env import EchoEnv
 

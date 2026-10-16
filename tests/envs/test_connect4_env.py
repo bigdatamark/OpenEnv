@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Legacy unittest-style Connect4 client/server tests that start the server
+# as a subprocess. The whole module is skipped (pytestmark) in favour of
+# test_websockets.py. Prepends repo root to sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Test Connect4 environment client and server integration.
@@ -30,13 +34,22 @@ pytestmark = pytest.mark.skip(
 
 
 class TestConnect4(unittest.TestCase):
+    # [CLASS DOC]
+    # unittest TestCase driving a Connect4 server on 127.0.0.1:8000.
     def __init__(self, methodName="runTest"):
+        # [FUNCTION DOC]
+        # Initializes client None and an empty actions list, then the TestCase.
+        # KNOWN ISSUE: server_process is not initialized, so tearDown raises
+        # AttributeError for tests that never started the server.
         self.client = None
 
         self.actions = []
         super().__init__(methodName)
 
     def test_setup_server(self):
+        # [FUNCTION DOC]
+        # Starts "python -m envs.connect4_env.server.app" as a subprocess and sleeps
+        # 3 s. Side effects: spawns a process stored on self.
         self.server_process = subprocess.Popen(
             ["python", "-m", "envs.connect4_env.server.app"],
             stdin=subprocess.PIPE,
@@ -47,6 +60,8 @@ class TestConnect4(unittest.TestCase):
         time.sleep(3)
 
     def check_server_running(self):
+        # [FUNCTION DOC]
+        # GETs /health and asserts 200; fails the test on connection errors.
         try:
             # Attempt to ping the server
             response = requests.get(
@@ -58,6 +73,8 @@ class TestConnect4(unittest.TestCase):
             self.fail("Server did not start or is unreachable")
 
     def test_connect4_env_client(self):
+        # [FUNCTION DOC]
+        # Starts the server, checks it, and creates a Connect4Env client.
         self.test_setup_server()
         self.check_server_running()
 
@@ -66,6 +83,11 @@ class TestConnect4(unittest.TestCase):
         assert isinstance(self.client, Connect4Env)
 
     def test_connect4_initial_state(self):
+        # [FUNCTION DOC]
+        # Resets via the client and checks a 6x7 board, 7 legal actions, not done,
+        # reward 0.0.
+        # KNOWN ISSUE: it copies legal_actions only if they are a float, which never
+        # happens, so self.actions stays empty.
         self.test_connect4_env_client()
 
         result = self.client.reset()
@@ -91,6 +113,9 @@ class TestConnect4(unittest.TestCase):
             self.actions = observation.legal_actions
 
     def check_valid_action(self, action):
+        # [FUNCTION DOC]
+        # HELPER: asserts the action is in self.actions and returns True/False.
+        # KNOWN ISSUE: assertIn returns None, so this always returns False (or raises).
         legal_actions = self.actions
 
         if self.assertIn(
@@ -101,6 +126,11 @@ class TestConnect4(unittest.TestCase):
         return False
 
     def step_action(self, column):
+        # [FUNCTION DOC]
+        # HELPER: if the column is valid, steps the client and checks observation
+        # types; returns the step result.
+        # KNOWN ISSUE: when the action is invalid, result is unbound and returning it
+        # raises UnboundLocalError.
         valid = self.check_valid_action(column)
 
         assert isinstance(valid, bool)
@@ -122,6 +152,8 @@ class TestConnect4(unittest.TestCase):
         return result
 
     def tearDown(self):
+        # [FUNCTION DOC]
+        # Terminates the server (SIGKILL after a 5 s timeout) and closes its pipes.
         if self.server_process:
             # Try terminating the process gracefully
             self.server_process.terminate()

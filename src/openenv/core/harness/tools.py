@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tool-name conflict resolution for injecting environment MCP tools into a harness that
+# has its own built-in tools.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tool name conflict resolution for harness tool injection (RFC 005)."""
@@ -14,6 +17,12 @@ def resolve_tool_conflicts(
     harness_builtin_tools: Collection[str],
     prefix: str = "env_",
 ) -> list[Tool]:
+    # [FUNCTION DOC]
+    # Returns copies of env_tools with names that collide with harness built-ins renamed to
+    # "<prefix><name>" (default prefix "env_"); input is not mutated; order preserved.
+    # Raises: ValueError if any env tool uses a reserved orchestration name, env tool names
+    # are duplicated, a prefixed name is itself a built-in or an existing env tool name, or
+    # the final names collide.
     """
     Detect and resolve name conflicts between environment and harness tools.
 

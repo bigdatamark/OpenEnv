@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the REPL environment: the code action (with optional explicit final answer),
+# the per-execution result, the observation and the extended state.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -26,6 +29,8 @@ except ImportError:
 
 
 class REPLAction(Action):
+    # [CLASS DOC]
+    # Action: code to execute (default empty), is_final flag and optional final_answer.
     """Action containing Python code to execute in the REPL.
 
     Supports multiple finalization patterns:
@@ -45,6 +50,9 @@ class REPLAction(Action):
 
 
 class CodeBlockResult(BaseModel):
+    # [CLASS DOC]
+    # Result of executing one code block: stdout, stderr, string snapshot of new/changed variables,
+    # non-negative execution time, success flag and exception message.
     """Result of executing a single code block."""
 
     stdout: str = Field(default="", description="Standard output from execution")
@@ -63,6 +71,9 @@ class CodeBlockResult(BaseModel):
 
 
 class REPLObservation(Observation):
+    # [CLASS DOC]
+    # Observation: CodeBlockResult, context preview and length, available variable names, iteration and
+    # max_iterations (default 30). Inherits done/reward/metadata.
     """Observation returned after code execution in the REPL."""
 
     result: CodeBlockResult = Field(
@@ -86,6 +97,9 @@ class REPLObservation(Observation):
 
 
 class REPLState(State):
+    # [CLASS DOC]
+    # State: context, task prompt, iteration, max_iterations, namespace keys, final answer and total
+    # execution time, plus episode_id/step_count.
     """Extended state for REPL environment."""
 
     context: Optional[str] = Field(

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Scripted, slowed-down OpenApp demo for screen recording: drives the server-side OpenAppEnvironment (visible browser)
+# against an OpenApps server at OPENAPPS_URL through fixed scenarios (calendar, todo, messenger, maps, code editor, or
+# a full app tour), printing a description per action and pausing between actions.
+# Side effects: sys.path change, browser automation, sleeps, stdout.
+# KNOWN ISSUE: the module docstring lists a "shopping" scenario that does not exist; the CLI offers maps and codeeditor instead.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -38,9 +44,14 @@ from openapp_env.server.openapp_environment import OpenAppEnvironment
 
 
 class RecordingDemo:
+    # [CLASS DOC]
+    # Holds the OpenApps URL, inter-action delay, verbosity and the environment instance; provides setup, per-action stepping,
+    # scenario scripts and cleanup.
     """Demo scenarios optimized for video recording."""
 
     def __init__(self, openapps_url: str, delay: float = 2.0, verbose: bool = False):
+        # [FUNCTION DOC]
+        # Stores URL, delay and verbosity; no environment yet.
         """
         Initialize recording demo.
 
@@ -55,6 +66,8 @@ class RecordingDemo:
         self.env = None
 
     def setup(self):
+        # [FUNCTION DOC]
+        # Prints a banner and a 3-second countdown, then creates a non-headless OpenAppEnvironment with max 100 steps.
         """Set up the environment."""
         print("=" * 70)
         print("OpenApp Recording Demo")
@@ -82,12 +95,17 @@ class RecordingDemo:
         )
 
     def wait(self, message: str = None):
+        # [FUNCTION DOC]
+        # Prints the message when verbose and a message is given, then sleeps for the configured delay.
         """Wait between actions with optional message."""
         if message and self.verbose:
             print(f"   {message}")
         time.sleep(self.delay)
 
     def step(self, action: OpenAppAction, description: str):
+        # [FUNCTION DOC]
+        # Prints the description (and action details when verbose), executes the action on the environment, prints the URL and
+        # any action error when verbose, waits the delay, and returns the step observation. Raises AttributeError if setup was not called.
         """Execute action with description."""
         print(f"🎬 {description}")
         if self.verbose:
@@ -110,6 +128,9 @@ class RecordingDemo:
         return result
 
     def calendar_scenario(self):
+        # [FUNCTION DOC]
+        # Resets and runs a 10-step calendar script: home, calendar, scroll, agenda view, scroll, calendar view, two month pages,
+        # an event page, back to calendar.
         """Demonstrate calendar interactions with meaningful actions."""
         print("\n" + "=" * 70)
         print("SCENARIO: Calendar Management")
@@ -178,6 +199,8 @@ class RecordingDemo:
         print("✓ Calendar scenario complete!\n")
 
     def todo_scenario(self):
+        # [FUNCTION DOC]
+        # Resets and runs an 11-step todo script: home, todo list, scrolling, two edit pages and returns, ending at home.
         """Demonstrate todo list interactions with meaningful actions."""
         print("\n" + "=" * 70)
         print("SCENARIO: Todo List Management")
@@ -251,6 +274,9 @@ class RecordingDemo:
         print("✓ Todo scenario complete!\n")
 
     def messages_scenario(self):
+        # [FUNCTION DOC]
+        # Resets and runs a 14-step messenger script: open conversations and Alice's thread, scroll, click and fill the message
+        # input, send with Enter, view the response, return to the list and home; prints any action errors for the input steps.
         """Demonstrate messenger with actual message sending."""
         print("\n" + "=" * 70)
         print("SCENARIO: Messenger - Send Message")
@@ -363,6 +389,10 @@ class RecordingDemo:
         print("✓ Messenger scenario complete!\n")
 
     def codeeditor_scenario(self):
+        # [FUNCTION DOC]
+        # Resets, opens the code editor and a new train.py, fills the editor with a PyTorch training script in five growing
+        # chunks, pauses, clicks Save, and returns to the editor index and home.
+        # KNOWN ISSUE: the step labels jump from 10/15 to 13/15 (no steps 11 and 12).
         """Demonstrate code editor by typing a PyTorch training loop."""
         print("\n" + "=" * 70)
         print("SCENARIO: Code Editor - PyTorch Training Loop")
@@ -522,6 +552,8 @@ for epoch in range(10):
         print("✓ Code Editor scenario complete!\n")
 
     def maps_scenario(self):
+        # [FUNCTION DOC]
+        # Resets and runs a 12-step maps script: open maps, scroll, a location search, return to map, pan and return home.
         """Demonstrate maps with search and landmark exploration."""
         print("\n" + "=" * 70)
         print("SCENARIO: Maps Exploration with Search")
@@ -603,6 +635,9 @@ for epoch in range(10):
         print("✓ Maps scenario complete!\n")
 
     def app_tour_scenario(self):
+        # [FUNCTION DOC]
+        # Resets and runs a tour across calendar, todo, messenger (including sending a message) and maps, ending at home.
+        # KNOWN ISSUE: step labels switch from an x/21 to an x/26 total partway through and the last step is 24.
         """Tour through all applications with meaningful interactions."""
         print("\n" + "=" * 70)
         print("SCENARIO: Complete App Tour")
@@ -732,6 +767,8 @@ for epoch in range(10):
         print("✓ App tour complete!\n")
 
     def cleanup(self):
+        # [FUNCTION DOC]
+        # Prints completion banner, waits 1 second and closes the environment if it was created.
         """Clean up and close environment."""
         print("\n" + "=" * 70)
         print("🎬 Recording Demo Complete!")
@@ -749,6 +786,10 @@ for epoch in range(10):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses scenario (default all, which runs the app tour), delay and verbosity; returns 1 with instructions if
+    # OPENAPPS_URL is unset; otherwise sets up the demo and runs the scenario. Returns 0 on success, 1 on interrupt or error
+    # (traceback printed). Always runs cleanup.
     parser = argparse.ArgumentParser(
         description="OpenApp Recording Demo - Optimized for video recording",
         formatter_class=argparse.RawDescriptionHelpFormatter,

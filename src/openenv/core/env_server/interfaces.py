@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Core server-side interfaces: the chat Message typed dict, the ModelTokenizer
+# and TaskProvider structural protocols, the abstract observation Transform,
+# and the abstract Environment base class (Gym-style reset/step/state with async
+# variants, metadata, optional transform and rubric hooks, optional web UI
+# hooks, and cleanup). Type variables bind actions, observations and state to
+# the pydantic base types.
 # SPDX-License-Identifier: BSD-3-Clause
 
 import inspect
@@ -27,6 +34,9 @@ StateT = TypeVar("StateT", bound=State)
 
 
 class Message(TypedDict):
+    # [CLASS DOC]
+    # Typed dict for a chat message with string role and content (HF chat template
+    # format).
     """A message in a conversation.
 
     Compatible with Huggingface chat template format.
@@ -37,6 +47,8 @@ class Message(TypedDict):
 
 
 class ModelTokenizer(Protocol):
+    # [CLASS DOC]
+    # Structural protocol for HF-style tokenizers used by chat environments.
     """Protocol for tokenizers that support chat templates.
 
     This protocol defines the interface that tokenizers must implement
@@ -51,6 +63,8 @@ class ModelTokenizer(Protocol):
         return_tensors: str | None = None,
         **kwargs: Any,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Protocol method: format (and optionally tokenize) a conversation.
         """Apply a chat template to format and optionally tokenize a conversation.
 
         Args:
@@ -71,6 +85,8 @@ class ModelTokenizer(Protocol):
     def decode(
         self, token_ids: Any, skip_special_tokens: bool = False, **kwargs: Any
     ) -> str:
+        # [FUNCTION DOC]
+        # Protocol method: decode token ids to text.
         """Decode token IDs back to text.
 
         Args:
@@ -88,6 +104,11 @@ class ModelTokenizer(Protocol):
 
 
 class TaskProvider(Protocol):
+    # [CLASS DOC]
+    # Structural protocol for optional task discovery methods an Environment may
+    # define (sync or async); exposed by the HTTP server under /{env_name}/ and
+    # answered with 501 when absent. Must work on a freshly constructed instance and
+    # be side-effect-free.
     """
     Optional task discovery API for dataset-backed environments.
 
@@ -118,6 +139,8 @@ class TaskProvider(Protocol):
     """
 
     def list_splits(self) -> list[Any]:
+        # [FUNCTION DOC]
+        # Protocol method: return split descriptors (strings, dicts or models).
         """
         Return task split descriptors supported by this environment.
 
@@ -129,6 +152,8 @@ class TaskProvider(Protocol):
         ...
 
     def list_tasks(self, split: str) -> list[Any]:
+        # [FUNCTION DOC]
+        # Protocol method: return task specs for a split (may be a bounded preview).
         """
         Return all task specs for a split.
 
@@ -144,6 +169,8 @@ class TaskProvider(Protocol):
         ...
 
     def num_tasks(self, split: str) -> int:
+        # [FUNCTION DOC]
+        # Protocol method: return the number of tasks in a split.
         """
         Return the number of task specs in a split.
 
@@ -157,6 +184,8 @@ class TaskProvider(Protocol):
         ...
 
     def get_task(self, split: str, index: int) -> Any:
+        # [FUNCTION DOC]
+        # Protocol method: return one task spec; IndexError when out of range.
         """
         Return one task spec by split and index.
 
@@ -181,6 +210,8 @@ class TaskProvider(Protocol):
         start: Optional[int] = None,
         stop: Optional[int] = None,
     ) -> list[Any]:
+        # [FUNCTION DOC]
+        # Protocol method: return task specs in the slice [start, stop).
         """
         Return task specs for Python slice-style range bounds.
 
@@ -199,6 +230,9 @@ class TaskProvider(Protocol):
 
 
 class Transform(ABC, Generic[ObsT]):
+    # [CLASS DOC]
+    # Abstract callable that maps an observation to a (possibly modified)
+    # observation, e.g. to add rewards.
     """Transform observations to add rewards, metrics, or other modifications.
 
     Transforms follow the TorchRL pattern where they take an observation
@@ -208,6 +242,8 @@ class Transform(ABC, Generic[ObsT]):
 
     @abstractmethod
     def __call__(self, observation: ObsT) -> ObsT:
+        # [FUNCTION DOC]
+        # Abstract: return the transformed observation.
         """Transform an observation.
 
         Args:
@@ -221,6 +257,13 @@ class Transform(ABC, Generic[ObsT]):
 
 
 class Environment(ABC, Generic[ActT, ObsT, StateT]):
+    # [CLASS DOC]
+    # Abstract base for environment servers. Class flags:
+    # SUPPORTS_CONCURRENT_SESSIONS (default False; required for more than one
+    # server session) and REQUIRES_SINGLE_THREAD_EXECUTOR (default False; the
+    # server then runs all sessions on one shared thread). Instances hold an
+    # optional transform and rubric. Subclasses implement reset, step and the
+    # state property.
     """Base class for all environment servers following Gym/Gymnasium API.
 
     See [rfcs/004-rubrics.md](https://github.com/huggingface/OpenEnv/blob/main/rfcs/004-rubrics.md) for rubric design details.
@@ -266,6 +309,8 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         transform: Optional[Transform[ObsT]] = None,
         rubric: Optional["Rubric"] = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the optional transform and rubric.
         self.transform = transform
         self.rubric = rubric
 
@@ -276,6 +321,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> ObsT:
+        # [FUNCTION DOC]
+        # Abstract: start a new episode (optional seed, episode id, extra kwargs) and
+        # return the initial observation.
         """Reset the environment and return initial observation."""
         pass
 
@@ -285,6 +333,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> ObsT:
+        # [FUNCTION DOC]
+        # Default async reset: calls the synchronous reset with the same arguments (on
+        # the calling thread).
         """Async version of reset. Default implementation calls sync reset.
 
         Override to provide true async implementation.
@@ -298,6 +349,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> ObsT:
+        # [FUNCTION DOC]
+        # Abstract: apply an action (optional timeout and kwargs) and return the
+        # observation.
         """Take a step in the environment."""
         pass
 
@@ -307,6 +361,8 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> ObsT:
+        # [FUNCTION DOC]
+        # Default async step: calls the synchronous step with the same arguments.
         """Async version of step. Default implementation calls sync step.
 
         Override to provide true async implementation.
@@ -316,10 +372,15 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
     @property
     @abstractmethod
     def state(self) -> StateT:
+        # [FUNCTION DOC]
+        # Abstract property returning the current State.
         """Get the current environment state."""
         pass
 
     def get_metadata(self) -> EnvironmentMetadata:
+        # [FUNCTION DOC]
+        # Returns default EnvironmentMetadata: name = class name, description
+        # "<class name> environment", version "1.0.0".
         """
         Get metadata about this environment.
 
@@ -336,12 +397,19 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         )
 
     def _apply_transform(self, observation: ObsT) -> ObsT:
+        # [FUNCTION DOC]
+        # HELPER: Returns the transform applied to observation, or observation
+        # unchanged if no transform is set.
         """Apply transform if one is provided."""
         if self.transform is not None:
             return self.transform(observation)
         return observation
 
     def _apply_rubric(self, action: ActT, observation: ObsT) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns rubric(action, observation) if a rubric is set, else 0.0.
+        # KNOWN ISSUE: if the rubric is async, the coroutine is returned instead of a
+        # float (use _apply_rubric_async).
         """Apply rubric if one is provided.
 
         Args:
@@ -367,6 +435,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         return 0.0
 
     async def _apply_rubric_async(self, action: ActT, observation: ObsT) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Calls the rubric if set, awaiting the result when it is a coroutine;
+        # returns 0.0 without a rubric.
         """Apply rubric asynchronously if one is provided.
 
         Args:
@@ -396,6 +467,8 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         return 0.0
 
     def _reset_rubric(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Calls rubric.reset() if a rubric is set.
         """Reset the rubric state if one is provided.
 
         Call this in `reset()` to clear any trajectory state in the rubric:
@@ -411,6 +484,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
             self.rubric.reset()
 
     async def _reset_rubric_async(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: If a rubric is set, calls its reset_async (awaiting a coroutine
+        # result) when available, else its reset.
         """Reset the rubric state asynchronously if one is provided.
 
         Call this in `reset_async()` to clear any trajectory state in the rubric:
@@ -432,6 +508,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
                 self.rubric.reset()
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Web UI hook: returns HTML drawing for a serialized observation (plus reward
+        # and done). Default returns None (no drawing).
         """
         HTML that draws an observation in the web interface at `/web`.
 
@@ -448,6 +527,9 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Web UI hook: returns a list of (label, action dict) one-click actions for the
+        # observation. Default returns an empty list.
         """
         One-click actions for the web interface at `/web`, as `(label, action)` pairs.
 
@@ -463,6 +545,8 @@ class Environment(ABC, Generic[ActT, ObsT, StateT]):
         return []
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Cleanup hook; default does nothing.
         """Clean up resources used by the environment.
 
         Override this method to implement custom cleanup logic.

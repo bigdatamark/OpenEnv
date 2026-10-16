@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Client for the WebSearch environment server: serialises the search query and parses results.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +33,10 @@ except ImportError:
 
 
 class WebSearchEnv(EnvClient[WebSearchAction, WebSearchObservation, State]):
+    # [CLASS DOC]
+    # EnvClient for WebSearch with generic State.
+    # KNOWN ISSUE: the class docstring examples refer to a "message" action field and "echoed_message"
+    # observation field that do not exist (the action has "query", the observation "content"/"web_contents").
     """
     HTTP client for the WebSearch Env Environment.
 
@@ -56,6 +62,9 @@ class WebSearchEnv(EnvClient[WebSearchAction, WebSearchObservation, State]):
     """
 
     def _step_payload(self, action: WebSearchAction) -> Dict:
+        # [FUNCTION DOC]
+        # Returns a mapping with only the action's "query".
+        # KNOWN ISSUE: temp_api_key is never sent, so per-request API keys cannot be used through this client.
         """
         Convert WebSearchAction to JSON payload for step request.
 
@@ -70,6 +79,10 @@ class WebSearchEnv(EnvClient[WebSearchAction, WebSearchObservation, State]):
         }
 
     def _parse_result(self, payload: Dict) -> StepResult[WebSearchObservation]:
+        # [FUNCTION DOC]
+        # Builds a WebSearchObservation from the observation's content (default "") and web_contents (default []),
+        # metadata from envelope or observation. Returns a StepResult with envelope reward and done.
+        # KNOWN ISSUE: reward and done are not copied onto the observation itself.
         """
         Parse server response into StepResult[WebSearchObservation].
 
@@ -94,6 +107,8 @@ class WebSearchEnv(EnvClient[WebSearchAction, WebSearchObservation, State]):
         )
 
     def _parse_state(self, payload: Dict) -> State:
+        # [FUNCTION DOC]
+        # Returns a generic State from episode_id and step_count.
         """
         Parse server response into State object.
 

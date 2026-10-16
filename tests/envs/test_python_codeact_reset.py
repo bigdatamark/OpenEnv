@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Tests that coding_env's PythonCodeActEnv.reset clears executor state (functions, variables,
+# imports), resets step count and episode id, and that json is importable. Skipped without
+# smolagents. Side effect at import: prepends the repo root and src to sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Test that PythonCodeActEnv.reset() properly resets executor state."""
@@ -21,6 +25,8 @@ from envs.coding_env.server.python_codeact_env import PythonCodeActEnv
 
 
 def test_reset_clears_executor_state():
+    # [FUNCTION DOC]
+    # A function defined before reset is undefined afterwards (exit code 1 with NameError-like stderr).
     """Test that reset() clears functions and variables defined in
     previous execution."""
     env = PythonCodeActEnv()
@@ -56,6 +62,8 @@ def test_reset_clears_executor_state():
 
 
 def test_reset_clears_variables():
+    # [FUNCTION DOC]
+    # A variable defined before reset is undefined afterwards.
     """Test that reset() clears variables defined in previous execution."""
     env = PythonCodeActEnv()
 
@@ -86,6 +94,8 @@ def test_reset_clears_variables():
 
 
 def test_reset_clears_imports():
+    # [FUNCTION DOC]
+    # An import alias defined before reset is undefined afterwards.
     """Test that reset() clears imported modules from previous execution."""
     env = PythonCodeActEnv()
 
@@ -120,6 +130,8 @@ def test_reset_clears_imports():
 
 
 def test_json_import_is_available_by_default():
+    # [FUNCTION DOC]
+    # Importing json and dumping a dict works and prints sorted JSON.
     """Test that the coding env permits common JSON serialization code."""
     env = PythonCodeActEnv()
     env.reset()
@@ -134,6 +146,8 @@ def test_json_import_is_available_by_default():
 
 
 def test_reset_preserves_step_count_reset():
+    # [FUNCTION DOC]
+    # step_count goes to 5 after five steps, back to 0 on reset, then 1 after one step.
     """Test that reset() properly resets step count."""
     env = PythonCodeActEnv()
 
@@ -159,6 +173,8 @@ def test_reset_preserves_step_count_reset():
 
 
 def test_reset_changes_episode_id():
+    # [FUNCTION DOC]
+    # Each reset assigns a new episode id.
     """Test that reset() generates a new episode ID."""
     env = PythonCodeActEnv()
 

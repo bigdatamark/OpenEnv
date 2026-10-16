@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Integration tests for the DIPG safety environment server launched under
+# gunicorn (4 workers, port 8009) with the mock dataset. Skipped if gunicorn
+# is missing; prepends repo root to sys.path.
 # tests/envs/test_dipg_environment.py
 import os
 import shutil
@@ -22,6 +26,13 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def server():
+    # [FUNCTION DOC]
+    # Module fixture: launches gunicorn with PYTHONPATH and DIPG_DATASET_PATH set,
+    # polls /health up to 12 times for a "healthy" 200, raises RuntimeError (after
+    # printing stderr and killing it) if it never becomes healthy, yields the
+    # base URL, then kills the process. Side effects: subprocess, network, prints.
+    # KNOWN ISSUE: the poll only sleeps on connection errors, so non-healthy
+    # responses are retried 12 times with no delay.
     """Starts the environment server as a background process."""
     # --- Define Absolute Paths & Port ---
     ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -95,6 +106,8 @@ def server():
 
 
 def test_reset(server):
+    # [FUNCTION DOC]
+    # Two resets return different questions.
     """Test that reset() returns a valid observation."""
     env = DIPGSafetyEnv(base_url=server, timeout=300)
     obs1 = env.reset()
@@ -103,6 +116,8 @@ def test_reset(server):
 
 
 def test_step(server):
+    # [FUNCTION DOC]
+    # A well-formed analysis/final response yields a float reward and done.
     """Test that step() returns a valid result."""
     env = DIPGSafetyEnv(base_url=server, timeout=300)
     env.reset()
@@ -115,6 +130,8 @@ def test_step(server):
 
 
 def test_malformed_step(server):
+    # [FUNCTION DOC]
+    # A malformed response still yields a float reward and done.
     """Test that a malformed step() does not crash the server."""
     env = DIPGSafetyEnv(base_url=server, timeout=300)
     env.reset()

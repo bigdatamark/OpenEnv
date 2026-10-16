@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Defines per-token roles (context, action, env_output, warning), the Segment and Trajectory data types, and conversion
+# of a trajectory into token ids plus aligned boolean role masks for the ECHO loss. torch is imported lazily.
 """Rollout trajectory with **per-token role masks** — the schema piece OpenEnv is missing.
 
 OpenEnv's `EpisodeRecord` is message-level (`messages` + `tool_trace`). To switch
@@ -29,12 +32,16 @@ WARNING = "warning"  # harness boilerplate — excluded from env loss by default
 
 @dataclass
 class Segment:
+    # [CLASS DOC]
+    # Dataclass: a contiguous piece of text with a single role string.
     role: str
     text: str
 
 
 @dataclass
 class Trajectory:
+    # [CLASS DOC]
+    # Dataclass: ordered role segments, terminal reward and optional task prompt text.
     """One rollout, segmented by role, plus its terminal reward."""
 
     segments: list[Segment]
@@ -48,6 +55,10 @@ def tokenize_trajectory(
     *,
     world_loss_target: str = "env_only",
 ) -> dict[str, torch.Tensor]:
+    # [FUNCTION DOC]
+    # Tokenises each segment separately (no special tokens), concatenates, and returns 1-D tensors input_ids (long) and
+    # boolean action_mask, warning_mask and obs_mask. obs_mask covers env_output tokens, or env_output plus warning tokens
+    # when world_loss_target is "all" (other values behave as env_only).
     """Render a trajectory to token ids + aligned per-token role masks.
 
     Tokenizes each segment independently (``add_special_tokens=False``) and

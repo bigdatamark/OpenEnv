@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Integration tests for MCP: EchoEnvironment tool listing/calling via step, MCPEnvironment wrapping
+# a FastMCP server (including reserved-name rejection), and JSON-RPC tools/list and tools/call
+# over the /ws WebSocket of a FastAPI app.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -30,6 +35,9 @@ from openenv.core.env_server.types import Action, Observation, State
 
 
 class MinimalMCPEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # HELPER: Minimal MCPEnvironment over a given FastMCP server with a simple State; non-MCP actions
+    # increment step_count and return an observation with the action string in metadata.
     """
     Minimal MCPEnvironment subclass for testing.
 
@@ -38,6 +46,8 @@ class MinimalMCPEnvironment(MCPEnvironment):
     """
 
     def __init__(self, mcp_server: Any) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Passes the server to MCPEnvironment and initializes state.
         super().__init__(mcp_server)
         self._state = State(episode_id="test-episode", step_count=0)
 
@@ -47,6 +57,8 @@ class MinimalMCPEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ):
+        # [FUNCTION DOC]
+        # HELPER: Resets state (episode id defaults to "test-episode") and returns an empty observation with reward 0.
         self._state = State(
             episode_id=episode_id or "test-episode",
             step_count=0,
@@ -59,6 +71,8 @@ class MinimalMCPEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Increments step_count and returns an observation describing the action.
         """Handle non-MCP actions."""
         self._state.step_count += 1
         return Observation(
@@ -69,21 +83,29 @@ class MinimalMCPEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # HELPER: Returns the current State.
         return self._state
 
 
 @pytest.fixture
 def simple_mcp_server():
+    # [FUNCTION DOC]
+    # Fixture building a FastMCP server with add and greet tools.
     """Create a simple FastMCP server for testing."""
     mcp = FastMCP("test-server")
 
     @mcp.tool
     def add(a: int, b: int) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns a+b.
         """Add two numbers."""
         return a + b
 
     @mcp.tool
     def greet(name: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "Hello, <name>!".
         """Greet a person by name."""
         return f"Hello, {name}!"
 
@@ -92,6 +114,8 @@ def simple_mcp_server():
 
 @pytest.fixture
 def minimal_mcp_env(simple_mcp_server):
+    # [FUNCTION DOC]
+    # Fixture wrapping simple_mcp_server in MinimalMCPEnvironment.
     """Create a MinimalMCPEnvironment with the simple MCP server."""
     return MinimalMCPEnvironment(simple_mcp_server)
 
@@ -102,9 +126,13 @@ def minimal_mcp_env(simple_mcp_server):
 
 
 class TestEchoEnvironmentMCP:
+    # [CLASS DOC]
+    # Tests EchoEnvironment's MCP features.
     """Tests for EchoEnvironment's MCP functionality."""
 
     def test_echo_environment_list_tools(self):
+        # [FUNCTION DOC]
+        # ListToolsAction returns echo_message and echo_with_length.
         """Test EchoEnvironment.step(ListToolsAction()) returns available tools."""
         from echo_env.server.echo_environment import EchoEnvironment
 
@@ -126,6 +154,8 @@ class TestEchoEnvironmentMCP:
         assert "echo_with_length" in tool_names
 
     def test_echo_environment_call_tool_echo_message(self):
+        # [FUNCTION DOC]
+        # Calling echo_message echoes the message (checked across possible result shapes).
         """Test EchoEnvironment.step(CallToolAction()) for echo_message tool."""
         from echo_env.server.echo_environment import EchoEnvironment
 
@@ -156,6 +186,9 @@ class TestEchoEnvironmentMCP:
             assert obs.result == "Hello, MCP!"
 
     def test_echo_environment_call_tool_echo_with_length(self):
+        # [FUNCTION DOC]
+        # Calling echo_with_length succeeds without error.
+        # KNOWN ISSUE: the result assertion is an "or" with "result is not None", so it barely checks content.
         """Test EchoEnvironment.step(CallToolAction()) for echo_with_length tool."""
         from echo_env.server.echo_environment import EchoEnvironment
 
@@ -180,6 +213,8 @@ class TestEchoEnvironmentMCP:
         assert "test" in str(obs.result) or obs.result is not None
 
     def test_echo_environment_call_nonexistent_tool(self):
+        # [FUNCTION DOC]
+        # Calling an unknown tool yields an observation with an error.
         """Test EchoEnvironment handles calling a nonexistent tool gracefully."""
         from echo_env.server.echo_environment import EchoEnvironment
 
@@ -200,6 +235,8 @@ class TestEchoEnvironmentMCP:
         assert obs.error is not None
 
     def test_echo_environment_reset_returns_observation(self):
+        # [FUNCTION DOC]
+        # reset returns a not-done Observation with status "ready" in metadata.
         """Test EchoEnvironment.reset() returns an Observation."""
         from echo_env.server.echo_environment import EchoEnvironment
 
@@ -218,9 +255,13 @@ class TestEchoEnvironmentMCP:
 
 
 class TestMCPEnvironmentWithFastMCP:
+    # [CLASS DOC]
+    # Tests MCPEnvironment with a FastMCP server.
     """Tests for MCPEnvironment base class with FastMCP servers."""
 
     def test_fastmcp_in_mcp_environment_list_tools(self, minimal_mcp_env):
+        # [FUNCTION DOC]
+        # Both FastMCP tools are listed.
         """Test that MCPEnvironment correctly lists tools from a FastMCP server."""
         obs = minimal_mcp_env.step(ListToolsAction())
 
@@ -234,6 +275,8 @@ class TestMCPEnvironmentWithFastMCP:
         assert "greet" in tool_names
 
     def test_fastmcp_in_mcp_environment_call_add(self, minimal_mcp_env):
+        # [FUNCTION DOC]
+        # Calling add returns 8 for 5+3 (checked across result shapes).
         """Test MCPEnvironment can call an 'add' tool from FastMCP server."""
         obs = minimal_mcp_env.step(
             CallToolAction(
@@ -255,6 +298,8 @@ class TestMCPEnvironmentWithFastMCP:
             assert "8" in str(obs.result)
 
     def test_fastmcp_in_mcp_environment_call_greet(self, minimal_mcp_env):
+        # [FUNCTION DOC]
+        # Calling greet returns a greeting containing the name.
         """Test MCPEnvironment can call a 'greet' tool from FastMCP server."""
         obs = minimal_mcp_env.step(
             CallToolAction(
@@ -269,11 +314,15 @@ class TestMCPEnvironmentWithFastMCP:
         assert "Claude" in str(obs.result)
 
     def test_fastmcp_reserved_name_validation(self):
+        # [FUNCTION DOC]
+        # A FastMCP tool named reset makes the environment constructor raise ValueError mentioning reserved.
         """Test that MCPEnvironment rejects FastMCP tools with reserved names."""
         mcp = FastMCP("test-server")
 
         @mcp.tool
         def reset() -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool deliberately using the reserved name.
             """This uses a reserved name."""
             return "should not work"
 
@@ -290,10 +339,14 @@ class TestMCPEnvironmentWithFastMCP:
 
 
 class TestWebSocketMCP:
+    # [CLASS DOC]
+    # Tests JSON-RPC MCP messages over the /ws WebSocket.
     """Tests for WebSocket MCP tools/list and tools/call endpoints."""
 
     @pytest.fixture
     def app(self):
+        # [FUNCTION DOC]
+        # Fixture creating a FastAPI app for EchoEnvironment with MCP action/observation classes.
         """Create a FastAPI app with EchoEnvironment for WebSocket testing."""
         from echo_env.server.echo_environment import EchoEnvironment
         from openenv.core.env_server.http_server import create_fastapi_app
@@ -309,6 +362,8 @@ class TestWebSocketMCP:
         )
 
     def test_websocket_tools_list(self, app):
+        # [FUNCTION DOC]
+        # tools/list returns a JSON-RPC result listing the echo tools inside an "mcp" envelope.
         """Test WebSocket tools/list via JSON-RPC."""
         from starlette.testclient import TestClient
 
@@ -345,6 +400,8 @@ class TestWebSocketMCP:
             assert "echo_with_length" in tool_names
 
     def test_websocket_tools_call(self, app):
+        # [FUNCTION DOC]
+        # tools/call returns a JSON-RPC result with the request id.
         """Test WebSocket tools/call via JSON-RPC."""
         from starlette.testclient import TestClient
 
@@ -377,6 +434,8 @@ class TestWebSocketMCP:
             assert "result" in response["data"]
 
     def test_websocket_mcp_method_not_found(self, app):
+        # [FUNCTION DOC]
+        # An unknown method returns error code -32601.
         """Test WebSocket returns error for unknown MCP method."""
         from starlette.testclient import TestClient
 
@@ -405,6 +464,8 @@ class TestWebSocketMCP:
             assert "not found" in response["data"]["error"]["message"].lower()
 
     def test_websocket_tools_call_missing_name(self, app):
+        # [FUNCTION DOC]
+        # tools/call without a name returns error code -32602 mentioning name.
         """Test WebSocket tools/call returns error when name is missing."""
         from starlette.testclient import TestClient
 

@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Pydantic models for the Connect4 environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -20,6 +22,8 @@ from pydantic import Field
 
 
 class Connect4Action(Action):
+    # [CLASS DOC]
+    # Action: column index (0-6) to drop a piece into.
     """
     Action for Connect4 environment.
 
@@ -31,6 +35,10 @@ class Connect4Action(Action):
 
 
 class Connect4Observation(Observation):
+    # [CLASS DOC]
+    # Observation: 6x7 board (row 0 at top) and legal column indices; inherits done, reward, metadata.
+    # KNOWN ISSUE: docstring says 1 is the current player, but the server stores absolute player ids (1 moves
+    # first, -1 second).
     """
     Observation for Connect4 environment.
 
@@ -47,6 +55,8 @@ class Connect4Observation(Observation):
 
 
 class Connect4State(State):
+    # [CLASS DOC]
+    # State: board, next_player (1 or -1) and step count.
     """
     State for Connect4 environment.
 

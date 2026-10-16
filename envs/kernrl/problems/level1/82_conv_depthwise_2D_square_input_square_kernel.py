@@ -1,8 +1,14 @@
+# [MODULE DOC]
+# kernrl problem (level 1): depthwise 2D convolution (3 channels, 3x3 kernel,
+# stride 1, no padding, no bias) on a (16, 3, 256, 256) input.
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model wrapping nn.Conv2d with groups = in_channels (one filter per
+    # channel).
     """
     Performs a depthwise 2D convolution operation with square input and square kernel.
 
@@ -22,6 +28,9 @@ class Model(nn.Module):
         padding: int = 0,
         bias: bool = False,
     ):
+        # [FUNCTION DOC]
+        # Creates the depthwise Conv2d submodule (in_channels in and out, groups =
+        # in_channels) with the given kernel, stride, padding and bias.
         super(Model, self).__init__()
         self.conv2d = nn.Conv2d(
             in_channels,
@@ -34,6 +43,8 @@ class Model(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the depthwise convolution of x, shape (B, in_channels, H_out, W_out).
         """
         Performs the depthwise 2D convolution.
 
@@ -57,9 +68,13 @@ padding = 0
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, in_channels, height, width).
     x = torch.randn(batch_size, in_channels, height, width)
     return [x]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [in_channels, kernel_size, stride, padding].
     return [in_channels, kernel_size, stride, padding]

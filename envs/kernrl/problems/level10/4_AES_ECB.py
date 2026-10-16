@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 10): AES-128 encryption of a single 16-byte block
+# (ECB, one block) with on-the-fly key expansion, implemented naively with
+# small int64 tensor operations on a column-major 4x4 state.
 """
 AES-128 ECB Encryption
 
@@ -22,11 +26,16 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference AES-128 model with the S-box (256 entries) and 10 round constants
+    # registered as int64 buffers.
     """
     AES-128 ECB encryption.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the sbox and rcon buffers.
         super(Model, self).__init__()
 
         # AES S-box (substitution box)
@@ -295,10 +304,14 @@ class Model(nn.Module):
         self.register_buffer("rcon", torch.tensor(RCON, dtype=torch.int64))
 
     def _sub_bytes(self, state: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: SubBytes: replaces each state byte with its S-box value.
         """Apply S-box substitution."""
         return self.sbox[state.long()]
 
     def _shift_rows(self, state: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: ShiftRows: rotates rows 1, 2, 3 of the (4, 4) state left by 1, 2, 3.
         """Shift rows of state matrix."""
         # state is (4, 4) - rows are shifted by 0, 1, 2, 3 positions
         result = state.clone()
@@ -308,10 +321,14 @@ class Model(nn.Module):
         return result
 
     def _xtime(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Multiplies bytes by x in GF(2^8) (shift left, reduce with 0x1B).
         """Multiply by x in GF(2^8)."""
         return ((x << 1) ^ (((x >> 7) & 1) * 0x1B)) & 0xFF
 
     def _mix_column(self, col: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: MixColumns for one 4-byte column using the xtime formulation.
         """Mix one column."""
         t = col[0] ^ col[1] ^ col[2] ^ col[3]
         result = torch.zeros(4, dtype=col.dtype, device=col.device)
@@ -322,6 +339,8 @@ class Model(nn.Module):
         return result
 
     def _mix_columns(self, state: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Applies the column mix to each of the 4 state columns.
         """Apply MixColumns transformation."""
         result = torch.zeros_like(state)
         for i in range(4):
@@ -331,10 +350,18 @@ class Model(nn.Module):
     def _add_round_key(
         self, state: torch.Tensor, round_key: torch.Tensor
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: AddRoundKey: XOR of state and round key.
         """XOR state with round key."""
         return state ^ round_key
 
     def forward(self, plaintext: torch.Tensor, key: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Expands the 16-byte key into 11 round keys (RotWord, SubWord, Rcon on the
+        # last column, then cumulative XOR of columns), loads the plaintext as a
+        # column-major 4x4 state, applies the initial key add, 9 full rounds, and the
+        # final round without MixColumns. Returns the 16 ciphertext bytes (column-major
+        # flatten) as an int64 tensor.
         """
         Encrypt plaintext block with AES-128.
 
@@ -388,10 +415,14 @@ class Model(nn.Module):
 
 # Problem configuration
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a random 16-byte plaintext and 16-byte key (int64 values 0..255).
     plaintext = torch.randint(0, 256, (16,), dtype=torch.int64)
     key = torch.randint(0, 256, (16,), dtype=torch.int64)
     return [plaintext, key]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

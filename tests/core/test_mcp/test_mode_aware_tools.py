@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for mode-aware tool registration on MCPEnvironment: the env.tool decorator with a mode
+# argument ("production", "simulation" or none for all modes), separate implementations of the
+# same tool name per mode, list_tools filtering and call_tool dispatch by the current mode, mode
+# switching, default behavior, and error cases (wrong-mode calls, invalid mode, reserved names,
+# async tools). Most tests skip if the decorator is unavailable.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -43,23 +50,36 @@ from openenv.core.env_server.types import Observation
 
 
 class MinimalMCPEnv(MCPEnvironment):
+    # [CLASS DOC]
+    # HELPER: Minimal MCPEnvironment whose mode starts as "simulation" and can be changed via set_mode;
+    # reset and non-MCP steps return empty observations.
     """Minimal MCP environment for testing."""
 
     def __init__(self, mcp_server):
+        # [FUNCTION DOC]
+        # HELPER: Wraps the FastMCP server and sets mode to "simulation".
         super().__init__(mcp_server)
         self._mode = "simulation"  # Default mode
 
     def reset(self, seed=None, episode_id=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Returns an empty Observation.
         return Observation()
 
     def _step_impl(self, action, timeout_s=None, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Returns an empty Observation.
         return Observation()
 
     @property
     def state(self):
+        # [FUNCTION DOC]
+        # HELPER: Returns an empty dict.
         return {}
 
     def set_mode(self, mode: str):
+        # [FUNCTION DOC]
+        # HELPER: Sets the private mode attribute.
         """Set the environment mode for testing."""
         self._mode = mode
 
@@ -70,9 +90,13 @@ class MinimalMCPEnv(MCPEnvironment):
 
 
 class TestModeAwareRegistrationAPI:
+    # [CLASS DOC]
+    # Tests that the mode-aware decorator exists and accepts modes.
     """Test that a mode-aware registration API exists and is usable."""
 
     def test_mcp_environment_has_mode_aware_tool_decorator(self):
+        # [FUNCTION DOC]
+        # The environment exposes a tool (or mcp_tool) decorator.
         """Test that MCPEnvironment provides a mode-aware tool decorator."""
         # This test will fail until we implement the API
         # Expected usage pattern:
@@ -103,6 +127,8 @@ class TestModeAwareRegistrationAPI:
         )
 
     def test_tool_decorator_accepts_mode_parameter(self):
+        # [FUNCTION DOC]
+        # Decorating with mode="production" does not raise.
         """Test that the tool decorator accepts a 'mode' parameter."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -118,6 +144,8 @@ class TestModeAwareRegistrationAPI:
 
                 @env.tool(mode="production")
                 def test_tool_prod(x: int) -> int:
+                    # [FUNCTION DOC]
+                    # HELPER: Tool registered via env.tool for "production" mode; returns x multiplied by 2.
                     return x * 2
 
                 success = True
@@ -129,6 +157,8 @@ class TestModeAwareRegistrationAPI:
         assert success, "tool decorator should accept mode parameter"
 
     def test_can_register_production_mode_tool(self):
+        # [FUNCTION DOC]
+        # A production-only tool can be registered.
         """Test that a tool can be registered for production mode only."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -139,12 +169,16 @@ class TestModeAwareRegistrationAPI:
 
         @env.tool(mode="production")
         def prod_only_tool(value: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "prod: <value>".
             return f"prod: {value}"
 
         # Tool should be registered
         # We'll verify this in integration tests
 
     def test_can_register_simulation_mode_tool(self):
+        # [FUNCTION DOC]
+        # A simulation-only tool can be registered.
         """Test that a tool can be registered for simulation mode only."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -155,6 +189,8 @@ class TestModeAwareRegistrationAPI:
 
         @env.tool(mode="simulation")
         def sim_only_tool(value: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "sim: <value>".
             return f"sim: {value}"
 
         # Tool should be registered
@@ -167,9 +203,13 @@ class TestModeAwareRegistrationAPI:
 
 
 class TestSameToolDifferentModes:
+    # [CLASS DOC]
+    # Tests same-name tools in different modes.
     """Test registering different implementations for the same tool name."""
 
     def test_can_register_same_tool_name_for_different_modes(self):
+        # [FUNCTION DOC]
+        # Registering one name for both modes does not conflict.
         """Test that the same tool name can have different implementations per mode."""
         # This is the core use case from Issue #359:
         # - expedia_search in production → calls real API
@@ -183,16 +223,22 @@ class TestSameToolDifferentModes:
         # FAILING TEST: Register same tool name with different modes
         @env.tool(mode="production")
         def expedia_search(query: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "real_api_result".
             return "real_api_result"
 
         @env.tool(mode="simulation")
         def expedia_search(query: str) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "mock_result".
             return "mock_result"
 
         # Both should register without conflict
         # The system should track them separately by (name, mode) pair
 
     def test_different_mode_implementations_are_tracked_separately(self):
+        # [FUNCTION DOC]
+        # Both implementations register without overriding each other (behavior verified elsewhere).
         """Test that prod and sim implementations don't override each other."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -202,10 +248,14 @@ class TestSameToolDifferentModes:
 
         @env.tool(mode="production")
         def my_tool(x: int) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "prod_<x>".
             return f"prod_{x}"
 
         @env.tool(mode="simulation")
         def my_tool(x: int) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "sim_<x>".
             return f"sim_{x}"
 
         # FAILING TEST: Both implementations should exist
@@ -219,9 +269,13 @@ class TestSameToolDifferentModes:
 
 
 class TestToolDiscoveryByMode:
+    # [CLASS DOC]
+    # Tests list_tools filtering by mode.
     """Test that list_tools returns tools filtered by current mode."""
 
     def test_list_tools_shows_only_production_tools_in_prod_mode(self):
+        # [FUNCTION DOC]
+        # In production only production tools are listed.
         """Test that production mode only shows production tools."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -232,14 +286,20 @@ class TestToolDiscoveryByMode:
         # Register tools for different modes
         @env.tool(mode="production")
         def prod_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns x unchanged.
             return x
 
         @env.tool(mode="simulation")
         def sim_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns x multiplied by 2.
             return x * 2
 
         @env.tool(mode="production")
         def another_prod_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns x plus one.
             return x + 1
 
         # FAILING TEST: Set mode to production and list tools
@@ -257,6 +317,8 @@ class TestToolDiscoveryByMode:
         assert "sim_tool" not in tool_names, "Simulation tool should NOT be visible"
 
     def test_list_tools_shows_only_simulation_tools_in_sim_mode(self):
+        # [FUNCTION DOC]
+        # In simulation only simulation tools are listed.
         """Test that simulation mode only shows simulation tools."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -267,14 +329,20 @@ class TestToolDiscoveryByMode:
         # Register tools for different modes
         @env.tool(mode="production")
         def prod_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns x unchanged.
             return x
 
         @env.tool(mode="simulation")
         def sim_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns x multiplied by 2.
             return x * 2
 
         @env.tool(mode="simulation")
         def another_sim_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns x plus one.
             return x + 1
 
         # FAILING TEST: Set mode to simulation and list tools
@@ -292,6 +360,8 @@ class TestToolDiscoveryByMode:
         assert "prod_tool" not in tool_names, "Production tool should NOT be visible"
 
     def test_list_tools_shows_both_mode_versions_of_same_tool(self):
+        # [FUNCTION DOC]
+        # A tool registered for both modes is listed in each mode.
         """Test that same tool name appears in both modes with correct implementation."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -302,10 +372,14 @@ class TestToolDiscoveryByMode:
         # Register same tool name for both modes
         @env.tool(mode="production")
         def expedia_search(query: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "real".
             return "real"
 
         @env.tool(mode="simulation")
         def expedia_search(query: str) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "mock".
             return "mock"
 
         # FAILING TEST: Tool should appear in both modes
@@ -326,9 +400,13 @@ class TestToolDiscoveryByMode:
 
 
 class TestToolExecutionByMode:
+    # [CLASS DOC]
+    # Tests call_tool dispatch by mode.
     """Test that calling a tool executes the correct mode-specific implementation."""
 
     def test_call_tool_executes_production_implementation_in_prod_mode(self):
+        # [FUNCTION DOC]
+        # In production the production implementation runs.
         """Test that prod mode executes the production implementation."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -339,10 +417,14 @@ class TestToolExecutionByMode:
         # Register different implementations
         @env.tool(mode="production")
         def compute(x: int) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "PROD_<x>".
             return f"PROD_{x}"
 
         @env.tool(mode="simulation")
         def compute(x: int) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "SIM_<x>".
             return f"SIM_{x}"
 
         # FAILING TEST: Call in production mode
@@ -363,6 +445,8 @@ class TestToolExecutionByMode:
         assert result == "PROD_42", f"Expected PROD_42, got {result}"
 
     def test_call_tool_executes_simulation_implementation_in_sim_mode(self):
+        # [FUNCTION DOC]
+        # In simulation the simulation implementation runs.
         """Test that sim mode executes the simulation implementation."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -373,10 +457,14 @@ class TestToolExecutionByMode:
         # Register different implementations
         @env.tool(mode="production")
         def compute(x: int) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "PROD_<x>".
             return f"PROD_{x}"
 
         @env.tool(mode="simulation")
         def compute(x: int) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "SIM_<x>".
             return f"SIM_{x}"
 
         # FAILING TEST: Call in simulation mode
@@ -402,9 +490,13 @@ class TestToolExecutionByMode:
 
 
 class TestModeSwitching:
+    # [CLASS DOC]
+    # Tests switching modes back and forth.
     """Test that switching modes correctly toggles between tool implementations."""
 
     def test_switching_mode_toggles_tool_implementation(self):
+        # [FUNCTION DOC]
+        # Alternating modes alternates the executed implementation.
         """Test that switching between modes executes the correct implementation."""
         # This is the key requirement from Issue #359:
         # "We should have tests that check that switching back and forth
@@ -418,10 +510,14 @@ class TestModeSwitching:
         # Register mode-specific implementations
         @env.tool(mode="production")
         def api_call(param: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "real_api_<param>".
             return f"real_api_{param}"
 
         @env.tool(mode="simulation")
         def api_call(param: str) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "mock_api_<param>".
             return f"mock_api_{param}"
 
         # FAILING TEST: Toggle between modes multiple times
@@ -466,6 +562,8 @@ class TestModeSwitching:
         assert result4 == "mock_api_D", "Fourth call should use simulation again"
 
     def test_mode_switch_updates_list_tools(self):
+        # [FUNCTION DOC]
+        # The tool list changes with the mode.
         """Test that switching mode updates the list of available tools."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -475,10 +573,14 @@ class TestModeSwitching:
 
         @env.tool(mode="production")
         def prod_only(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns x unchanged.
             return x
 
         @env.tool(mode="simulation")
         def sim_only(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns x unchanged.
             return x
 
         # FAILING TEST: List tools should change when mode switches
@@ -502,9 +604,13 @@ class TestModeSwitching:
 
 
 class TestDefaultBehavior:
+    # [CLASS DOC]
+    # Tests tools registered without a mode.
     """Test behavior when mode is not specified."""
 
     def test_tool_without_mode_available_in_all_modes(self):
+        # [FUNCTION DOC]
+        # A mode-less tool is listed and behaves identically in both modes.
         """Test that tools without mode parameter work in both modes."""
         # From Issue #359: "Whenever a mapping is not specified,
         # obviously the same tool will be used in every mode."
@@ -517,6 +623,8 @@ class TestDefaultBehavior:
         # FAILING TEST: Register a tool without specifying mode
         @env.tool()
         def universal_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for all modes; returns x multiplied by 10.
             return x * 10
 
         # Should be available in production mode
@@ -563,9 +671,13 @@ class TestDefaultBehavior:
 
 
 class TestErrorHandling:
+    # [CLASS DOC]
+    # Tests error cases.
     """Test error cases for mode-aware tool registration."""
 
     def test_calling_production_tool_in_simulation_mode_fails(self):
+        # [FUNCTION DOC]
+        # Calling a production-only tool in simulation returns a tool_not_found error.
         """Test that calling a production-only tool in sim mode returns error."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -575,6 +687,8 @@ class TestErrorHandling:
 
         @env.tool(mode="production")
         def prod_only_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns x unchanged.
             return x
 
         # FAILING TEST: Calling prod-only tool in sim mode should fail
@@ -588,6 +702,8 @@ class TestErrorHandling:
         )
 
     def test_calling_simulation_tool_in_production_mode_fails(self):
+        # [FUNCTION DOC]
+        # Calling a simulation-only tool in production returns a tool_not_found error.
         """Test that calling a simulation-only tool in prod mode returns error."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -597,6 +713,8 @@ class TestErrorHandling:
 
         @env.tool(mode="simulation")
         def sim_only_tool(x: int) -> int:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns x unchanged.
             return x
 
         # FAILING TEST: Calling sim-only tool in prod mode should fail
@@ -610,6 +728,8 @@ class TestErrorHandling:
         )
 
     def test_invalid_mode_value_raises_error(self):
+        # [FUNCTION DOC]
+        # An invalid mode raises ValueError at registration.
         """Test that registering a tool with invalid mode raises error."""
         mcp = FastMCP("test-server")
         env = MinimalMCPEnv(mcp)
@@ -622,9 +742,13 @@ class TestErrorHandling:
 
             @env.tool(mode="invalid_mode")
             def bad_tool(x: int) -> int:
+                # [FUNCTION DOC]
+                # HELPER: Tool whose registration with an invalid mode is expected to fail; returns x unchanged.
                 return x
 
     def test_reserved_name_raises_error(self):
+        # [FUNCTION DOC]
+        # Registering tools named reset, step, state or close raises ValueError.
         """Test that registering a tool with a reserved name raises ValueError.
 
         The @self.tool() decorator should validate against RESERVED_TOOL_NAMES
@@ -641,6 +765,8 @@ class TestErrorHandling:
 
             @env.tool()
             def reset(x: int) -> int:
+                # [FUNCTION DOC]
+                # HELPER: Tool with a reserved name whose registration is expected to raise ValueError; returns x unchanged.
                 return x
 
         # FAILING TEST: Reserved name "step" should raise ValueError
@@ -648,6 +774,8 @@ class TestErrorHandling:
 
             @env.tool()
             def step(x: int) -> int:
+                # [FUNCTION DOC]
+                # HELPER: Tool with a reserved name whose registration is expected to raise ValueError; returns x unchanged.
                 return x
 
         # FAILING TEST: Reserved name "state" should raise ValueError
@@ -655,6 +783,8 @@ class TestErrorHandling:
 
             @env.tool()
             def state(x: int) -> int:
+                # [FUNCTION DOC]
+                # HELPER: Tool with a reserved name whose registration is expected to raise ValueError; returns x unchanged.
                 return x
 
         # FAILING TEST: Reserved name "close" should raise ValueError
@@ -662,9 +792,13 @@ class TestErrorHandling:
 
             @env.tool()
             def close(x: int) -> int:
+                # [FUNCTION DOC]
+                # HELPER: Tool with a reserved name whose registration is expected to raise ValueError; returns x unchanged.
                 return x
 
     def test_async_mode_specific_tool_is_awaited(self):
+        # [FUNCTION DOC]
+        # Async mode-specific tools are awaited and return their values in each mode.
         """Test that async mode-specific tools are properly awaited.
 
         Mode-specific tool execution must handle async functions correctly,
@@ -679,12 +813,16 @@ class TestErrorHandling:
         # FAILING TEST: Register async tools for different modes
         @env.tool(mode="production")
         async def async_compute(x: int) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "production" mode; returns the string "ASYNC_PROD_<x>".
             # Simulate async work
             await asyncio.sleep(0.001)
             return f"ASYNC_PROD_{x}"
 
         @env.tool(mode="simulation")
         async def async_compute(x: int) -> str:  # noqa: F811
+            # [FUNCTION DOC]
+            # HELPER: Tool registered via env.tool for "simulation" mode; returns the string "ASYNC_SIM_<x>".
             # Simulate async work
             await asyncio.sleep(0.001)
             return f"ASYNC_SIM_{x}"

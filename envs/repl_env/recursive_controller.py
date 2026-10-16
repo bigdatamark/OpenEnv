@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# HELPER: Assembles the server-side LLM/recursion callables for REPLEnvironment from a chat function:
+# a recursive child-RLM backend when max_depth exceeds 1, otherwise a direct LM backend.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -27,6 +30,9 @@ ChatFn = Callable[..., str]
 
 @dataclass
 class RecursiveController:
+    # [CLASS DOC]
+    # Bundle of the four callables exposed to the REPL (llm query, batched llm query, and optional
+    # recursive query and batched recursive query) plus the backend object.
     llm_query_fn: Callable[[str, str | None], str]
     llm_batch_fn: Callable[[list[str], str | None], list[str]]
     rlm_query_fn: Callable[[str, str | None], str] | None
@@ -34,6 +40,8 @@ class RecursiveController:
     backend: object
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # No-op close hook.
         pass
 
 
@@ -50,6 +58,11 @@ def create_server_recursive_controller(
     per_child_timeout_s: float | None = None,
     env_max_iterations_multiplier: int = 5,
 ) -> RecursiveController:
+    # [FUNCTION DOC]
+    # Builds BackendLimits from the arguments. For max_depth > 1 creates a LocalChildRLMBackend (using
+    # LocalRLMRunner as the child runner, the system prompt, max iterations and env iteration multiplier at
+    # depth 0) and returns a controller exposing its query, batched query, recursive query and batched
+    # recursive query. Otherwise creates a DirectLMBackend and returns a controller without recursive callables.
     limits = BackendLimits(
         max_depth=max_depth,
         max_batch_workers=max_batch_workers,

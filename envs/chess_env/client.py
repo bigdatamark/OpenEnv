@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the chess environment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -22,6 +24,8 @@ from .models import ChessAction, ChessObservation, ChessState
 
 
 class ChessEnv(EnvClient[ChessAction, ChessObservation, ChessState]):
+    # [CLASS DOC]
+    # Typed client sending UCI moves and parsing chess observations and state.
     """
     Client for Chess Environment.
 
@@ -41,6 +45,8 @@ class ChessEnv(EnvClient[ChessAction, ChessObservation, ChessState]):
     """
 
     def _step_payload(self, action: ChessAction) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Returns {"move": action.move}.
         """
         Convert ChessAction to JSON payload for step request.
 
@@ -55,6 +61,10 @@ class ChessEnv(EnvClient[ChessAction, ChessObservation, ChessState]):
         }
 
     def _parse_result(self, payload: Dict[str, Any]) -> StepResult[ChessObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a ChessObservation from payload["observation"] (fen, legal_moves, is_check, result)
+        # with reward (default 0.0) and done read from the envelope and metadata from payload or observation;
+        # wraps it in a StepResult.
         """
         Parse server response into StepResult[ChessObservation].
 
@@ -89,6 +99,8 @@ class ChessEnv(EnvClient[ChessAction, ChessObservation, ChessState]):
         )
 
     def _parse_state(self, payload: Dict[str, Any]) -> ChessState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a ChessState from the payload with defaults (empty fen, "white", empty history, 0 steps).
         """
         Parse server response into ChessState object.
 

@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Server-side QED Math environment (MCP-only). Loads problems from local JSON/JSONL files or Hugging
+# Face datasets (or a single built-in bootstrap problem), normalises heterogeneous rows into
+# canonical fields, and serves them through MCP tools. Proof problems are graded by an LLM rubric
+# (0-7 scale); answer problems are verified with math_verify in a worker-process pool and mapped to
+# rewards via presets. Supports multi-step problems with several attempts, reasoning stripping,
+# reward shaping (discount and overlong penalty) and detailed verifier metrics.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -62,12 +69,16 @@ DatasetSource = str | dict[str, Any] | list[str | dict[str, Any]] | None
 
 
 def _default_verifier_workers() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Default verifier worker count: half the CPU count, clamped to [2, 8].
     """Choose a conservative worker default for shared training hosts."""
     cpu_count = os.cpu_count() or 2
     return max(2, min(8, cpu_count // 2 or 1))
 
 
 def _default_verifier_queue_size() -> int:
+    # [FUNCTION DOC]
+    # HELPER: Default verifier queue size: 32 times the default worker count.
     """Default queue size proportional to worker count for burst tolerance."""
     return _default_verifier_workers() * 32
 
@@ -101,6 +112,9 @@ ANSWER_REWARD_PRESETS: dict[str, dict[str, float]] = {
 
 
 def answer_reward_for_status(status: str, preset: str = "pure_success") -> float:
+    # [FUNCTION DOC]
+    # Returns the reward for a verifier status from the named preset table (unknown presets fall back to
+    # "pure_success"; unknown statuses give 0.0).
     """Return the answer-mode reward for a verifier *status* under *preset*.
 
     Args:
@@ -121,6 +135,10 @@ def remove_reasoning(
     completion: str,
     reasoning_delimiters: list[str] | None = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # Strips reasoning: with no delimiters returns completion unchanged; otherwise, for the first
+    # delimiter (in list order) that occurs, returns the stripped text after its last occurrence; returns
+    # an empty string if no delimiter occurs.
     """Strip reasoning traces from model output before verification.
 
     When *reasoning_delimiters* is provided, splits on each delimiter in
@@ -149,6 +167,11 @@ def remove_reasoning(
 
 @dataclass
 class QEDMathConfig:
+    # [CLASS DOC]
+    # Mutable configuration: dataset source, grader model (default "gemini-3-pro"), prompt name, score
+    # threshold flag, default max attempts, discount factor, overlong buffer and max tokens, reasoning
+    # delimiters (default the closing think tag), grader temperature and output cap, answer reward
+    # preset, and verifier pool settings (workers, queue, timeout, retries, strict, precision, rounding).
     """Configuration for QEDMathEnvironment rubric and dataset behavior."""
 
     dataset_path: DatasetSource = None
@@ -173,6 +196,9 @@ class QEDMathConfig:
 
 
 def load_evaluator_prompt(prompt_name: str) -> str:
+    # [FUNCTION DOC]
+    # Returns the text of prompts/evaluator_prompts/<prompt_name>.md inside the environment package if it
+    # exists, else the built-in default grader instruction. Reads a file.
     """Load an evaluator prompt template by name.
 
     Prompt lookup order:
@@ -191,6 +217,8 @@ def load_evaluator_prompt(prompt_name: str) -> str:
 
 
 def _bootstrap_problems() -> list[dict]:
+    # [FUNCTION DOC]
+    # HELPER: Returns a list with one built-in proof problem (sum of two even integers) used when no dataset is configured.
     return [
         {
             "problem": "Prove that the sum of two even integers is even.",
@@ -205,6 +233,8 @@ def _bootstrap_problems() -> list[dict]:
 
 
 def _coerce_positive_int(value: Any, default: int) -> int:
+    # [FUNCTION DOC]
+    # HELPER: Returns int(value) if it is positive, else default (also on conversion errors).
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -213,6 +243,10 @@ def _coerce_positive_int(value: Any, default: int) -> int:
 
 
 def _canonical_problem_type(raw_problem: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Determines problem type: an explicit type field ("proof", "answer", "multi_step"), a truthy
+    # multi_step flag, evaluation_mode "answer", else "answer" when no non-empty grading schema field is
+    # present and "proof" otherwise.
     explicit_type = _first_present_value(
         raw_problem,
         ("problem_type", "type", "problem_kind", "mode"),
@@ -255,6 +289,9 @@ def _canonical_problem_type(raw_problem: dict[str, Any]) -> str:
 
 
 def _coerce_dataset_specs(dataset_path: DatasetSource) -> list[str | dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Wraps a single string/mapping spec in a list, returns lists unchanged and None as empty.
+    # Raises TypeError for other types.
     if dataset_path is None:
         return []
     if isinstance(dataset_path, (str, dict)):
@@ -267,6 +304,10 @@ def _coerce_dataset_specs(dataset_path: DatasetSource) -> list[str | dict[str, A
 
 
 def _read_local_problem_rows(path: Path) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Reads problem rows from a .jsonl (one object per line, non-objects skipped) or .json file
+    # (a list or an object with a "problems" list). Raises FileNotFoundError if missing, ValueError for
+    # other formats or JSON shapes, and JSON decoding errors for bad content.
     if not path.exists():
         raise FileNotFoundError(f"Dataset path does not exist: {path}")
 
@@ -300,6 +341,10 @@ def _read_local_problem_rows(path: Path) -> list[dict[str, Any]]:
 def _read_hub_problem_rows(
     spec: str | dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str]:
+    # [FUNCTION DOC]
+    # HELPER: Loads a Hugging Face dataset from a hub id string or a spec mapping (hub_id or dataset,
+    # config, split default "train", trust_remote_code default True). Returns (rows as mappings, hub id).
+    # Raises ValueError without an id. Side effects: network/cache access, logging.
     if isinstance(spec, str):
         hub_id = spec
         config = None
@@ -339,6 +384,8 @@ def _first_present_value(
     keys: tuple[str, ...],
     default: Any = None,
 ) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Returns the value of the first key present with a non-None value, else default.
     """Return the first non-None value for the provided keys.
 
     This uses key presence rather than truthiness so explicit empty strings in
@@ -354,6 +401,12 @@ def _first_present_value(
 def _normalize_problem(
     raw_problem: dict[str, Any], index: int, dataset_source: str
 ) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Converts a raw row into the canonical problem mapping: problem (required non-empty string,
+    # else ValueError), original_problem, reference_solution (wrapped in a boxed block for answer mode
+    # if not already boxed), grading_guidelines (raw, may be a list), problem_id (default from index),
+    # dataset_source, problem_type, max_attempts (default 3 for multi_step, else 1),
+    # success_score_threshold (default 7) and evaluation_mode ("proof" or "answer").
     """Map heterogeneous dataset rows to canonical QED-Math fields.
 
     Canonical environment fields:
@@ -445,6 +498,10 @@ def _load_problems_from_spec(
     spec: str | dict[str, Any],
     start_index: int,
 ) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Loads and normalises rows from one spec: mapping with "path" (local) or hub_id/dataset
+    # (hub); string treated as a local path if it exists or ends in .json/.jsonl, else as a hub id if it
+    # contains "/". Invalid rows are skipped with a warning. Raises ValueError for unrecognised specs.
     if isinstance(spec, dict):
         if "path" in spec:
             path = Path(spec["path"])
@@ -490,6 +547,9 @@ def _load_problems_from_spec(
 
 
 def load_problems(dataset_path: DatasetSource) -> list[dict]:
+    # [FUNCTION DOC]
+    # Loads all problems from the configured source(s), returning the bootstrap problem when none is
+    # configured. Raises ValueError if sources are configured but yield no valid problems.
     """Load problems from local JSON/JSONL files or Hugging Face datasets.
 
     Supported sources:
@@ -516,6 +576,11 @@ def load_problems(dataset_path: DatasetSource) -> list[dict]:
 
 
 class QEDMathEnvironment(MCPEnvironment):
+    # [CLASS DOC]
+    # MCP environment for proof/answer problems. Tools are registered at construction. Holds the merged
+    # config, loaded problems, the current problem, an answer-mode gold cache keyed by problem id and
+    # verifier settings, the LLM rubric, the verifier service, shaping settings, State, attempt
+    # counters and a pending output token count injected by the harness.
     """
     Math proof environment with MCP tools and rubric-based grading.
 
@@ -545,6 +610,11 @@ class QEDMathEnvironment(MCPEnvironment):
         max_attempts: int | None = None,
         config: QEDMathConfig | None = None,
     ):
+        # [FUNCTION DOC]
+        # Creates the FastMCP server and registers tools, merges explicit arguments over the config, loads
+        # the prompt template and problems (may raise from loading), builds the gold cache, creates the rubric
+        # using JUDGE_API_BASE_URL/OPENAI_BASE_URL, JUDGE_API_KEY/OPENAI_API_KEY and JUDGE_MODEL environment
+        # variables, creates (but does not start) the verifier service, and initialises state.
         """
         Initialize the QED Math environment.
 
@@ -654,6 +724,8 @@ class QEDMathEnvironment(MCPEnvironment):
         self._pending_output_length_tokens: int = 0
 
     def _build_gold_cache_signature(self) -> tuple[bool, int, int]:
+        # [FUNCTION DOC]
+        # HELPER: Returns (strict, numeric precision, float rounding) from config, used in cache keys.
         """Return cache settings that affect answer-verifier behavior."""
         return (
             bool(self._config.verifier_strict),
@@ -662,10 +734,15 @@ class QEDMathEnvironment(MCPEnvironment):
         )
 
     def _gold_cache_key(self, problem_id: str) -> tuple[str, tuple[bool, int, int]]:
+        # [FUNCTION DOC]
+        # HELPER: Returns the cache key (problem_id, settings signature).
         """Build a stable answer-cache key for a specific problem id."""
         return (problem_id, self._gold_cache_signature)
 
     def _build_gold_answer_cache(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Rebuilds the gold cache with the reference solution of each answer-mode problem that has an
+        # id; pre-parses each and logs a warning on failure (the raw text is still cached).
         """Build cache of answer-mode gold references keyed by problem id/settings."""
         self._gold_answer_cache = {}
         for problem in self._problems:
@@ -692,6 +769,8 @@ class QEDMathEnvironment(MCPEnvironment):
             )
 
     def _refresh_gold_cache_if_needed(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Rebuilds the gold cache if verifier settings or the problem count changed.
         """Refresh answer cache when verifier settings or problem set changes."""
         current_signature = self._build_gold_cache_signature()
         current_problem_count = len(self._problems)
@@ -704,6 +783,8 @@ class QEDMathEnvironment(MCPEnvironment):
             self._build_gold_answer_cache()
 
     def _get_cached_gold_answer(self, problem_id: str, fallback: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the cached gold answer for problem_id (counting a hit) or fallback (counting a miss).
         """Get cached gold reference for answer-mode grading."""
         self._refresh_gold_cache_if_needed()
         key = self._gold_cache_key(problem_id)
@@ -715,6 +796,8 @@ class QEDMathEnvironment(MCPEnvironment):
         return fallback
 
     def _gold_cache_hit_rate(self) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Returns cache hits divided by total lookups, or 0.0 with no lookups.
         """Return cache hit rate for answer-mode gold lookup."""
         total = self._gold_cache_hits + self._gold_cache_misses
         if total == 0:
@@ -727,6 +810,12 @@ class QEDMathEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Any:
+        # [FUNCTION DOC]
+        # Async step used directly by the WebSocket server. Increments step_count. ListToolsAction returns the
+        # tool list (empty with error metadata on failure). CallToolAction: for submit_proof stores the
+        # harness-supplied output_length_tokens kwarg; calls the tool with a timeout (timeout_s or 600 s);
+        # returns a CallToolObservation enriched with reward/done for submit_proof, or one carrying a TIMEOUT or
+        # EXECUTION_ERROR tool error. Other actions return the unknown-action observation.
         """Async step override — fixes the run_async_safely event-loop deadlock
         described in https://github.com/huggingface/OpenEnv/issues/455.
 
@@ -816,6 +905,15 @@ class QEDMathEnvironment(MCPEnvironment):
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Starts an episode: optional problem_id kwarg selects a specific problem (ValueError if not found);
+        # otherwise chooses randomly (seeded local RNG if seed is given, else the global random module).
+        # Resets state (episode_id or new UUID), attempt count, increments reset count, calls the rubric's
+        # reset hook if any. Returns a ProblemObservation with problem, grading guidelines as text, id, source,
+        # type, max attempts, and the reference solution only in answer mode; or a plain Observation with an
+        # error when no problem is available.
+        # KNOWN ISSUE: in answer mode the gold answer is returned to the agent here and by get_problem,
+        # so answer problems can be solved by copying it.
         """
         Reset the environment and load a new problem.
 
@@ -915,6 +1013,8 @@ class QEDMathEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # HELPER: Returns an Observation with an "Unknown action type" error in metadata (done False, reward 0).
         """
         Handle non-MCP actions.
 
@@ -941,6 +1041,9 @@ class QEDMathEnvironment(MCPEnvironment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> Observation:
+        # [FUNCTION DOC]
+        # Sync step: increments step_count, delegates to the base MCP environment step, and enriches
+        # submit_proof results with reward/done.
         """
         Execute a step in the environment.
 
@@ -958,6 +1061,10 @@ class QEDMathEnvironment(MCPEnvironment):
         return self._enrich_submit_proof_obs(action, obs)
 
     def _enrich_submit_proof_obs(self, action: Any, obs: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: For a successful submit_proof CallToolObservation whose payload is a mapping, returns a new
+        # CallToolObservation with done and reward from the payload and the full proof submission added to
+        # metadata under "proof_submission"; otherwise returns obs unchanged.
         """Attach reward/done from submit_proof payload onto the CallToolObservation."""
         if (
             isinstance(action, CallToolAction)
@@ -993,6 +1100,9 @@ class QEDMathEnvironment(MCPEnvironment):
 
     @staticmethod
     def _extract_tool_payload(tool_result: Any) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns the tool result's data attribute, else its structured_content, else the value if it
+        # is a mapping, else None.
         """Extract a structured tool payload from FastMCP CallToolResult-like values."""
         if tool_result is None:
             return None
@@ -1012,11 +1122,15 @@ class QEDMathEnvironment(MCPEnvironment):
 
     @staticmethod
     def _utc_now_iso() -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the current UTC time in ISO format.
         """Return a UTC timestamp string for progress events."""
         return datetime.now(timezone.utc).isoformat()
 
     @staticmethod
     def _chunk_feedback(feedback: str, chunk_size: int = 280) -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: Splits feedback into consecutive chunks of chunk_size characters (default 280); empty list for empty feedback.
         """Split grader feedback into chunks for client-side streamed rendering."""
         if not feedback:
             return []
@@ -1031,6 +1145,9 @@ class QEDMathEnvironment(MCPEnvironment):
         is_correct: bool,
         done: bool,
     ) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a progress metadata mapping: status, progress 1.0, four fixed stage events with
+        # current timestamps, realtime info, feedback chunks and is_correct. The events are synthetic.
         """Build WebSocket-friendly progress and streaming feedback metadata."""
         feedback_chunks = self._chunk_feedback(feedback)
         return {
@@ -1075,6 +1192,10 @@ class QEDMathEnvironment(MCPEnvironment):
         }
 
     def get_problem_payload(self) -> dict:
+        # [FUNCTION DOC]
+        # MCP payload for get_problem: problem, guidelines text, id, source, type, max attempts, attempt count,
+        # done False, reward 0, plus reference_solution in answer mode. Returns an error mapping without an
+        # active problem.
         """Payload for MCP tool get_problem."""
         if self._current_problem is None:
             return {
@@ -1120,6 +1241,11 @@ class QEDMathEnvironment(MCPEnvironment):
         strict: bool = True,
         max_prediction_length: int = 1000,
     ) -> str:
+        # [FUNCTION DOC]
+        # Synchronous math_verify check of a prediction against gold: uses the text from the last boxed
+        # block to the end, rejects empty boxes and over-long predictions, parses both and verifies with a
+        # 1 s timeout. Returns "correct", "wrong", "no_answer" (no boxed block) or "unparsable" (any other
+        # error). Not used elsewhere in this module.
         """QED-Nano-style math verification using math_verify.
 
         Returns one of: correct, wrong, no_answer, unparsable.
@@ -1165,6 +1291,10 @@ class QEDMathEnvironment(MCPEnvironment):
         expected_answer: str,
         problem_id: str = "",
     ) -> GradingResult:
+        # [FUNCTION DOC]
+        # HELPER: Verifies an answer submission through the verifier service, logs the result and returns a
+        # GradingResult with score 7 if correct else 0, reward from the configured preset, feedback with the
+        # status, and verifier/service metrics.
         """Grade an answer submission using process-based verifier workers.
 
         Args:
@@ -1248,19 +1378,30 @@ class QEDMathEnvironment(MCPEnvironment):
         )
 
     async def shutdown_verifier_service(self) -> None:
+        # [FUNCTION DOC]
+        # Stops the verifier service (async, waits for the pool).
         """Explicit async shutdown hook for deterministic test and run cleanup."""
         await self._verifier_service.stop()
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Releases the verifier pool without waiting, then closes MCP resources via the base class.
         """Release the verifier worker pool before tearing down MCP resources."""
         self._verifier_service.close_sync()
         super().close()
 
     def _strip_reasoning(self, text: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Applies remove_reasoning with the configured delimiters.
         """Strip reasoning traces using configured delimiters."""
         return remove_reasoning(text, self._reasoning_delimiters)
 
     async def _grade_submission(self, submission: str) -> GradingResult:
+        # [FUNCTION DOC]
+        # HELPER: Grades a submission for the current problem. Strips reasoning (falling back to the original
+        # text if stripping empties a non-empty submission). Answer mode uses the cached gold and the verifier;
+        # proof mode uses the rubric with original_problem (if present) or problem, reference solution and
+        # guidelines text. Returns a zero GradingResult without an active problem.
         if self._current_problem is None:
             return GradingResult(
                 score=0,
@@ -1313,6 +1454,9 @@ class QEDMathEnvironment(MCPEnvironment):
         reward: float,
         output_length_tokens: int,
     ) -> float:
+        # [FUNCTION DOC]
+        # HELPER: If output_length_tokens > 0, multiplies reward by discount_factor to the power of the token
+        # count and, when buffer and max tokens are configured, adds the overlong penalty. Returns the reward.
         """Apply discount factor and length penalty to a base reward.
 
         Ported from QED-Nano: training/pipelinerl/domains/math/rollouts.py.
@@ -1341,6 +1485,13 @@ class QEDMathEnvironment(MCPEnvironment):
         return reward
 
     async def submit_proof_payload(self, proof: str) -> dict:
+        # [FUNCTION DOC]
+        # MCP payload for submit_proof. Without an active problem returns a done, zero-reward submission with
+        # an error. Otherwise increments the attempt count, grades (empty proof scores 0), consumes the pending
+        # token count for shaping, marks is_correct when score reaches the problem's success threshold
+        # (default 7), computes attempts remaining and done (always for non multi-step; otherwise when correct
+        # or out of attempts), and returns a ProofSubmissionObservation dumped to a mapping with progress,
+        # reward breakdown and verifier metrics in metadata. Further submissions after done are still graded.
         """Payload for MCP tool submit_proof.
 
         Args:
@@ -1433,6 +1584,9 @@ class QEDMathEnvironment(MCPEnvironment):
         output_length_tokens: int,
         is_correct: bool,
     ) -> dict[str, float | int | str]:
+        # [FUNCTION DOC]
+        # HELPER: Copies the grading metrics and adds base/shaped/raw reward, overlong penalty, attempt number,
+        # correctness, problem type and dataset source. Returns the mapping.
         """Build TrackIO-compatible verifier metrics dict.
 
         Aggregates rubric-level metrics from ``result.metrics`` with
@@ -1473,6 +1627,9 @@ class QEDMathEnvironment(MCPEnvironment):
         return metrics
 
     def get_grading_guidelines_payload(self) -> dict:
+        # [FUNCTION DOC]
+        # MCP payload for get_grading_guidelines: guidelines text, problem id, done False, reward 0; an error
+        # mapping without an active problem.
         """Payload for MCP tool get_grading_guidelines."""
         if self._current_problem is None:
             return {
@@ -1490,6 +1647,8 @@ class QEDMathEnvironment(MCPEnvironment):
         }
 
     def _current_grading_guidelines_text(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the current problem's grading guidelines converted to text, or "" without a problem.
         """Return current grading guidelines normalized to markdown text."""
         if self._current_problem is None:
             return ""
@@ -1497,5 +1656,7 @@ class QEDMathEnvironment(MCPEnvironment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property: returns the current State.
         """Get the current environment state."""
         return self._state

@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Unity ML-Agents environment package. Re-exports the client (UnityEnv) and the UnityAction /
+# UnityObservation / UnityState models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

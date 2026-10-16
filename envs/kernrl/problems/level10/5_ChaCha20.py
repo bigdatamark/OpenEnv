@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 10): generate one 64-byte ChaCha20 keystream block
+# (20 rounds) from a 256-bit key, 96-bit nonce and block counter, with 32-bit
+# words emulated in int64 tensors.
 """
 ChaCha20 Stream Cipher
 
@@ -22,11 +26,16 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference ChaCha20 block function with the "expand 32-byte k" constants
+    # registered as a buffer.
     """
     ChaCha20 stream cipher.
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the four constant words.
         super(Model, self).__init__()
 
         # ChaCha20 constants "expand 32-byte k"
@@ -42,12 +51,17 @@ class Model(nn.Module):
         self.register_buffer("constants", constants)
 
     def _rotl(self, x: torch.Tensor, n: int) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: 32-bit left rotation by n bits.
         """Left rotation for 32-bit values."""
         return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
 
     def _quarter_round(
         self, state: torch.Tensor, a: int, b: int, c: int, d: int
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Returns a copy of the 16-word state with the ChaCha quarter-round
+        # (add, XOR, rotate by 16/12/8/7) applied to indices a, b, c, d.
         """Perform ChaCha20 quarter-round."""
         state = state.clone()
 
@@ -68,6 +82,10 @@ class Model(nn.Module):
     def forward(
         self, key: torch.Tensor, nonce: torch.Tensor, counter: int = 0
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Builds the state (constants, 8 key words, counter, 3 nonce words), runs 10
+        # double rounds (4 column then 4 diagonal quarter-rounds), adds the original
+        # state word-wise mod 2^32, and returns the (16,) int64 keystream words.
         """
         Generate 64 bytes of keystream.
 
@@ -113,10 +131,15 @@ class Model(nn.Module):
 
 # Problem configuration
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns a random 8-word key, a random 3-word nonce (values < 2^32), and
+    # counter 0 (a plain int).
     key = torch.randint(0, 2**32, (8,), dtype=torch.int64)
     nonce = torch.randint(0, 2**32, (3,), dtype=torch.int64)
     return [key, nonce, 0]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

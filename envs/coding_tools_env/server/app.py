@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI app for the coding tools environment. At import, loads the environment's .env file into
+# os.environ (without overriding), enables the web interface by default, and creates the app with MCP
+# call-tool actions, a custom Gradio UI builder and MAX_CONCURRENT_ENVS (default 4) sessions.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -26,6 +30,10 @@ except ImportError:  # pragma: no cover
 
 
 def _load_env_file() -> None:
+    # [FUNCTION DOC]
+    # HELPER: Reads KEY=VALUE lines from the env directory's .env (skipping blanks, comments and lines without
+    # "="), strips quotes, and sets keys not already in the environment. No-op if the file is absent.
+    # Side effects: mutates os.environ.
     candidate = Path(__file__).resolve().parents[1] / ".env"
     if not candidate.exists():
         return
@@ -55,6 +63,8 @@ app = create_app(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default 8000) and runs uvicorn (blocking).
     import argparse
 
     import uvicorn

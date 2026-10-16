@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 10): simplified BLAKE3-like compression of one
+# 64-byte chunk (7 rounds of the G mixing function) producing 32 bytes.
 """
 BLAKE3 Hash Function
 
@@ -21,11 +24,18 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference model with the BLAKE3 IV and a 7-row message permutation table
+    # registered as buffers.
+    # KNOWN ISSUE: this is not bit-compatible with real BLAKE3 (the per-round
+    # schedule table and finalization differ from the specification).
     """
     BLAKE3 hash function (simplified single-chunk version).
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Registers the IV (8 words) and MSG_SCHEDULE (7 x 16 indices) buffers.
         super(Model, self).__init__()
 
         # BLAKE3 IV (same as BLAKE2s)
@@ -60,6 +70,9 @@ class Model(nn.Module):
         self.register_buffer("MSG_SCHEDULE", MSG_SCHEDULE)
 
     def _rotl(self, x: torch.Tensor, n: int) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: 32-bit right rotation by n bits (named rotl, but rotates right, as
+        # BLAKE3 specifies).
         """Right rotation (BLAKE3 uses right rotation)."""
         return ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF
 
@@ -73,6 +86,9 @@ class Model(nn.Module):
         mx: torch.Tensor,
         my: torch.Tensor,
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Returns a copy of the state with the G function applied to indices
+        # a, b, c, d using message words mx and my (rotations 16, 12, 8, 7).
         """BLAKE3 G function (mixing function)."""
         state = state.clone()
 
@@ -93,6 +109,9 @@ class Model(nn.Module):
     def _round(
         self, state: torch.Tensor, m: torch.Tensor, schedule: torch.Tensor
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: One round: permutes the message words by the schedule row, applies G
+        # to the four columns and then the four diagonals.
         """One round of mixing."""
         msg = m[schedule]
 
@@ -111,6 +130,12 @@ class Model(nn.Module):
         return state
 
     def forward(self, message: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Parses the 64 bytes little-endian into 16 words, initializes the state from
+        # IV, IV[0:4], counter 0, block length 64 and flags 0b1011, runs 7 rounds, and
+        # returns the low half XOR high half as 32 little-endian bytes (int64).
+        # KNOWN ISSUE: the comment says the result is also XORed with the IV, but the
+        # code only XORs the two halves.
         """
         Compute BLAKE3 hash of a single chunk (64 bytes).
 
@@ -162,9 +187,13 @@ class Model(nn.Module):
 
 # Problem configuration
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns one random 64-byte message (int64 byte values).
     message = torch.randint(0, 256, (64,), dtype=torch.int64)
     return [message]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

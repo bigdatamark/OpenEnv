@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# HELPER: Reusable GRPO components for training an LLM to play OpenSpiel blackjack with the Forge/Monarch stack: the
+# Episode record and collation, a GRPO loss with KL penalty, prompt formatting and HIT/STAND parsing, Forge actors
+# (reward shaping, group-relative advantages, environment/tokenizer holder), a file+console game logger, torchstore
+# weight cleanup, game playing against an OpenSpiel server, random-policy benchmarking, and a GRPOTrainer facade plus
+# an async setup function that provisions all Forge services from a YAML config.
+# KNOWN ISSUE: the module imports "omegaConf" (wrong capitalisation); the package is "omegaconf", so the import fails on case-sensitive systems.
 """
 GRPO Utilities for OpenEnv Training
 
@@ -46,6 +53,9 @@ from vllm.transformers_utils.tokenizer import get_tokenizer
 
 @dataclass
 class Episode:
+    # [CLASS DOC]
+    # Dataclass for one training sample (one game step): ids, pad id, fixed request/response lengths, game id and step index,
+    # the generator Completion, reference log-probs, reward and advantage. Provides padded tensors and the policy version.
     """Episode data for RL training."""
 
     episode_id: str
@@ -61,10 +71,14 @@ class Episode:
 
     @property
     def policy_version(self) -> int | None:
+        # [FUNCTION DOC]
+        # Returns the generator version recorded in the completion. Raises AttributeError if completion is None.
         return self.completion.generator_version
 
     @property
     def request_tensor(self) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the prompt token ids as a long tensor left-padded with pad_id up to request_len (longer prompts are not truncated).
         request_tokens: torch.Tensor = self.completion.prompt_ids
         tensor = torch.tensor(request_tokens, dtype=torch.long)
         if tensor.shape[0] < self.request_len:
@@ -74,6 +88,8 @@ class Episode:
 
     @property
     def response_tensor(self) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the response token ids as a long tensor right-padded with pad_id up to response_len (longer responses are not truncated).
         response_tokens: torch.Tensor = self.completion.token_ids
         tensor = torch.tensor(response_tokens, dtype=torch.long)
         if tensor.shape[0] < self.response_len:
@@ -91,6 +107,10 @@ Group = list[Episode]
 
 
 def collate(batches: list[Group]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    # [FUNCTION DOC]
+    # For each group, stacks request and response tensors, squeezed reference log-probs and advantages (column vector), and
+    # builds inputs {"tokens": request concatenated with response} and targets {response, ref_logprobs, advantages,
+    # padding_mask (response != pad_id)}. Returns a tuple of (list of inputs, list of targets).
     """
     Collate batches of episodes into model inputs and targets.
 
@@ -130,6 +150,10 @@ def simple_grpo_loss(
     padding_mask: torch.Tensor,
     beta: float = 0.1,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # Computes per-token log-probs of the response from the logits, a KL estimate of exp(ref - logp) - (ref - logp) - 1, a
+    # policy term exp(logp - stop_grad(logp)) * advantage (value 1 times advantage, gradient of logp), and per-token loss
+    # -(policy - beta * kl). Returns the mean over sequences of the masked per-token average loss (scalar tensor).
     """
     GRPO loss with KL penalty.
 
@@ -170,6 +194,9 @@ def simple_grpo_loss(
 
 
 def format_prompt(step_num: int, action_history: list, tokenizer) -> str:
+    # [FUNCTION DOC]
+    # Builds a chat (system: expert blackjack player answering HIT or STAND; user: step header, numbered previous action
+    # names, question) and renders it with the tokenizer's chat template with a generation prompt. Returns the prompt string.
     """
     Format game state as text prompt for LLM.
 
@@ -203,6 +230,9 @@ def format_prompt(step_num: int, action_history: list, tokenizer) -> str:
 
 
 def parse_action(response_text: str, legal_actions: list[int]) -> int:
+    # [FUNCTION DOC]
+    # Maps the response to an action id: 0 if it contains "hit", else 1 (STAND, also the default). If not legal, returns the
+    # first legal action. Raises IndexError if legal_actions is empty and the chosen id is not legal.
     """
     Parse action from model's text response.
 
@@ -236,12 +266,16 @@ def parse_action(response_text: str, legal_actions: list[int]) -> int:
 
 @dataclass
 class BlackJackReward(ForgeActor):
+    # [CLASS DOC]
+    # Forge actor that shapes game rewards and records reward metrics.
     """Reward actor for evaluating game outcomes."""
 
     @endpoint
     async def evaluate_response(
         self, prompt: str, response: str, game_reward: float
     ) -> float:
+        # [FUNCTION DOC]
+        # Endpoint: returns 2.0 for a positive game reward, 0.5 for zero, otherwise the raw reward as float; records average and sum metrics.
         """
         Evaluate episode reward with optional shaping.
 
@@ -270,10 +304,14 @@ class BlackJackReward(ForgeActor):
 
 @dataclass
 class ComputeAdvantages(ForgeActor):
+    # [CLASS DOC]
+    # Forge actor computing group-relative advantages.
     """Actor for computing group-relative advantages."""
 
     @endpoint
     async def compute(self, group: Group) -> list[float]:
+        # [FUNCTION DOC]
+        # Endpoint: returns (reward - group mean) / (group std + 1e-4) for each episode in the group, as a list of floats.
         """
         Compute advantages normalized by group statistics.
 
@@ -292,6 +330,8 @@ class ComputeAdvantages(ForgeActor):
 
 @dataclass
 class EnvironmentActor(ForgeActor):
+    # [CLASS DOC]
+    # Forge actor holding the environment server URL and model name, and providing the tokenizer and pad token id.
     """Actor that manages OpenEnv connections and tokenizer."""
 
     server_url: str = "http://localhost:8004"
@@ -299,17 +339,23 @@ class EnvironmentActor(ForgeActor):
 
     @endpoint
     def setup(self):
+        # [FUNCTION DOC]
+        # Endpoint: loads the tokenizer for the model and prints an initialisation message.
         """Initialize tokenizer."""
         self._tokenizer = get_tokenizer(self.model)
         print(f"EnvironmentActor initialized (server: {self.server_url})")
 
     @endpoint
     async def get_tokenizer(self):
+        # [FUNCTION DOC]
+        # Endpoint: returns the loaded tokenizer.
         """Get tokenizer instance."""
         return self._tokenizer
 
     @endpoint
     async def pad_token(self):
+        # [FUNCTION DOC]
+        # Endpoint: returns the tokenizer's pad token id.
         """Get padding token ID."""
         return self._tokenizer.pad_token_id
 
@@ -324,6 +370,9 @@ BlackJackEnvActor = EnvironmentActor
 
 
 def setup_game_logger(log_dir: str = "game_logs"):
+    # [FUNCTION DOC]
+    # Creates the log directory and a timestamped log file, writes a header, and returns a logging function.
+    # Side effects: filesystem writes, stdout.
     """
     Setup detailed game logging to file.
 
@@ -338,6 +387,8 @@ def setup_game_logger(log_dir: str = "game_logs"):
     log_file = Path(log_dir) / f"games_{timestamp}.log"
 
     def log(message: str):
+        # [FUNCTION DOC]
+        # HELPER: Appends the message to the log file and prints it.
         """Write message to log file and console."""
         with open(log_file, "a") as f:
             f.write(f"{message}\n")
@@ -352,6 +403,9 @@ def setup_game_logger(log_dir: str = "game_logs"):
 
 
 async def drop_weights(version: int):
+    # [FUNCTION DOC]
+    # Deletes all torchstore keys for the given weight version (dropping the whole-state-dict DCP handle first if present)
+    # and prints timing. Side effects: mutates torchstore.
     """
     Drop old model weights from torchstore.
 
@@ -390,6 +444,12 @@ async def play_game(
     game_log,
     rollout_count: int = 0
 ):
+    # [FUNCTION DOC]
+    # Plays one blackjack game against the OpenSpiel server: resets, then up to 10 steps formats a prompt, generates one
+    # response with the policy service, parses and executes the action, logging everything. Assigns the final step reward
+    # to every step and records game metrics. Returns a list of dicts (game_id, final_reward, step_num, prompt, response
+    # Completion). Always closes the env.
+    # KNOWN ISSUE: the outcome comparisons fail with TypeError if the final step reward is None.
     """
     Play a single game and collect episode data.
 
@@ -502,6 +562,8 @@ play_blackjack_game = play_game
 
 
 def show_openenv_observation(observation):
+    # [FUNCTION DOC]
+    # Prints the observation's game phase, legal actions, info-state length and its first 10 values.
     """
     Pretty print an OpenEnv observation.
 
@@ -516,6 +578,9 @@ def show_openenv_observation(observation):
 
 
 def play_random_policy(server_url: str, num_games: int = 100):
+    # [FUNCTION DOC]
+    # Plays num_games games with uniformly random legal actions (max 10 steps each) and returns a dict with wins, losses,
+    # pushes, win rate and total games. Closes the env afterwards. Side effects: network I/O.
     """
     Benchmark random policy on OpenEnv environment.
 
@@ -563,6 +628,9 @@ def play_random_policy(server_url: str, num_games: int = 100):
 
 
 def play_heuristic_policy(server_url: str, num_games: int = 100):
+    # [FUNCTION DOC]
+    # Placeholder for a heuristic policy benchmark: currently just returns play_random_policy results.
+    # KNOWN ISSUE: the docstring describes a HIT-below-17 heuristic, but the function delegates to the random policy.
     """
     Benchmark basic strategy heuristic on OpenEnv environment.
 
@@ -586,6 +654,8 @@ def play_heuristic_policy(server_url: str, num_games: int = 100):
 
 
 class GRPOTrainer:
+    # [CLASS DOC]
+    # Facade over initialised Forge services exposing the policy, an async training run and shutdown.
     """
     Simplified interface for GRPO training that hides Forge complexity.
 
@@ -594,6 +664,8 @@ class GRPOTrainer:
     """
 
     def __init__(self, services: dict, cfg: DictConfig):
+        # [FUNCTION DOC]
+        # Stores the services dict and config, an unused metrics list and a shutdown event.
         """
         Initialize trainer (called by setup_forge_training).
 
@@ -608,10 +680,19 @@ class GRPOTrainer:
 
     @property
     def policy(self):
+        # [FUNCTION DOC]
+        # Returns the policy (generator) service.
         """Access the trained policy for playing games."""
         return self._services['policy']
 
     async def run(self, steps: int) -> dict:
+        # [FUNCTION DOC]
+        # Runs concurrent rollout and training loops. Rollouts: repeatedly plays group_size games, turns every step into an
+        # Episode with a shaped reward, fills a token tensor for reference log-probs, computes advantages, adds episodes to the
+        # replay buffer and prints a win rate. Training: samples batches until steps train steps are done, pushing weights,
+        # updating the policy, dropping the previous version and flushing metrics. When training ends, signals the rollouts to
+        # stop (cancelling after 5 s). Returns a metrics dict.
+        # KNOWN ISSUE: the returned metrics dict is never populated (its lists stay empty).
         """
         Run GRPO training for specified steps.
 
@@ -649,6 +730,8 @@ class GRPOTrainer:
 
         # Rollout loop (copy-pasted from blackjack_main_fixed.py)
         async def continuous_rollouts():
+            # [FUNCTION DOC]
+            # HELPER: Rollout loop described in run; runs until the shutdown event is set.
             rollout_count = 0
 
             while not self._shutdown_event.is_set():
@@ -718,6 +801,8 @@ class GRPOTrainer:
 
         # Training loop (copy-pasted from blackjack_main_fixed.py)
         async def continuous_training():
+            # [FUNCTION DOC]
+            # HELPER: Training loop described in run; polls the replay buffer every 0.1 s when empty.
             training_step = 0
 
             while training_step < steps:
@@ -758,11 +843,18 @@ class GRPOTrainer:
         return metrics
 
     async def shutdown(self):
+        # [FUNCTION DOC]
+        # Shuts down all Forge services and the provisioner.
         """Shutdown all Forge services."""
         await shutdown()
 
 
 async def setup_forge_training(config_path: str) -> GRPOTrainer:
+    # [FUNCTION DOC]
+    # Loads the YAML config, initialises the provisioner (with launcher config if provided), metric logger, and all services
+    # (environment actor, generator, trainer with the GRPO loss, replay buffer with collate, advantages, reference model,
+    # reward actor) concurrently, initialises torchstore on the trainer host mesh, fetches the tokenizer and pad id.
+    # Returns a GRPOTrainer wrapping all services.
     """
     Setup Forge GRPO training infrastructure.
 

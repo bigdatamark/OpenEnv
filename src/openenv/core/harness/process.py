@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Loop-agnostic helper for a long-lived CLI harness subprocess with line-based stdio,
+# using subprocess.Popen plus daemon reader threads (stdout lines into a queue, stderr
+# tail into a bounded deque) so it works across event loops. Blocking calls are offloaded
+# with asyncio.to_thread. Processes run in their own session/process group.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Loop-agnostic subprocess helper for CLI harnesses (RFC 005)."""
@@ -20,6 +25,10 @@ _STDERR_TAIL_LINES = 50
 
 
 class HarnessProcess:
+    # [CLASS DOC]
+    # Manages one harness subprocess: command, cwd, extra env vars, startup timeout and
+    # SIGTERM grace period; holds the Popen handle, stdout line queue (None marks EOF), last
+    # 50 stderr lines and reader threads.
     """
     Manage a long-lived CLI harness subprocess with line-based stdio.
 
@@ -60,6 +69,9 @@ class HarnessProcess:
         startup_timeout_s: float = 30.0,
         terminate_grace_s: float = 5.0,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration (copies of command and env vars) and initializes empty process
+        # state. Starts nothing.
         self.command = list(command)
         self.cwd = cwd
         self.env_vars = dict(env_vars or {})
@@ -72,14 +84,26 @@ class HarnessProcess:
         self._reader_threads: list[threading.Thread] = []
 
     def is_running(self) -> bool:
+        # [FUNCTION DOC]
+        # True if a process exists and has not exited.
         """Whether the subprocess is alive."""
         return self._proc is not None and self._proc.poll() is None
 
     def drain_stderr(self) -> str:
+        # [FUNCTION DOC]
+        # Returns the buffered recent stderr lines concatenated.
         """Return the most recent stderr output for diagnostics."""
         return "".join(self._stderr_tail)
 
     async def start(self, ready_check: Optional[Callable[[str], bool]] = None) -> None:
+        # [FUNCTION DOC]
+        # Starts the subprocess (UTF-8 text pipes with replacement, line buffered, new session,
+        # environment = os.environ plus env_vars), after stopping any exited previous process;
+        # spawns reader threads. If ready_check is given, polls stdout lines (0.2s slices) until
+        # one satisfies it.
+        # Raises: HarnessStartupError if already running, spawn fails, the process exits during
+        # startup, or readiness times out. Any exception (including cancellation or a raising
+        # ready_check) stops the process before propagating.
         """
         Start the subprocess and optionally wait for a readiness line.
 
@@ -165,6 +189,9 @@ class HarnessProcess:
             raise
 
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Async. Stops the process via _stop_blocking in a worker thread and clears it. No-op if
+        # never started.
         """
         Stop the subprocess, escalating SIGTERM to SIGKILL after the grace period.
 
@@ -178,6 +205,10 @@ class HarnessProcess:
         self._proc = None
 
     def _stop_blocking(self, proc: subprocess.Popen) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Sends SIGTERM to the process group, polls until the group is gone or the grace
+        # period expires (then SIGKILL), waits for the process, joins reader threads (2s each),
+        # closes stdin, and clears the reader thread list.
         # start_new_session=True makes proc.pid the process-group ID. The
         # group can outlive its leader, including after proc.poll() reaps it.
         self._signal_group(proc, signal.SIGTERM)
@@ -208,6 +239,9 @@ class HarnessProcess:
 
     @staticmethod
     def _signal_group(proc: subprocess.Popen, sig: signal.Signals) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Sends sig to the process group; on failure falls back to signalling the process
+        # itself, ignoring ProcessLookupError.
         """Signal the process group (start_new_session=True) with a fallback."""
         try:
             os.killpg(proc.pid, sig)
@@ -218,6 +252,9 @@ class HarnessProcess:
                 pass
 
     async def write_line(self, text: str) -> None:
+        # [FUNCTION DOC]
+        # Writes text plus a newline (if missing) to stdin and flushes, in a worker thread.
+        # Raises: HarnessNotRunningError if not running, stdin is missing, or the write fails.
         """
         Write one line to the subprocess's stdin.
 
@@ -237,6 +274,8 @@ class HarnessProcess:
             text += "\n"
 
         def _write() -> None:
+            # [FUNCTION DOC]
+            # HELPER: Performs the blocking write/flush, converting pipe errors to HarnessNotRunningError.
             try:
                 self._proc.stdin.write(text)
                 self._proc.stdin.flush()
@@ -248,6 +287,9 @@ class HarnessProcess:
         await asyncio.to_thread(_write)
 
     async def read_line(self, timeout_s: Optional[float] = None) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Reads one stdout line (without trailing newline) from the queue in a worker thread.
+        # Returns None on timeout or EOF; the EOF marker is re-queued for later readers.
         """
         Read one stdout line from the subprocess.
 
@@ -262,6 +304,8 @@ class HarnessProcess:
         stdout_queue = self._stdout_queue
 
         def _read() -> Optional[str]:
+            # [FUNCTION DOC]
+            # HELPER: Blocking queue read implementing read_line.
             try:
                 item = stdout_queue.get(timeout=timeout_s)
             except queue.Empty:
@@ -279,7 +323,13 @@ class HarnessProcess:
         sink: Callable[[str], None],
         on_eof: Optional[Callable[[], None]] = None,
     ) -> threading.Thread:
+        # [FUNCTION DOC]
+        # HELPER: Starts a daemon thread that feeds each line of stream to sink, ignores
+        # ValueError/OSError from closed pipes, then closes the stream and calls on_eof.
+        # Returns the thread.
         def _pump() -> None:
+            # [FUNCTION DOC]
+            # HELPER: Thread body for _spawn_reader.
             try:
                 if stream is None:
                     return

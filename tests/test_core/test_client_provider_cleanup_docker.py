@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Opt-in (OPENENV_DOCKER_INTEGRATION=1) test that GenericEnvClient cleanup failures never
+# orphan a real Docker container. Uses a provider that runs a labelled, network-less
+# "sleep" container from a locally cached image (default alpine:latest) with injectable
+# readiness/stop failures; no WebSocket is ever opened.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Opt-in EnvClient cleanup tests with real, fault-injected Docker resources.
@@ -30,6 +35,9 @@ pytestmark = [
 
 
 def docker(*args):
+    # [FUNCTION DOC]
+    # HELPER: Runs the docker CLI with the args (30 s timeout). Returns stripped stdout.
+    # Raises CalledProcessError on non-zero exit. Side effect: subprocess.
     return subprocess.run(
         ["docker", *args],
         capture_output=True,
@@ -40,9 +48,14 @@ def docker(*args):
 
 
 class DockerLifecycleProvider(ContainerProvider):
+    # [CLASS DOC]
+    # HELPER: ContainerProvider holding a single container id; tags containers with a unique
+    # label so leftovers can be found; counts stop calls.
     """Single-handle provider with injectable readiness and stop failures."""
 
     def __init__(self, image):
+        # [FUNCTION DOC]
+        # Stores the image, generates a unique label, and sets fail_stop True and fail_readiness False.
         self.image = image
         self.label = f"openenv-cleanup-test={uuid4().hex}"
         self.container_id = None
@@ -52,6 +65,9 @@ class DockerLifecycleProvider(ContainerProvider):
         self.fail_stop = True
 
     def start_container(self):
+        # [FUNCTION DOC]
+        # Starts a detached labelled container (no pull, no network) running sleep 300, records
+        # its id. Returns: a placeholder "http://localhost:8000".
         self.container_id = docker(
             "run",
             "--detach",
@@ -68,6 +84,8 @@ class DockerLifecycleProvider(ContainerProvider):
         return "http://localhost:8000"
 
     def wait_for_ready(self, base_url, timeout_s=30.0):
+        # [FUNCTION DOC]
+        # Asserts the container is running; raises TimeoutError if fail_readiness is set.
         assert (
             docker("inspect", "--format={{.State.Running}}", self.container_id)
             == "true"
@@ -76,6 +94,9 @@ class DockerLifecycleProvider(ContainerProvider):
             raise TimeoutError("injected readiness failure")
 
     def stop_container(self):
+        # [FUNCTION DOC]
+        # Counts the call; raises OSError if fail_stop is set; otherwise stops and removes the
+        # container and clears the id.
         self.stop_calls += 1
         if self.fail_stop:
             raise OSError("injected Docker cleanup failure")
@@ -84,6 +105,8 @@ class DockerLifecycleProvider(ContainerProvider):
         self.container_id = None
 
     def remaining_containers(self):
+        # [FUNCTION DOC]
+        # Returns ids of all containers (any state) carrying this provider's label.
         return docker(
             "ps", "--all", "--quiet", "--no-trunc", "--filter", f"label={self.label}"
         ).splitlines()
@@ -91,6 +114,9 @@ class DockerLifecycleProvider(ContainerProvider):
 
 @pytest.fixture
 def docker_provider():
+    # [FUNCTION DOC]
+    # Fixture: verifies the test image exists locally (fails otherwise), yields a provider,
+    # then force-removes any labelled leftovers and asserts none remain.
     image = os.environ.get("OPENENV_DOCKER_TEST_IMAGE", "alpine:latest")
     # Opting in with a missing daemon/image is a failure, not a silent skip.
     docker("image", "inspect", image)
@@ -107,7 +133,11 @@ def docker_provider():
 
 
 class ConstructorFailureClient(GenericEnvClient):
+    # [CLASS DOC]
+    # HELPER: GenericEnvClient whose constructor raises ValueError whenever a base_url is given.
     def __init__(self, base_url=None, **kwargs):
+        # [FUNCTION DOC]
+        # Raises ValueError for a base_url; otherwise defers to GenericEnvClient.
         if base_url is not None:
             raise ValueError("injected constructor failure")
         super().__init__(base_url=base_url, **kwargs)
@@ -119,6 +149,11 @@ class ConstructorFailureClient(GenericEnvClient):
 async def test_failed_cleanup_never_orphans_a_real_container(
     docker_provider, failure, sync
 ):
+    # [FUNCTION DOC]
+    # For readiness/constructor failures in async and sync modes: the first new_session fails
+    # leaving one container; a retry only retries stop (OSError) without starting another;
+    # after stop works, the next attempt removes the old container, starts and cleans a new
+    # one; double close does not stop again; ws_connect is never called.
     provider = docker_provider
     provider.fail_readiness = failure == "readiness"
     client_type = (
@@ -128,6 +163,8 @@ async def test_failed_cleanup_never_orphans_a_real_container(
     client = parent.sync() if sync else parent
 
     async def invoke(method):
+        # [FUNCTION DOC]
+        # HELPER: Calls the named no-arg client method, awaiting in async mode.
         result = getattr(client, method)()
         if not sync:
             return await result

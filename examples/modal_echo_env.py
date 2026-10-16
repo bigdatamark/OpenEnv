@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Hello-world example running the Echo environment in a Modal sandbox via ModalProvider and talking to it through EchoEnv
+# over the Modal tunnel. Requires a configured Modal account. Side effects: builds an image and starts/stops a remote sandbox, logging.
 """Hello-world example running the Echo environment on Modal.
 
 Boots the echo-env server inside a Modal sandbox via ``ModalProvider``, then
@@ -23,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _interact(base_url: str) -> None:
+    # [FUNCTION DOC]
+    # HELPER: Connects an EchoEnv client to the URL, resets, logs the available tool names and the echo_message result.
     """Run the async WebSocket interaction against the running sandbox."""
     async with EchoEnv(base_url=base_url) as env:
         await env.reset()
@@ -35,6 +40,9 @@ async def _interact(base_url: str) -> None:
 
 
 def main() -> int:
+    # [FUNCTION DOC]
+    # Configures logging, builds a Modal image from the echo Dockerfile, starts the sandbox, waits up to 180 s for readiness,
+    # runs the interaction, and stops the sandbox when the provider context exits. Returns 0.
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     image = ModalProvider.image_from_dockerfile("envs/echo_env/server/Dockerfile")

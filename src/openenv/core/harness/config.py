@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pydantic configuration types for external agentic harness processes: the transport
+# enum and HarnessConfig (command, working directory, env vars, transport, MCP config
+# path, timeouts, model and API-key env var name).
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Configuration types for external agentic harnesses (RFC 005)."""
@@ -11,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class HarnessTransport(str, Enum):
+    # [CLASS DOC]
+    # String enum of harness transports: stdio, http (streamable HTTP), mcp.
     """How a harness exposes its interface to the adapter."""
 
     STDIO = "stdio"
@@ -19,6 +25,11 @@ class HarnessTransport(str, Enum):
 
 
 class HarnessConfig(BaseModel):
+    # [CLASS DOC]
+    # Pydantic model (extra fields forbidden) describing how to launch and configure a harness
+    # subprocess. Fields: name, command (non-empty list), working_directory (default
+    # "/workspace"), env_vars, transport (default stdio), mcp_config_path, startup_timeout_s
+    # (30), session_timeout_s (600, per turn), model, api_key_env_var.
     """
     Configuration for an external agentic harness process.
 
@@ -73,6 +84,8 @@ class HarnessConfig(BaseModel):
     @field_validator("command")
     @classmethod
     def _command_must_be_non_empty(cls, value: list[str]) -> list[str]:
+        # [FUNCTION DOC]
+        # HELPER: Field validator; returns command unchanged, raises ValueError if it is empty.
         if not value:
             raise ValueError("command must contain at least one element")
         return value

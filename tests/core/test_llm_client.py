@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for openenv.core.llm_client: the LLMClient abstract base (base_url construction and
+# endpoint validation), OpenAIClient and AnthropicClient construction and request mapping (SDKs
+# mocked or driven through an httpx mock transport), LLMResponse, the create_llm_client factory,
+# and helpers converting MCP tool schemas and OpenAI-format messages to provider formats.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for LLMClient abstraction, OpenAIClient, AnthropicClient, and helpers."""
@@ -23,18 +29,28 @@ from openenv.core.llm_client import (
 
 
 class TestLLMClientABC:
+    # [CLASS DOC]
+    # Tests the LLMClient base class.
     """Test the abstract base class."""
 
     def test_cannot_instantiate_directly(self):
+        # [FUNCTION DOC]
+        # LLMClient is abstract.
         """LLMClient is abstract and cannot be instantiated."""
         with pytest.raises(TypeError):
             LLMClient("http://localhost", 8000)
 
     def test_concrete_subclass(self):
+        # [FUNCTION DOC]
+        # A subclass implementing complete stores endpoint and port.
         """A concrete subclass can be instantiated."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         client = StubClient("http://localhost", 8000)
@@ -42,20 +58,32 @@ class TestLLMClientABC:
         assert client.port == 8000
 
     def test_base_url_property(self):
+        # [FUNCTION DOC]
+        # base_url joins endpoint and port.
         """base_url combines endpoint and port."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         client = StubClient("http://localhost", 8000)
         assert client.base_url == "http://localhost:8000"
 
     def test_base_url_custom_endpoint(self):
+        # [FUNCTION DOC]
+        # base_url works for an https endpoint.
         """base_url works with custom endpoints."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         client = StubClient("https://api.example.com", 443)
@@ -78,10 +106,17 @@ class TestLLMClientABC:
         ],
     )
     def test_base_url_endpoint_forms(self, endpoint, port, expected):
+        # [FUNCTION DOC]
+        # Parametrized: the port is appended only when the URL has none, trailing slashes are dropped,
+        # paths and IPv6 hosts are preserved.
         """Port is appended only when the URL names none; a path survives."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         assert StubClient(endpoint, port).base_url == expected
@@ -103,10 +138,17 @@ class TestLLMClientABC:
         ],
     )
     def test_base_url_malformed_endpoint_raises(self, endpoint):
+        # [FUNCTION DOC]
+        # Parametrized malformed endpoints (double port, no scheme, bad scheme, credentials, query,
+        # fragment, invalid port) raise ValueError "Invalid endpoint URL".
         """Invalid endpoints fail with a clear error instead of a bad URL."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         with pytest.raises(ValueError, match="Invalid endpoint URL"):
@@ -114,20 +156,32 @@ class TestLLMClientABC:
 
     @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
     def test_base_url_port_out_of_range_raises(self, port):
+        # [FUNCTION DOC]
+        # Out-of-range port arguments raise ValueError.
         """The appended port is range-checked like a port inside the URL."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         with pytest.raises(ValueError, match="out of range 1-65535"):
             StubClient("http://localhost", port).base_url
 
     def test_base_url_error_does_not_echo_credentials(self):
+        # [FUNCTION DOC]
+        # A credential-bearing endpoint error masks the secret.
         """A credential-bearing endpoint is rejected without leaking the secret."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         with pytest.raises(ValueError, match="credentials") as excinfo:
@@ -137,10 +191,16 @@ class TestLLMClientABC:
         assert "***@localhost:8000/v1" in str(excinfo.value)
 
     def test_base_url_conflicting_port_raises(self):
+        # [FUNCTION DOC]
+        # A port argument conflicting with the URL's port raises ValueError.
         """An explicit port that differs from the URL's port is rejected."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         with pytest.raises(ValueError, match="conflicts with port=8000"):
@@ -148,10 +208,16 @@ class TestLLMClientABC:
 
     @pytest.mark.asyncio
     async def test_complete_with_tools_not_implemented(self):
+        # [FUNCTION DOC]
+        # The default complete_with_tools raises NotImplementedError naming the subclass.
         """Default complete_with_tools raises NotImplementedError."""
 
         class StubClient(LLMClient):
+            # [CLASS DOC]
+            # HELPER: Minimal concrete LLMClient for this test.
             async def complete(self, prompt: str, **kwargs) -> str:
+                # [FUNCTION DOC]
+                # HELPER: Returns "stub".
                 return "stub"
 
         client = StubClient("http://localhost", 8000)
@@ -160,10 +226,15 @@ class TestLLMClientABC:
 
 
 class TestOpenAIClientConstruction:
+    # [CLASS DOC]
+    # Tests OpenAIClient construction (AsyncOpenAI patched).
     """Test OpenAIClient initialization."""
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_basic_construction(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # Stores endpoint, port, model and default temperature 0.0, max_tokens 256, no system prompt; the SDK
+        # gets base URL <base>/v1 and api key "not-needed".
         """OpenAIClient stores params and creates AsyncOpenAI."""
         client = OpenAIClient("http://localhost", 8000, model="gpt-4")
 
@@ -181,6 +252,8 @@ class TestOpenAIClientConstruction:
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_custom_api_key(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # A given api key is passed to the SDK.
         """API key is passed through to AsyncOpenAI."""
         OpenAIClient("http://localhost", 8000, model="gpt-4", api_key="sk-test-123")
 
@@ -191,6 +264,8 @@ class TestOpenAIClientConstruction:
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_default_api_key_when_none(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # api_key None becomes "not-needed".
         """api_key=None defaults to 'not-needed'."""
         OpenAIClient("http://localhost", 8000, model="gpt-4", api_key=None)
 
@@ -201,6 +276,8 @@ class TestOpenAIClientConstruction:
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_system_prompt_stored(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # The system prompt is stored.
         """System prompt is stored for use in complete()."""
         client = OpenAIClient(
             "http://localhost",
@@ -212,6 +289,8 @@ class TestOpenAIClientConstruction:
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_custom_temperature_and_max_tokens(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # Custom temperature and max_tokens are stored.
         """Custom temperature and max_tokens are stored."""
         client = OpenAIClient(
             "http://localhost",
@@ -246,6 +325,8 @@ class TestOpenAIClientConstruction:
         ],
     )
     def test_endpoint_url_forms(self, endpoint, port, expected):
+        # [FUNCTION DOC]
+        # Parametrized: /v1 is appended only when the URL has no path; existing paths are used as-is.
         """/v1 is appended only when the URL has no path; a path is used as-is."""
         with patch("openenv.core.llm_client.AsyncOpenAI") as mock_openai_cls:
             OpenAIClient(endpoint, port, model="gpt-4")
@@ -256,17 +337,23 @@ class TestOpenAIClientConstruction:
         )
 
     def test_endpoint_with_malformed_port_raises(self):
+        # [FUNCTION DOC]
+        # A double-port endpoint raises ValueError.
         """The double-port form fails before any client is created."""
         with pytest.raises(ValueError, match="Invalid endpoint URL"):
             OpenAIClient("http://localhost:8000:8000", 8000, model="gpt-4")
 
     def test_endpoint_with_conflicting_port_raises(self):
+        # [FUNCTION DOC]
+        # A conflicting port raises ValueError.
         """A port argument that contradicts the URL's port is rejected."""
         with pytest.raises(ValueError, match="conflicts with port=8000"):
             OpenAIClient("http://localhost:11434", 8000, model="gpt-4")
 
 
 class TestOpenAIClientRequestUrl:
+    # [CLASS DOC]
+    # Tests the URL actually requested by the real OpenAI SDK.
     """The URL the SDK actually requests, not only what is handed to it."""
 
     @pytest.mark.asyncio
@@ -292,10 +379,14 @@ class TestOpenAIClientRequestUrl:
         ],
     )
     async def test_chat_completion_request_url(self, endpoint, port, expected):
+        # [FUNCTION DOC]
+        # Parametrized: complete reaches <base>/chat/completions via an httpx mock transport and returns its content.
         """complete() reaches <base>/chat/completions through the real SDK."""
         requested: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
+            # [FUNCTION DOC]
+            # HELPER: Mock transport handler recording the URL and returning a minimal chat completion "ok".
             requested.append(str(request.url))
             return httpx.Response(
                 200,
@@ -315,6 +406,8 @@ class TestOpenAIClientRequestUrl:
             )
 
         def build_sdk_client(**kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Builds a real AsyncOpenAI with the given kwargs and an httpx client on the mock transport.
             transport = httpx.MockTransport(handler)
             return AsyncOpenAI(
                 http_client=httpx.AsyncClient(transport=transport), **kwargs
@@ -328,10 +421,14 @@ class TestOpenAIClientRequestUrl:
 
 
 class TestOpenAIClientComplete:
+    # [CLASS DOC]
+    # Tests OpenAIClient.complete.
     """Test the complete() method."""
 
     @pytest.mark.asyncio
     async def test_complete_without_system_prompt(self):
+        # [FUNCTION DOC]
+        # Sends only the user message with default sampling and returns the content.
         """complete() sends user message only when no system prompt."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
@@ -353,6 +450,8 @@ class TestOpenAIClientComplete:
 
     @pytest.mark.asyncio
     async def test_complete_with_system_prompt(self):
+        # [FUNCTION DOC]
+        # Prepends the system message when configured.
         """complete() includes system message when system_prompt is set."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
@@ -382,6 +481,8 @@ class TestOpenAIClientComplete:
 
     @pytest.mark.asyncio
     async def test_complete_kwargs_override(self):
+        # [FUNCTION DOC]
+        # Keyword arguments override temperature and max_tokens.
         """Keyword arguments override default temperature and max_tokens."""
         mock_openai = MagicMock()
         mock_response = MagicMock()
@@ -402,10 +503,14 @@ class TestOpenAIClientComplete:
 
 
 class TestOpenAIClientCompleteWithTools:
+    # [CLASS DOC]
+    # Tests OpenAIClient.complete_with_tools.
     """Test complete_with_tools() on OpenAIClient."""
 
     @pytest.mark.asyncio
     async def test_no_tool_calls(self):
+        # [FUNCTION DOC]
+        # A response without tool calls yields an LLMResponse with empty tool_calls.
         """Response without tool calls returns empty tool_calls list."""
         mock_openai = MagicMock()
         mock_msg = MagicMock()
@@ -428,6 +533,8 @@ class TestOpenAIClientCompleteWithTools:
 
     @pytest.mark.asyncio
     async def test_kwargs_override(self):
+        # [FUNCTION DOC]
+        # Keyword arguments override sampling defaults; no tools parameter is sent for an empty tool list.
         """Keyword arguments override default temperature and max_tokens."""
         mock_openai = MagicMock()
         mock_msg = MagicMock()
@@ -456,6 +563,8 @@ class TestOpenAIClientCompleteWithTools:
 
     @pytest.mark.asyncio
     async def test_with_tool_calls(self):
+        # [FUNCTION DOC]
+        # Tool calls are parsed into ToolCall objects with JSON-decoded arguments.
         """Response with tool calls are parsed into ToolCall objects."""
         mock_openai = MagicMock()
         mock_tc = MagicMock()
@@ -494,9 +603,13 @@ class TestOpenAIClientCompleteWithTools:
 
 
 class TestAnthropicClientConstruction:
+    # [CLASS DOC]
+    # Tests AnthropicClient construction.
     """Test AnthropicClient initialization."""
 
     def test_missing_anthropic_package(self):
+        # [FUNCTION DOC]
+        # Without the anthropic package, construction raises ImportError.
         """Raises ImportError with helpful message when anthropic is missing."""
         with patch.dict("sys.modules", {"anthropic": None}):
             with pytest.raises(ImportError, match="anthropic"):
@@ -506,15 +619,21 @@ class TestAnthropicClientConstruction:
 
     @patch("openenv.core.llm_client.AnthropicClient.__init__", return_value=None)
     def test_is_llm_client_subclass(self, mock_init):
+        # [FUNCTION DOC]
+        # AnthropicClient subclasses LLMClient.
         """AnthropicClient is a proper LLMClient subclass."""
         assert issubclass(AnthropicClient, LLMClient)
 
 
 class TestAnthropicClientComplete:
+    # [CLASS DOC]
+    # Tests AnthropicClient.complete.
     """Test the complete() method on AnthropicClient."""
 
     @pytest.mark.asyncio
     async def test_complete_basic(self):
+        # [FUNCTION DOC]
+        # complete calls the messages API on a manually-initialized client and returns the text block.
         """complete() calls the Anthropic messages API and returns text."""
         mock_anthropic = MagicMock()
         mock_text_block = MagicMock()
@@ -543,10 +662,14 @@ class TestAnthropicClientComplete:
 
 
 class TestAnthropicClientCompleteWithTools:
+    # [CLASS DOC]
+    # Tests AnthropicClient.complete_with_tools.
     """Test complete_with_tools() on AnthropicClient."""
 
     @pytest.mark.asyncio
     async def test_with_tool_use_response(self):
+        # [FUNCTION DOC]
+        # Text and tool_use blocks are parsed into content and ToolCall objects.
         """Tool use blocks are parsed into ToolCall objects."""
         mock_anthropic = MagicMock()
         mock_text_block = MagicMock()
@@ -597,9 +720,13 @@ class TestAnthropicClientCompleteWithTools:
 
 
 class TestLLMResponse:
+    # [CLASS DOC]
+    # Tests LLMResponse.to_message_dict.
     """Test LLMResponse dataclass."""
 
     def test_to_message_dict_no_tools(self):
+        # [FUNCTION DOC]
+        # Without tool calls the dict is a plain assistant message.
         """to_message_dict without tool calls is a plain assistant message."""
         resp = LLMResponse(content="hello")
         msg = resp.to_message_dict()
@@ -607,6 +734,8 @@ class TestLLMResponse:
         assert "tool_calls" not in msg
 
     def test_to_message_dict_with_tools(self):
+        # [FUNCTION DOC]
+        # With tool calls the dict includes OpenAI-format tool_calls.
         """to_message_dict includes tool_calls in OpenAI format."""
         resp = LLMResponse(
             content="",
@@ -628,16 +757,22 @@ class TestLLMResponse:
 
 
 class TestCreateLLMClient:
+    # [CLASS DOC]
+    # Tests create_llm_client.
     """Test the create_llm_client factory."""
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_openai_provider(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # "openai" creates an OpenAIClient.
         """'openai' creates an OpenAIClient."""
         client = create_llm_client("openai", "gpt-4", "sk-key")
         assert isinstance(client, OpenAIClient)
         assert client.model == "gpt-4"
 
     def test_anthropic_provider(self):
+        # [FUNCTION DOC]
+        # "anthropic" creates an AnthropicClient.
         """'anthropic' creates an AnthropicClient."""
         mock_async_anthropic = MagicMock()
         mock_module = MagicMock()
@@ -650,18 +785,24 @@ class TestCreateLLMClient:
         assert client.model == "claude-sonnet-4-20250514"
 
     def test_unsupported_provider(self):
+        # [FUNCTION DOC]
+        # An unknown provider raises ValueError.
         """Unsupported provider raises ValueError."""
         with pytest.raises(ValueError, match="google"):
             create_llm_client("google", "gemini-pro", "key")
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_case_insensitive(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # Provider names are case-insensitive.
         """Provider name is case-insensitive."""
         client = create_llm_client("OpenAI", "gpt-4", "sk-key")
         assert isinstance(client, OpenAIClient)
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_custom_params(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # Temperature and max_tokens are forwarded.
         """Temperature and max_tokens are forwarded."""
         client = create_llm_client(
             "openai", "gpt-4", "sk-key", temperature=0.5, max_tokens=1024
@@ -671,6 +812,8 @@ class TestCreateLLMClient:
 
     @patch("openenv.core.llm_client.AsyncOpenAI")
     def test_system_prompt_forwarded(self, mock_openai_cls):
+        # [FUNCTION DOC]
+        # The system prompt is forwarded.
         """system_prompt is forwarded to the client."""
         client = create_llm_client(
             "openai", "gpt-4", "sk-key", system_prompt="You are a judge."
@@ -684,9 +827,13 @@ class TestCreateLLMClient:
 
 
 class TestCleanMCPSchema:
+    # [CLASS DOC]
+    # Tests _clean_mcp_schema.
     """Test _clean_mcp_schema helper."""
 
     def test_non_dict_returns_empty(self):
+        # [FUNCTION DOC]
+        # A non-dict yields an empty object schema.
         assert _clean_mcp_schema("not a dict") == {
             "type": "object",
             "properties": {},
@@ -694,11 +841,15 @@ class TestCleanMCPSchema:
         }
 
     def test_passthrough_simple_object(self):
+        # [FUNCTION DOC]
+        # A simple object schema keeps its properties.
         schema = {"type": "object", "properties": {"x": {"type": "string"}}}
         result = _clean_mcp_schema(schema)
         assert result["properties"]["x"]["type"] == "string"
 
     def test_oneOf_selects_object(self):
+        # [FUNCTION DOC]
+        # oneOf resolves to the object alternative.
         schema = {
             "oneOf": [
                 {"type": "string"},
@@ -709,6 +860,8 @@ class TestCleanMCPSchema:
         assert "a" in result["properties"]
 
     def test_allOf_merges(self):
+        # [FUNCTION DOC]
+        # allOf merges properties and required lists.
         schema = {
             "allOf": [
                 {"properties": {"a": {"type": "string"}}, "required": ["a"]},
@@ -721,6 +874,8 @@ class TestCleanMCPSchema:
         assert result["required"] == ["a", "b"]
 
     def test_anyOf_selects_object(self):
+        # [FUNCTION DOC]
+        # anyOf resolves to the object alternative.
         schema = {
             "anyOf": [
                 {"type": "null"},
@@ -731,10 +886,14 @@ class TestCleanMCPSchema:
         assert "x" in result["properties"]
 
     def test_sets_default_type(self):
+        # [FUNCTION DOC]
+        # A missing type defaults to "object".
         result = _clean_mcp_schema({"properties": {"a": {"type": "string"}}})
         assert result["type"] == "object"
 
     def test_does_not_mutate_input(self):
+        # [FUNCTION DOC]
+        # The input dict is not modified.
         """_clean_mcp_schema must not modify the caller's dict."""
         original = {"type": "object"}
         _clean_mcp_schema(original)
@@ -743,9 +902,13 @@ class TestCleanMCPSchema:
 
 
 class TestMCPToolsToOpenAI:
+    # [CLASS DOC]
+    # Tests _mcp_tools_to_openai.
     """Test _mcp_tools_to_openai conversion."""
 
     def test_basic_conversion(self):
+        # [FUNCTION DOC]
+        # An MCP tool becomes an OpenAI function tool with parameters from inputSchema.
         mcp_tools = [
             {
                 "name": "get_weather",
@@ -763,13 +926,19 @@ class TestMCPToolsToOpenAI:
         assert "city" in result[0]["function"]["parameters"]["properties"]
 
     def test_empty_list(self):
+        # [FUNCTION DOC]
+        # An empty list converts to an empty list.
         assert _mcp_tools_to_openai([]) == []
 
 
 class TestMCPToolsToAnthropic:
+    # [CLASS DOC]
+    # Tests _mcp_tools_to_anthropic.
     """Test _mcp_tools_to_anthropic conversion."""
 
     def test_basic_conversion(self):
+        # [FUNCTION DOC]
+        # An MCP tool becomes an Anthropic tool with name and input_schema.
         mcp_tools = [
             {
                 "name": "get_weather",
@@ -786,6 +955,8 @@ class TestMCPToolsToAnthropic:
         assert "input_schema" in result[0]
 
     def test_empty_list(self):
+        # [FUNCTION DOC]
+        # An empty list converts to an empty list.
         assert _mcp_tools_to_anthropic([]) == []
 
 
@@ -795,9 +966,13 @@ class TestMCPToolsToAnthropic:
 
 
 class TestOpenAIMsgsToAnthropic:
+    # [CLASS DOC]
+    # Tests _openai_msgs_to_anthropic.
     """Test _openai_msgs_to_anthropic conversion."""
 
     def test_system_extracted(self):
+        # [FUNCTION DOC]
+        # System messages are returned separately from the message list.
         msgs = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hi"},
@@ -808,6 +983,8 @@ class TestOpenAIMsgsToAnthropic:
         assert result[0]["role"] == "user"
 
     def test_tool_calls_converted(self):
+        # [FUNCTION DOC]
+        # Assistant tool calls become text plus tool_use content blocks with decoded input.
         msgs = [
             {"role": "user", "content": "weather?"},
             {
@@ -837,6 +1014,8 @@ class TestOpenAIMsgsToAnthropic:
         assert assistant_msg["content"][1]["input"] == {"city": "SF"}
 
     def test_tool_result_becomes_user_turn(self):
+        # [FUNCTION DOC]
+        # Tool messages become user turns with tool_result blocks referencing the call id.
         msgs = [
             {"role": "user", "content": "hi"},
             {
@@ -864,6 +1043,8 @@ class TestOpenAIMsgsToAnthropic:
         assert tool_turn["content"][0]["tool_use_id"] == "c1"
 
     def test_multiple_system_messages_concatenated(self):
+        # [FUNCTION DOC]
+        # Multiple system messages are joined with blank lines.
         msgs = [
             {"role": "system", "content": "Rule 1."},
             {"role": "system", "content": "Rule 2."},

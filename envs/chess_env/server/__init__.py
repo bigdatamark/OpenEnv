@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Chess environment server package. Re-exports ChessEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

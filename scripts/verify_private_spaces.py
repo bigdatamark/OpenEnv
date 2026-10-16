@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Maintenance script that verifies deployed (possibly private) OpenEnv Hugging Face Spaces by
+# probing their HTTP endpoints with the user's HF token. Spaces are selected by name suffix
+# (default "-0.2.3") within a namespace and/or explicit ids. Three probe profiles: generic
+# (health, metadata, schema, MCP), gradio_web (also the Gradio web pages and POST /reset) and
+# repl_web (also REPL web reset/step/state round-trip). Prints a JSON report and exits 1 if
+# any Space fails.
 from __future__ import annotations
 
 import argparse
@@ -21,6 +28,9 @@ GRADIO_HTML_MARKERS = (
 def collect_space_ids(
     api: HfApi, namespace: str, suffixes: Sequence[str], explicit: Sequence[str]
 ) -> list[str]:
+    # [FUNCTION DOC]
+    # Lists up to 500 Spaces of the namespace and returns ids ending with any suffix, followed by
+    # explicit ids not already selected (order preserved). Side effects: Hub API call.
     suffixes = tuple(suffixes)
     spaces = list(api.list_spaces(author=namespace, limit=500))
     selected: list[str] = []
@@ -37,6 +47,9 @@ def collect_space_ids(
 
 
 def pick_domain_candidates(raw_domains: Iterable[dict]) -> list[dict]:
+    # [FUNCTION DOC]
+    # HELPER: from runtime domain dicts with a non-empty "domain", returns the READY ones, or all
+    # others if none are READY.
     ready = []
     fallback = []
     for domain in raw_domains:
@@ -51,6 +64,9 @@ def pick_domain_candidates(raw_domains: Iterable[dict]) -> list[dict]:
 
 
 def endpoint_ok(path: str, status_code: int | None) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: default success rule: None status is failure; /mcp accepts 200 or 404; every other
+    # path requires 200.
     if status_code is None:
         return False
     if path == "/mcp":
@@ -66,6 +82,9 @@ REPL_STEP_PAYLOAD = {"action": {"code": "count = len(context.split())"}}
 
 
 def response_is_gradio_html(response: requests.Response, details) -> bool:
+    # [FUNCTION DOC]
+    # Returns True if the response is 200, has an HTML content type and the text details contain
+    # one of the Gradio page markers (case-insensitive).
     """Recognize a successful Gradio page after redirects."""
     if response.status_code != 200:
         return False
@@ -79,6 +98,9 @@ def response_is_gradio_html(response: requests.Response, details) -> bool:
 
 
 def extract_response_details(response: requests.Response):
+    # [FUNCTION DOC]
+    # HELPER: returns parsed JSON if the content type is JSON and parsing succeeds, else the
+    # stripped response text.
     """Return JSON when possible, otherwise trimmed text."""
     if "application/json" in response.headers.get("Content-Type", ""):
         try:
@@ -96,6 +118,9 @@ def make_probe_result(
     details,
     payload=None,
 ) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: builds a probe result dict with path, method, status, ok, details and the payload
+    # when given.
     result = {
         "path": path,
         "method": method,
@@ -118,6 +143,10 @@ def run_probe_request(
     payload=None,
     ok_fn=None,
 ) -> dict:
+    # [FUNCTION DOC]
+    # Sends one request (JSON payload if any) to base_url plus path, judges it with ok_fn or the
+    # default rule, and returns a probe result dict. Request exceptions become a failed result
+    # with status None and the exception text as details.
     full_url = base_url.rstrip("/") + path
     try:
         response = session.request(
@@ -147,6 +176,9 @@ def probe_generic_space(
     headers: dict,
     timeout: float,
 ) -> list[dict]:
+    # [FUNCTION DOC]
+    # Probes the generic endpoints (GET /health, /metadata, /schema; POST /mcp).
+    # Returns: list of probe results.
     endpoints = [
         ("GET", "/health", None, None),
         ("GET", "/metadata", None, None),
@@ -169,10 +201,14 @@ def probe_generic_space(
 
 
 def gradio_web_ok_html(response: requests.Response, details) -> bool:
+    # [FUNCTION DOC]
+    # Success rule for Gradio web pages; delegates to the Gradio HTML check.
     return response_is_gradio_html(response, details)
 
 
 def gradio_web_ok_reset(response: requests.Response, details) -> bool:
+    # [FUNCTION DOC]
+    # Success rule for /reset: status 200 and a JSON object containing "observation".
     return response.status_code == 200 and isinstance(details, dict) and "observation" in details
 
 
@@ -182,6 +218,8 @@ def probe_gradio_web_space(
     headers: dict,
     timeout: float,
 ) -> list[dict]:
+    # [FUNCTION DOC]
+    # Probes Gradio web pages (/, /web, /web/), the generic GET endpoints and POST /reset.
     endpoints = [
         ("GET", "/", None, gradio_web_ok_html),
         ("GET", "/web", None, gradio_web_ok_html),
@@ -207,6 +245,9 @@ def probe_gradio_web_space(
 
 
 def repl_web_ok_reset(response: requests.Response, details) -> bool:
+    # [FUNCTION DOC]
+    # Success rule for the REPL web reset: status 200, observation's context preview equals the
+    # sent context and "context" is among available variables.
     if response.status_code != 200 or not isinstance(details, dict):
         return False
     observation = details.get("observation", {})
@@ -218,6 +259,9 @@ def repl_web_ok_reset(response: requests.Response, details) -> bool:
 
 
 def repl_web_ok_step(response: requests.Response, details) -> bool:
+    # [FUNCTION DOC]
+    # Success rule for the REPL web step: status 200, result success is True and the locals
+    # snapshot has count equal to 3.
     if response.status_code != 200 or not isinstance(details, dict):
         return False
     result = details.get("observation", {}).get("result", {})
@@ -226,6 +270,9 @@ def repl_web_ok_step(response: requests.Response, details) -> bool:
 
 
 def repl_web_ok_state(response: requests.Response, details) -> bool:
+    # [FUNCTION DOC]
+    # Success rule for the REPL web state: status 200, context and task prompt equal what reset
+    # sent, and "count" is in namespace keys.
     if response.status_code != 200 or not isinstance(details, dict):
         return False
     namespace_keys = details.get("namespace_keys") or []
@@ -242,6 +289,9 @@ def probe_repl_web_space(
     headers: dict,
     timeout: float,
 ) -> list[dict]:
+    # [FUNCTION DOC]
+    # Probes REPL web Spaces: Gradio pages, generic endpoints, MCP, then reset, step and state
+    # under /web in order (stateful over one session).
     endpoints = [
         ("GET", "/", None, gradio_web_ok_html),
         ("GET", "/web", None, gradio_web_ok_html),
@@ -275,6 +325,9 @@ def probe_space(
     timeout: float = 20.0,
     probe_profile: str = "generic",
 ) -> list[dict]:
+    # [FUNCTION DOC]
+    # Creates a requests session and dispatches to the probe set for the profile (unknown
+    # profiles fall back to generic). Returns: list of probe results.
     session = requests.Session()
     if probe_profile == "repl_web":
         return probe_repl_web_space(session, base_url, headers, timeout)
@@ -284,6 +337,13 @@ def probe_space(
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry point: parses namespace, suffixes, explicit ids, probe profile and timeout (default
+    # suffix only if neither suffixes nor ids are given). Exits 1 if no HF token or no Spaces are
+    # found. For each Space reads runtime info, tries candidate domains in order until all checks
+    # pass, and records stage, chosen (or first) domain, runtime error, last checks, success and
+    # all attempts. Prints the report as JSON and exits 1 unless every Space succeeded.
+    # Side effects: Hub API calls, HTTP requests with the bearer token.
     parser = argparse.ArgumentParser(
         description="Verify private OpenEnv spaces by suffix/explicit IDs."
     )

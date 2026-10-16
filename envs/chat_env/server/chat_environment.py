@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Server-side chat environment: keeps a conversation as parallel lists of messages and token lists,
+# using a tokenizer to decode action tokens into assistant messages and to tokenize messages.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -29,6 +32,9 @@ except ImportError as e:
 
 
 class ChatEnvironment(Environment):
+    # [CLASS DOC]
+    # Minimal chat environment. Owns the tokenizer, optional system prompt/role and a ChatState. Rewards
+    # are never set (None) and episodes never finish on their own.
     """A chat-based environment for LLMs, designed as a blank canvas for conversation and RL.
 
     This environment is designed to work with language models. It provides the fundamental structure
@@ -51,6 +57,10 @@ class ChatEnvironment(Environment):
         system_role: str = "system",
         transform: Transform | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores tokenizer, system prompt, role and optional transform; if a system prompt is given, seeds the
+        # history with it and its tokens.
+        # Raises: ValueError if the tokenizer has neither apply_chat_template nor encode.
         super().__init__(transform=transform)
 
         if not hasattr(tokenizer, "apply_chat_template") and not hasattr(
@@ -72,6 +82,8 @@ class ChatEnvironment(Environment):
             self._state.history_tokens.append(system_tokens)
 
     def _coerce_tokens(self, tokens) -> list[int]:
+        # [FUNCTION DOC]
+        # HELPER: Recursively flattens tensors/tuples/lists into a list of ints.
         """Normalize tokenizer outputs into a flat list of ints."""
         if hasattr(tokens, "tolist") and callable(tokens.tolist):
             tokens = tokens.tolist()
@@ -88,6 +100,10 @@ class ChatEnvironment(Environment):
         return [int(tokens)]
 
     def _tokenize_conversation(self, conversation: list[Message]) -> list[int]:
+        # [FUNCTION DOC]
+        # HELPER: Tokenizes messages with apply_chat_template; on any error falls back to encoding
+        # "role: content" lines joined by newlines. Returns a flat token list.
+        # Raises: ValueError if the fallback is needed but the tokenizer has no encode.
         """Tokenize a conversation with a chat-template fallback for base tokenizers."""
         try:
             tokens = self.tokenizer.apply_chat_template(conversation=conversation, tokenize=True)
@@ -104,6 +120,8 @@ class ChatEnvironment(Environment):
         return self._coerce_tokens(tokens)
 
     def reset(self) -> ChatObservation:
+        # [FUNCTION DOC]
+        # Clears history, re-adds the system prompt message and tokens if configured, and returns the observation.
         """Reset the environment to initial state.
 
         Returns:
@@ -123,6 +141,10 @@ class ChatEnvironment(Environment):
         return self._create_observation()
 
     def step(self, action: ChatAction) -> ChatObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Appends the action tokens to the token history and their decoded text (special tokens skipped) as an
+        # "assistant" message; returns the observation.
+        # Side effects: mutates state. Note: the role is always "assistant", whatever message produced the tokens.
         """Take a step in the environment by adding tokens to the chat history.
 
         Args:
@@ -144,6 +166,10 @@ class ChatEnvironment(Environment):
         return self._create_observation()
 
     def _create_observation(self) -> ChatObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds a ChatObservation with a copy of the messages and all history tokens flattened, applies
+        # the transform, and converts a non-ChatObservation result back (keeping messages, tokens, done, reward).
+        # KNOWN ISSUE: the conversion path drops the transformed observation's metadata.
         """Create a ChatObservation from the current state.
 
         Returns both the message history and the tokens flattened as a single tensor
@@ -180,6 +206,8 @@ class ChatEnvironment(Environment):
 
     @property
     def state(self) -> ChatState:
+        # [FUNCTION DOC]
+        # Property: returns the ChatState.
         """Get the current state of the environment.
 
         Returns:
@@ -188,6 +216,9 @@ class ChatEnvironment(Environment):
         return self._state
 
     def message_to_action(self, message: Message) -> ChatAction:
+        # [FUNCTION DOC]
+        # Tokenizes a single message into a ChatAction.
+        # Raises: ValueError if role/content missing or content is None.
         """Convert a message dictionary to a ChatAction with tokens.
 
         Args:

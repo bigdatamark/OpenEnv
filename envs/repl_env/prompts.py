@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Prompt templates and text utilities for RLM-style REPL agents: the system prompt (plain and a
+# variant with a cost warning), user prompt templates, builders for system/user messages, code block
+# extraction from model replies and formatting of execution observations back into text.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -26,6 +30,8 @@ from typing import List, Optional
 
 @dataclass
 class QueryMetadata:
+    # [CLASS DOC]
+    # Mutable context metadata for prompts: list of chunk lengths, total length and context type label.
     """Metadata about the context for building prompts."""
 
     context_lengths: List[int]
@@ -156,6 +162,10 @@ def build_rlm_system_prompt(
     system_prompt: str,
     query_metadata: QueryMetadata,
 ) -> List[dict]:
+    # [FUNCTION DOC]
+    # Returns a one-element message list: a system message with system_prompt followed by a sentence
+    # describing the context type, total length and chunk lengths (first 100 listed, rest counted).
+    # KNOWN ISSUE: the docstring says a system and a user message are returned, but only the system message is.
     """
     Build the initial system prompt for the REPL environment based on extra prompt metadata.
 
@@ -192,6 +202,10 @@ def build_user_prompt(
     context_count: int = 1,
     history_count: int = 0,
 ) -> dict:
+    # [FUNCTION DOC]
+    # Returns a user message mapping for an iteration: on iteration 0 a safeguard telling the model not
+    # to answer yet, then the user template (mentioning root_prompt when given); later iterations refer to
+    # previous history. Appends notes about multiple contexts and prior histories when counts exceed 1/0.
     """
     Build the user prompt for a given iteration.
 
@@ -241,6 +255,10 @@ def build_user_prompt(
 
 
 def extract_code_blocks(text: str, language: str = "python") -> List[str]:
+    # [FUNCTION DOC]
+    # Returns the stripped, non-empty bodies of all repl-fenced blocks followed by all blocks fenced with
+    # the given language (default "python"). Order across the two kinds is not preserved; if language is
+    # "repl" blocks are returned twice.
     """Extract code blocks from LLM response.
 
     Supports both ```repl``` (official RLM) and ```python``` style blocks.
@@ -271,6 +289,10 @@ def format_observations(
     code_blocks: Optional[List[str]] = None,
     max_character_length: int = 20000,
 ) -> str:
+    # [FUNCTION DOC]
+    # Formats observations as text: each shows stdout (or "(no output)"), an ERROR line with stderr or
+    # exception on failure, truncated to max_character_length (default 20000) with a count note, and is
+    # prefixed by the executed code when code_blocks covers it, else "Code block N output". Joined by blank lines.
     """Format REPL observations into observation text for the LLM.
 
     Follows the official RLM format: each observation includes the executed code

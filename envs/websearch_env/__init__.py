@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# WebSearch environment package: web search through the Serper.dev Google Search API. Re-exports the
+# client (WebSearchEnv) and the WebSearchAction / WebSearchObservation models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

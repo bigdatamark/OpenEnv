@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# WebSocket EnvClient for the dm_control environment, plus a helper that launches a local server subprocess.
+# Imports models through several fallbacks (relative, top-level, package, envs.* path).
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -52,6 +55,8 @@ except ImportError:
 
 
 class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlState]):
+    # [CLASS DOC]
+    # Typed client for dm_control.suite servers; reset can switch domain/task and request pixel rendering.
     """
     Client for dm_control.suite environments.
 
@@ -94,6 +99,8 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         message_timeout_s: float = 60.0,
         provider: Optional[Any] = None,
     ):
+        # [FUNCTION DOC]
+        # Passes base_url, connect/message timeouts (10 s / 60 s) and an optional lifecycle provider to EnvClient.
         """
         Initialize dm_control environment client.
 
@@ -111,6 +118,8 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         )
 
     def _step_payload(self, action: DMControlAction) -> Dict:
+        # [FUNCTION DOC]
+        # HELPER: Returns {"values": action.values} plus "metadata" when the action has metadata.
         """
         Convert DMControlAction to JSON payload for step request.
 
@@ -128,6 +137,9 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         return payload
 
     def _parse_result(self, payload: Dict) -> StepResult[DMControlObservation]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a DMControlObservation (observations dict, optional base64 pixels) with done/reward from the
+        # envelope and metadata from payload or observation; wraps it in a StepResult.
         """
         Parse server response into StepResult[DMControlObservation].
 
@@ -155,6 +167,8 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         )
 
     def _parse_state(self, payload: Dict) -> DMControlState:
+        # [FUNCTION DOC]
+        # HELPER: Builds a DMControlState with defaults (empty names/specs, physics 0.002 s, control 0.02 s).
         """
         Parse server response into DMControlState object.
 
@@ -183,6 +197,8 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         render: bool = False,
         **kwargs,
     ) -> StepResult[DMControlObservation]:
+        # [FUNCTION DOC]
+        # Sends reset with optional domain_name, task_name, seed, the render flag and extra kwargs. Returns the StepResult.
         """
         Reset the environment.
 
@@ -213,6 +229,9 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         render: bool = False,
         **kwargs,
     ) -> StepResult[DMControlObservation]:
+        # [FUNCTION DOC]
+        # Sends the action with extra kwargs. Returns the StepResult.
+        # KNOWN ISSUE: the render argument is ignored; rendering follows the setting from reset.
         """
         Execute one step in the environment.
 
@@ -230,6 +249,8 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
 
     @staticmethod
     def available_environments() -> List[Tuple[str, str]]:
+        # [FUNCTION DOC]
+        # Returns the static AVAILABLE_ENVIRONMENTS list of (domain, task) pairs.
         """
         List available dm_control environments.
 
@@ -247,6 +268,14 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
         render_width: int = 640,
         port: int = 8765,
     ) -> "DMControlEnv":
+        # [FUNCTION DOC]
+        # Starts "python -m uvicorn" for the server app on 127.0.0.1:port (default 8765) in a subprocess, with
+        # DMCONTROL_DOMAIN/TASK/RENDER_HEIGHT/RENDER_WIDTH, no-proxy for localhost, and PYTHONPATH including the repo
+        # src and root (falls back to the standalone server.app layout). Polls /health once per second for up to 30
+        # attempts, then returns a client whose provider terminates the subprocess on stop.
+        # Raises: RuntimeError (after killing the process) if the server never becomes healthy.
+        # Side effects: spawns a subprocess, network requests.
+        # KNOWN ISSUE: the server's stdout is piped but never read, so a chatty server can block once the pipe fills.
         """
         Create a dm_control environment client with an embedded local server.
 
@@ -356,12 +385,18 @@ class DMControlEnv(EnvClient[DMControlAction, DMControlObservation, DMControlSta
             )
 
         class DirectModeProvider:
+            # [CLASS DOC]
+            # HELPER: Minimal provider owning the server subprocess.
             """Provider that manages the embedded server subprocess."""
 
             def __init__(self, process: subprocess.Popen):
+                # [FUNCTION DOC]
+                # Stores the process.
                 self._process = process
 
             def stop(self):
+                # [FUNCTION DOC]
+                # Terminates the process, waits up to 10 s then kills it, and clears the reference. No-op once stopped.
                 """Stop the embedded server."""
                 if self._process:
                     self._process.terminate()

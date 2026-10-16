@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Tests for CodingToolsEnvironment (MCP coding tools over an E2B sandbox)
+# using an in-memory fake sandbox: tool listing, missing E2B key handling,
+# write/read/edit/todo/submit flow, todo validation, and reward-file override
+# rules (only verify commands may write it, invalid values fall back to the
+# pass rate, values outside [0, 1] are kept, unremovable files are ignored).
+# Module constant REWARD_FILE is the verifier reward path in the sandbox.
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
@@ -10,13 +17,20 @@ from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
 
 
 class FakeSandbox:
+    # [CLASS DOC]
+    # In-memory stand-in for E2BSandbox storing files in a mapping.
     sandbox_id = "fake-sandbox"
 
     def __init__(self) -> None:
+        # [FUNCTION DOC]
+        # Initializes an empty file mapping and killed False.
         self.files = {}
         self.killed = False
 
     def run_shell(self, command: str, timeout_s: float = 30) -> ToolResult:
+        # [FUNCTION DOC]
+        # Fails with exit_code 1 for commands containing "exit 1", returns empty
+        # output for reading the reward file, else echoes "shell: <command>".
         if "exit 1" in command:
             return ToolResult(
                 ok=False, output="", error="exit_code=1", metadata={"exit_code": 1}
@@ -28,6 +42,8 @@ class FakeSandbox:
         )
 
     def read_file(self, file_path: str, offset=None, limit=None) -> ToolResult:
+        # [FUNCTION DOC]
+        # Returns stored content sliced by offset/limit, or a not-found error.
         if file_path not in self.files:
             return ToolResult(ok=False, output="", error="file not found", metadata={})
         value = self.files[file_path]
@@ -38,12 +54,16 @@ class FakeSandbox:
         return ToolResult(ok=True, output=value, error=None, metadata={})
 
     def write_file(self, file_path: str, content: str) -> ToolResult:
+        # [FUNCTION DOC]
+        # Stores content (mutation) and returns "write ok" with byte count.
         self.files[file_path] = content
         return ToolResult(
             ok=True, output="write ok", error=None, metadata={"bytes": len(content)}
         )
 
     def glob_files(self, pattern: str, path: str | None = None) -> ToolResult:
+        # [FUNCTION DOC]
+        # Returns all stored paths sorted, ignoring the pattern.
         return ToolResult(
             ok=True,
             output="\n".join(sorted(self.files.keys())),
@@ -54,12 +74,16 @@ class FakeSandbox:
     def grep(
         self, pattern: str, path: str | None = None, include: str | None = None
     ) -> ToolResult:
+        # [FUNCTION DOC]
+        # Returns "<name>:1:<text>" for files containing the pattern as a substring.
         matches = [
             f"{name}:1:{text}" for name, text in self.files.items() if pattern in text
         ]
         return ToolResult(ok=True, output="\n".join(matches), error=None, metadata={})
 
     def list_dir(self, path: str = ".", ignore=None) -> ToolResult:
+        # [FUNCTION DOC]
+        # Lists basenames of all stored files as "[file] name", ignoring path.
         names = sorted(name.rsplit("/", 1)[-1] for name in self.files.keys())
         return ToolResult(
             ok=True,
@@ -69,10 +93,14 @@ class FakeSandbox:
         )
 
     def kill(self) -> None:
+        # [FUNCTION DOC]
+        # Sets killed to True.
         self.killed = True
 
 
 def _extract_text(result) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first content item's text, else str(data), else str(result).
     if hasattr(result, "content") and result.content:
         return result.content[0].text
     if hasattr(result, "data"):
@@ -81,6 +109,8 @@ def _extract_text(result) -> str:
 
 
 def test_lists_expected_tools():
+    # [FUNCTION DOC]
+    # ListToolsAction exposes exactly the ten coding tools.
     env = CodingToolsEnvironment()
     obs = env.step(ListToolsAction())
     names = {tool.name for tool in obs.tools}
@@ -99,6 +129,8 @@ def test_lists_expected_tools():
 
 
 def test_reset_without_e2b_key_fails(monkeypatch):
+    # [FUNCTION DOC]
+    # Without E2B_API_KEY, reset returns done with status "error".
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     env = CodingToolsEnvironment()
     obs = env.reset()
@@ -107,6 +139,9 @@ def test_reset_without_e2b_key_fails(monkeypatch):
 
 
 def test_write_read_edit_and_submit(monkeypatch):
+    # [FUNCTION DOC]
+    # With the fake sandbox patched in: write, read, edit (file mutated), todo_write
+    # (2 todos stored) and submit_solution (1/1 passed, reward 1.0) all work.
     monkeypatch.setenv("E2B_API_KEY", "fake")
     fake = FakeSandbox()
     monkeypatch.setattr(
@@ -177,6 +212,9 @@ def test_write_read_edit_and_submit(monkeypatch):
 
 
 def test_todo_write_rejects_multiple_in_progress(monkeypatch):
+    # [FUNCTION DOC]
+    # Two in_progress todos are rejected with an error message; then the state is
+    # replaced directly.
     monkeypatch.setenv("E2B_API_KEY", "fake")
     monkeypatch.setattr(
         "coding_tools_env.server.coding_tools_env_environment.E2BSandbox",
@@ -213,13 +251,21 @@ REWARD_FILE = "/home/user/logs/verifier/reward.txt"
 
 
 class RewardFileSandbox(FakeSandbox):
+    # [CLASS DOC]
+    # FakeSandbox that emulates "echo X > reward file" and "rm -f reward file"
+    # shell commands; removal can be disabled.
     """FakeSandbox whose reward file shell commands and file tools can write."""
 
     def __init__(self, *, removable: bool = True) -> None:
+        # [FUNCTION DOC]
+        # Initializes the base sandbox and the removable flag.
         super().__init__()
         self.removable = removable
 
     def run_shell(self, command: str, timeout_s: float = 30) -> ToolResult:
+        # [FUNCTION DOC]
+        # Writes the echoed value to the reward file; for rm, deletes it if removable
+        # and fails if it still exists; otherwise defers to the base behaviour.
         if command.startswith("echo ") and command.endswith(f" > {REWARD_FILE}"):
             self.files[REWARD_FILE] = command[len("echo ") : -len(f" > {REWARD_FILE}")]
             return ToolResult(ok=True, output="", error=None, metadata={"exit_code": 0})
@@ -237,6 +283,9 @@ class RewardFileSandbox(FakeSandbox):
 
 
 def _submit(monkeypatch, sandbox, verify_commands, agent_actions=()):
+    # [FUNCTION DOC]
+    # HELPER: patches the E2B key and sandbox, resets with the verify commands,
+    # runs the agent tool actions, submits, and returns the env state.
     monkeypatch.setenv("E2B_API_KEY", "fake")
     monkeypatch.setattr(
         "coding_tools_env.server.coding_tools_env_environment.E2BSandbox",
@@ -258,6 +307,9 @@ def _submit(monkeypatch, sandbox, verify_commands, agent_actions=()):
     ],
 )
 def test_reward_file_written_by_the_agent_is_ignored(monkeypatch, agent_action):
+    # [FUNCTION DOC]
+    # A reward file written by the agent (bash or write) is removed before
+    # verification, so reward is the 0.5 pass rate.
     state = _submit(
         monkeypatch, RewardFileSandbox(), ["true", "exit 1"], [agent_action]
     )
@@ -267,6 +319,8 @@ def test_reward_file_written_by_the_agent_is_ignored(monkeypatch, agent_action):
 
 
 def test_reward_file_written_by_a_verify_command_overrides_the_pass_rate(monkeypatch):
+    # [FUNCTION DOC]
+    # A verify command writing 0.8 overrides the pass rate.
     state = _submit(
         monkeypatch, RewardFileSandbox(), [f"echo 0.8 > {REWARD_FILE}", "exit 1"]
     )
@@ -277,6 +331,9 @@ def test_reward_file_written_by_a_verify_command_overrides_the_pass_rate(monkeyp
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-inf", "passed"])
 def test_invalid_reward_file_falls_back_to_the_pass_rate(monkeypatch, value):
+    # [FUNCTION DOC]
+    # nan/inf/non-numeric values fall back to 0.5 and are noted in
+    # reward_override_ignored.
     state = _submit(
         monkeypatch, RewardFileSandbox(), [f"echo {value} > {REWARD_FILE}", "exit 1"]
     )
@@ -287,6 +344,8 @@ def test_invalid_reward_file_falls_back_to_the_pass_rate(monkeypatch, value):
 
 @pytest.mark.parametrize("value", ["-0.5", "1.5"])
 def test_reward_file_outside_the_unit_interval_is_kept(monkeypatch, value):
+    # [FUNCTION DOC]
+    # Finite values outside [0, 1] are used as the reward.
     state = _submit(
         monkeypatch, RewardFileSandbox(), [f"echo {value} > {REWARD_FILE}", "exit 1"]
     )
@@ -296,6 +355,9 @@ def test_reward_file_outside_the_unit_interval_is_kept(monkeypatch, value):
 
 
 def test_reward_file_that_cannot_be_removed_is_ignored(monkeypatch):
+    # [FUNCTION DOC]
+    # If the agent's reward file cannot be removed, it is ignored with a "could
+    # not be removed" note.
     state = _submit(
         monkeypatch,
         RewardFileSandbox(removable=False),

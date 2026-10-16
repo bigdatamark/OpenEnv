@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Server subpackage for Reasoning Gym; re-exports ReasoningGymEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Tests for register_get_endpoints in the declarative route configuration helpers.
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for declarative route registration helpers."""
@@ -12,10 +15,14 @@ from pydantic import BaseModel
 
 
 class _RouteResponse(BaseModel):
+    # [CLASS DOC]
+    # HELPER: Pydantic response model with a single string field value.
     value: str
 
 
 def test_register_get_endpoints_binds_each_handler() -> None:
+    # [FUNCTION DOC]
+    # Registering two GET endpoints binds each to its own handler (no late-binding mix-up).
     """Each configured endpoint keeps its own handler binding."""
     app = FastAPI()
 

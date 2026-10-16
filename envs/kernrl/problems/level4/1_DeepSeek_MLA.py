@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# kernrl problem (level 4, modern LLM operators): DeepSeek-V3 Multi-head Latent
+# Attention (low-rank compressed Q and KV projections, decoupled RoPE and
+# non-RoPE head dims, causal attention), scaled down (batch 4, sequence 2048,
+# hidden 2048, 16 heads).
 import math
 
 import torch
@@ -17,12 +22,19 @@ import torch.nn.functional as F
 
 
 class DeepSeekRMSNorm(nn.Module):
+    # [CLASS DOC]
+    # HELPER: RMSNorm with a learnable weight (initialized to ones).
     def __init__(self, hidden_size, eps=1e-6):
+        # [FUNCTION DOC]
+        # Creates the weight parameter and stores eps (default 1e-6).
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
+        # [FUNCTION DOC]
+        # Normalizes in float32 by the root mean square over the last dim, casts back
+        # to the input dtype and multiplies by the weight.
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
@@ -31,6 +43,9 @@ class DeepSeekRMSNorm(nn.Module):
 
 
 def rotate_half(x):
+    # [FUNCTION DOC]
+    # HELPER: Returns x with its last-dim halves swapped and the new first half
+    # negated (concat of -second_half and first_half).
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
@@ -38,6 +53,10 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+    # [FUNCTION DOC]
+    # HELPER: Applies rotary embedding: q*cos + rotate_half(q)*sin and the same for
+    # k, after unsqueezing cos/sin at unsqueeze_dim for head broadcasting.
+    # position_ids is unused. Returns (q_embed, k_embed).
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
     q_embed = (q * cos) + (rotate_half(q) * sin)
@@ -46,7 +65,12 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 
 
 class DeepSeekRotaryEmbedding(nn.Module):
+    # [CLASS DOC]
+    # HELPER: Rotary embedding table generator with inverse frequencies
+    # base^(-2i/dim) stored as a non-persistent buffer.
     def __init__(self, dim, max_position_embeddings=2048, base=10000.0):
+        # [FUNCTION DOC]
+        # Stores dim, max positions and base and registers the inverse frequencies.
         super().__init__()
         self.dim = dim
         self.max_position_embeddings = max_position_embeddings
@@ -58,6 +82,9 @@ class DeepSeekRotaryEmbedding(nn.Module):
 
     @torch.no_grad()
     def forward(self, x, seq_len=None):
+        # [FUNCTION DOC]
+        # Without gradients, builds position angles for positions 0..seq_len-1
+        # (default x.shape[-2]) and returns (cos, sin) tensors of shape (seq_len, dim).
         if seq_len is None:
             seq_len = x.shape[-2]
         t = torch.arange(seq_len, device=x.device, dtype=torch.float32)
@@ -67,6 +94,11 @@ class DeepSeekRotaryEmbedding(nn.Module):
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference MLA layer: q path hidden -> q_lora_rank (RMSNorm) -> heads x
+    # (nope + rope dims); kv path hidden -> kv_lora_rank + shared rope key, RMSNorm,
+    # then expanded to per-head nope keys and values; rotary embeddings; output
+    # projection. Softmax scale is q_head_dim^-0.5.
     """
     DeepSeek-V3 Multi-head Latent Attention (MLA)
 
@@ -90,6 +122,9 @@ class Model(nn.Module):
         rope_theta: float = 10000.0,
         attention_dropout: float = 0.0,
     ):
+        # [FUNCTION DOC]
+        # Stores dimensions and creates all bias-free projections, the two RMSNorms and
+        # the rotary embedding.
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_attention_heads
@@ -133,6 +168,13 @@ class Model(nn.Module):
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Computes per-head queries split into nope/rope parts, the compressed KV and a
+        # single shared rope key, expands KV into nope keys and values, applies RoPE to
+        # the rope parts, concatenates into full query/key states (rope key broadcast to
+        # all heads), computes scaled scores with a causal mask, softmax in float32,
+        # dropout (training only), weighted values, and the output projection.
+        # Returns (batch, seq_len, hidden_size).
         bsz, q_len, _ = hidden_states.size()
 
         # Query projection with LoRA compression
@@ -230,10 +272,15 @@ max_position_embeddings = 4096
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, seq_len, hidden_size).
     return [torch.randn(batch_size, seq_len, hidden_size)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns the eight constructor arguments (hidden size, heads, q/kv LoRA ranks,
+    # nope/rope/value head dims, max positions).
     return [
         hidden_size,
         num_attention_heads,

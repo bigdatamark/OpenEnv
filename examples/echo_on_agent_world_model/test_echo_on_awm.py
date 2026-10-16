@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pytest tests for the ECHO-on-AWM adapter and loss using the bundled real AWM fixture episode and a character tokenizer:
+# segment roles and ordering, warning separation, mask disjointness, env-token dominance, world_loss_target behaviour,
+# and loss invariants (lambda 0, verifier-free, lambda scaling, finiteness and gradients). Loads the fixture at import time.
 """Tests for the ECHO-on-AWM adapter + loss. Run: ``pytest -q`` (from this dir)."""
 
 from __future__ import annotations
@@ -14,15 +18,23 @@ EPISODE = json.loads((HERE / "fixtures" / "awm_ecommerce_episode.json").read_tex
 
 
 class _CharTok:
+    # [CLASS DOC]
+    # HELPER: Character-level tokenizer stand-in mapping each corpus character to an id starting at 1.
     def __init__(self, corpus: str) -> None:
+        # [FUNCTION DOC]
+        # Builds the character-to-id mapping from the sorted unique characters of the corpus.
         chars = sorted(set(corpus))
         self.stoi = {c: i + 1 for i, c in enumerate(chars)}
 
     def __call__(self, text: str, add_special_tokens: bool = False) -> dict:
+        # [FUNCTION DOC]
+        # Returns a dict with "input_ids" for the text; raises KeyError on unknown characters.
         return {"input_ids": [self.stoi[c] for c in text]}
 
 
 def _tok_traj(world_loss_target: str = "env_only"):
+    # [FUNCTION DOC]
+    # HELPER: Converts the fixture to a trajectory and tokenises it with a character tokenizer fitted to its text. Returns (trajectory, token dict).
     traj = awm_episode_to_trajectory(EPISODE)
     tok = _CharTok("".join(s.text for s in traj.segments))
     return traj, tokenize_trajectory(tok, traj, world_loss_target=world_loss_target)
@@ -30,6 +42,8 @@ def _tok_traj(world_loss_target: str = "env_only"):
 
 # ── adapter / role mask ──────────────────────────────────────────────────────
 def test_roles_present_and_ordered():
+    # [FUNCTION DOC]
+    # Checks the first segment is CONTEXT and that ACTION and ENV_OUTPUT segments exist.
     traj = awm_episode_to_trajectory(EPISODE)
     roles = [s.role for s in traj.segments]
     assert roles[0] == CONTEXT  # context first
@@ -37,6 +51,8 @@ def test_roles_present_and_ordered():
 
 
 def test_warning_role_separated_from_env_output():
+    # [FUNCTION DOC]
+    # Checks a synthetic step with a warning yields a separate WARNING segment and that the warning text is absent from the ENV_OUTPUT segment.
     """A `warning` field becomes its own WARNING segment, never folded into env_output."""
     episode = {
         "scenario": "synthetic",
@@ -64,6 +80,8 @@ def test_warning_role_separated_from_env_output():
 
 
 def test_action_precedes_its_env_output():
+    # [FUNCTION DOC]
+    # Checks the first ACTION segment precedes the first ENV_OUTPUT segment.
     """The model must be conditioned on its action before predicting the world."""
     traj = awm_episode_to_trajectory(EPISODE)
     first_action = next(i for i, s in enumerate(traj.segments) if s.role == ACTION)
@@ -72,6 +90,8 @@ def test_action_precedes_its_env_output():
 
 
 def test_masks_partition_tokens():
+    # [FUNCTION DOC]
+    # Checks action, observation and warning masks are pairwise disjoint and their union does not exceed the sequence length.
     _, t = _tok_traj()
     a, o, w = t["action_mask"], t["obs_mask"], t["warning_mask"]
     # disjoint
@@ -83,6 +103,8 @@ def test_masks_partition_tokens():
 
 
 def test_free_signal_dominates():
+    # [FUNCTION DOC]
+    # Checks the fixture has more observation tokens than action tokens (both non-zero).
     """ECHO's whole pitch: observation tokens outnumber action tokens."""
     _, t = _tok_traj()
     n_action = int(t["action_mask"].sum())
@@ -92,6 +114,8 @@ def test_free_signal_dominates():
 
 
 def test_warning_excluded_by_default_included_on_all():
+    # [FUNCTION DOC]
+    # Checks the "all" observation mask count equals the env_only count plus the warning count.
     _, env_only = _tok_traj("env_only")
     _, all_obs = _tok_traj("all")
     # env_only excludes warning tokens; "all" folds them into the obs mask
@@ -102,6 +126,8 @@ def test_warning_excluded_by_default_included_on_all():
 
 # ── loss invariants ──────────────────────────────────────────────────────────
 def _logits_for(t):
+    # [FUNCTION DOC]
+    # HELPER: Builds a batch-of-one input id tensor, seeded random logits (vocab = max id + 2) and batched masks. Returns (input_ids, logits, masks). Reseeds torch's global RNG.
     input_ids = t["input_ids"].unsqueeze(0)
     torch.manual_seed(0)
     vocab = int(input_ids.max()) + 2
@@ -111,6 +137,8 @@ def _logits_for(t):
 
 
 def test_lambda_zero_is_vanilla_grpo():
+    # [FUNCTION DOC]
+    # Checks that with world_model_coeff 0 the total loss equals the RL term.
     _, t = _tok_traj()
     input_ids, logits, m = _logits_for(t)
     adv = torch.tensor([1.0])
@@ -121,6 +149,8 @@ def test_lambda_zero_is_vanilla_grpo():
 
 
 def test_verifier_free_is_pure_env_ce():
+    # [FUNCTION DOC]
+    # Checks that with use_rl false and coefficient 1 the RL term is zero and the loss equals the positive env CE.
     _, t = _tok_traj()
     input_ids, logits, m = _logits_for(t)
     adv = torch.tensor([1.0])
@@ -139,6 +169,8 @@ def test_verifier_free_is_pure_env_ce():
 
 
 def test_lambda_scales_env_term():
+    # [FUNCTION DOC]
+    # Checks that with use_rl false the loss equals 0.05 times the env CE.
     """λ multiplies the env-CE term (verifier-free isolates it for an exact check)."""
     _, t = _tok_traj()
     input_ids, logits, m = _logits_for(t)
@@ -156,6 +188,8 @@ def test_lambda_scales_env_term():
 
 
 def test_loss_is_finite_and_differentiable():
+    # [FUNCTION DOC]
+    # Checks the loss is finite and that backpropagation produces finite gradients on the logits.
     _, t = _tok_traj()
     input_ids = t["input_ids"].unsqueeze(0)
     torch.manual_seed(0)

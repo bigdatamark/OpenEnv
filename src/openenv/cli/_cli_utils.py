@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# HELPER module with shared CLI utilities: a module-level rich Console for output, Hugging Face
+# username extraction and validation of an environment directory's layout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """CLI utilities for OpenEnv command-line interface."""
@@ -12,6 +15,9 @@ console = Console()
 
 
 def _extract_hf_username(user_info: object) -> str | None:
+    # [FUNCTION DOC]
+    # HELPER: returns name, else fullname, else username from a whoami result given as a dict or
+    # an object with those attributes; None if none is set.
     """Extract a username from the supported Hugging Face whoami shapes."""
     if isinstance(user_info, dict):
         return (
@@ -28,6 +34,13 @@ def _extract_hf_username(user_info: object) -> str | None:
 
 
 def validate_env_structure(env_dir: Path, strict: bool = False) -> List[str]:
+    # [FUNCTION DOC]
+    # Checks an environment directory: openenv.yaml, __init__.py, client.py and README.md must
+    # exist; a Dockerfile must exist at the root or in server/; without a root Dockerfile, server/
+    # with __init__.py and app.py is required; pyproject.toml is required.
+    # Returns: list of warnings (currently only a missing outputs/ directory).
+    # Raises: FileNotFoundError naming the first missing requirement.
+    # KNOWN ISSUE: the strict argument is accepted but has no effect.
     """
     Validate that the directory follows OpenEnv environment structure.
 

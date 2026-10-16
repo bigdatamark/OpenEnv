@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Script (uv inline metadata) that trains the verifier-free ECHO objective with the Tinker service: LoRA fine-tunes a
+# base model with cross-entropy only on env-output tokens of oracle rollouts from the mini terminal env's training tasks,
+# and reports held-out env-token cross-entropy before and after. Requires TINKER_API_KEY. Side effects: sys.path change,
+# remote training via the Tinker API, stdout.
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
@@ -33,6 +38,11 @@ def build_echo_data(
     tokenizer: Any,
     trajectories: Sequence[Trajectory],
 ) -> list[Any]:
+    # [FUNCTION DOC]
+    # Tokenises each trajectory segment-wise (no special tokens), builds next-token inputs (all tokens but the last) and
+    # targets (all but the first), and assigns weight 1/N to targets that are env-output tokens, where N is the total count
+    # of such targets across all trajectories (so weights sum to 1 globally). Returns a list of Tinker Datum objects.
+    # Raises ValueError if any trajectory has fewer than 2 tokens or if there are no env-output targets at all.
     """Tokenize rollouts and put loss weight only on shifted env-output tokens."""
     encoded: list[tuple[list[int], list[bool]]] = []
     env_token_count = 0
@@ -65,6 +75,9 @@ def build_echo_data(
 
 
 def evaluate_env_ce(training_client: Any, data: Sequence[Any]) -> float:
+    # [FUNCTION DOC]
+    # Runs a forward pass with cross_entropy loss on the data and returns the negative weighted sum of target log-probs,
+    # i.e. the mean CE over env tokens given the global normalisation. Side effects: remote call.
     """Return mean cross-entropy over the globally normalized env tokens."""
     result = training_client.forward(list(data), "cross_entropy").result()
     weighted_logprob = 0.0
@@ -81,6 +94,8 @@ def evaluate_env_ce(training_client: Any, data: Sequence[Any]) -> float:
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Parses --model and --steps. Returns the argparse namespace.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--steps", type=int, default=15)
@@ -88,6 +103,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: validates steps >= 1 and the API key (SystemExit otherwise), creates a LoRA training client, builds train
+    # and held-out data from oracle rollouts, evaluates held-out CE, runs the requested forward_backward + Adam steps, and
+    # prints CE before and after.
     args = parse_args()
     if args.steps < 1:
         raise SystemExit("--steps must be at least 1")

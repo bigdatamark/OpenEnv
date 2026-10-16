@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# HELPER module behind "openenv validate": checks a local environment directory for multi-mode
+# deployment readiness (pyproject, uv.lock, server entry point, openenv dependency, server/app.py
+# main guard) and validates a running server's HTTP API (openapi, health, metadata, schema, MCP,
+# mode endpoint consistency), producing JSON-serializable reports made of criterion dicts and a
+# summary.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -31,6 +37,9 @@ def _make_criterion(
     expected: Any | None = None,
     actual: Any | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns a criterion dict with id, description, passed and required, plus details,
+    # expected and actual only when not None.
     """Create a standard criterion result payload."""
     criterion: dict[str, Any] = {
         "id": criterion_id,
@@ -48,6 +57,9 @@ def _make_criterion(
 
 
 def _normalize_runtime_url(base_url: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: trims the URL, prefixes "http://" if it has no scheme, checks it has scheme and host,
+    # and returns it without trailing slashes. Raises: ValueError if empty or invalid.
     """Normalize and validate a runtime target URL."""
     target = base_url.strip()
     if not target:
@@ -64,6 +76,9 @@ def _normalize_runtime_url(base_url: str) -> str:
 
 
 def _runtime_standard_profile(api_version: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns "openenv-http/1.x" for API versions starting with "1.", else
+    # "openenv-http/unknown".
     """Resolve the runtime standard profile for an API version."""
     if api_version.startswith("1."):
         return "openenv-http/1.x"
@@ -71,6 +86,9 @@ def _runtime_standard_profile(api_version: str) -> str:
 
 
 def _build_summary(criteria: list[dict[str, Any]]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: returns counts of passed/total criteria, ids of failed criteria (missing id shown as
+    # "unknown") and passed/total counts among required criteria (required defaults to True).
     """Build a compact pass/fail summary for a criteria list."""
     total_count = len(criteria)
     passed_count = sum(1 for criterion in criteria if criterion.get("passed", False))
@@ -99,6 +117,17 @@ def _build_summary(criteria: list[dict[str, Any]]) -> dict[str, Any]:
 def validate_running_environment(
     base_url: str, timeout_s: float = 5.0
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Validates a running server at base_url via HTTP (each request with timeout_s). Criteria:
+    # GET /openapi.json returns a string info.version (sets standard_version/profile and the paths);
+    # GET /health returns 200 with status "healthy"; GET /metadata returns string name and
+    # description; GET /schema returns object action, observation and state; POST /mcp with an empty
+    # JSON body returns 200 with jsonrpc "2.0"; and mode consistency from OpenAPI paths (with /reset:
+    # "simulation" mode requiring /step and /state; without: "production" mode requiring neither;
+    # fails if paths are unavailable). Request failures become failed criteria with details.
+    # Returns: report dict with target, validation_type, standard_version, standard_profile, mode,
+    # passed (all required criteria passed), summary and criteria.
+    # Raises: ValueError for an invalid URL.
     """
     Validate a running OpenEnv server against runtime API standards.
 
@@ -425,6 +454,10 @@ def validate_running_environment(
 
 
 def _has_main_guard_call(app_content: str) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: parses source and returns True if a top-level "if __name__ == '__main__'" block
+    # contains a direct main(...) call. On a syntax error falls back to a substring check for
+    # __name__, __main__ and "main(".
     """Return True when the module calls main() under a __main__ guard."""
     try:
         tree = ast.parse(app_content)
@@ -446,6 +479,8 @@ def _has_main_guard_call(app_content: str) -> bool:
 
 
 def _is_main_guard(test: ast.expr) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if the expression is exactly __name__ == "__main__".
     """Return True for `if __name__ == "__main__"` tests."""
     return (
         isinstance(test, ast.Compare)
@@ -460,6 +495,8 @@ def _is_main_guard(test: ast.expr) -> bool:
 
 
 def _contains_main_call(node: ast.AST) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: returns True if any call node within node is a call of a bare name main.
     """Return True when an AST node contains a direct `main(...)` call."""
     return any(
         isinstance(candidate, ast.Call)
@@ -477,6 +514,10 @@ _OPENENV_DOCKER_INSTALL_RE = re.compile(
 
 
 def _dockerfile_installs_openenv_runtime(env_path: Path) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: scans server/Dockerfile and root Dockerfile (non-comment lines, lowercased) and returns
+    # True if any line references an openenv requirement token or contains "openenv-core";
+    # unreadable files are skipped.
     """Return True when a Docker deployment installs OpenEnv outside pyproject."""
     for dockerfile_path in (
         env_path / "server" / "Dockerfile",
@@ -503,6 +544,12 @@ def _dockerfile_installs_openenv_runtime(env_path: Path) -> bool:
 
 
 def validate_multi_mode_deployment(env_path: Path) -> tuple[bool, list[str]]:
+    # [FUNCTION DOC]
+    # Checks deployment readiness of env_path. Returns early with failure if pyproject.toml is missing
+    # or unparsable. Issues collected: missing uv.lock; missing [project.scripts] server; server entry
+    # not containing ":main"; no openenv / openenv-core dependency in pyproject and none installed by a
+    # Dockerfile; missing server/app.py, no "def main(" in it, or no main call under a main guard.
+    # Returns: (True if no issues, list of issue strings).
     """
     Validate that an environment is ready for multi-mode deployment.
 
@@ -579,6 +626,9 @@ def validate_multi_mode_deployment(env_path: Path) -> tuple[bool, list[str]]:
 
 
 def get_deployment_modes(env_path: Path) -> dict[str, bool]:
+    # [FUNCTION DOC]
+    # Returns a dict of deployment modes: docker (a Dockerfile exists in server/ or root), and
+    # openenv_serve, uv_run and python_module (all True only if multi-mode validation passes).
     """
     Check which deployment modes are supported by the environment.
 
@@ -608,6 +658,9 @@ def get_deployment_modes(env_path: Path) -> dict[str, bool]:
 
 
 def format_validation_report(env_name: str, is_valid: bool, issues: list[str]) -> str:
+    # [FUNCTION DOC]
+    # Returns "[OK] <env>: Ready for multi-mode deployment" when valid, else a FAIL line followed by
+    # an "Issues found:" list.
     """
     Format a validation report for display.
 
@@ -632,6 +685,11 @@ def build_local_validation_json_report(
     issues: list[str],
     deployment_modes: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Builds the local validation JSON report: a required readiness criterion (issues as actual) plus
+    # optional non-required criteria per deployment mode. Returns: dict with target path, environment,
+    # validation_type "local_environment", standard_version "local", standard_profile
+    # "openenv-local", passed, summary, criteria, issues and deployment_modes.
     """Build a JSON report for local environment validation."""
     criteria = [
         _make_criterion(

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Docker tests for the openenv-base image: console scripts (uvicorn, fastapi, uv) are on
+# PATH and fastapi/uvicorn import in Python. Skipped when Docker or the
+# openenv-base:latest image is unavailable. Side effects: docker subprocesses.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the openenv-base Docker image.
@@ -20,6 +24,8 @@ import pytest
 
 @pytest.fixture
 def check_docker_available():
+    # [FUNCTION DOC]
+    # Fixture: skips unless the docker CLI exists and "docker info" succeeds within 10 s.
     """Check if Docker is available."""
     if not shutil.which("docker"):
         pytest.skip("Docker is not installed")
@@ -38,6 +44,8 @@ def check_docker_available():
 
 @pytest.fixture
 def check_base_image_exists(check_docker_available):
+    # [FUNCTION DOC]
+    # Fixture: skips unless openenv-base:latest exists locally.
     """Check if the openenv-base image exists."""
     result = subprocess.run(
         ["docker", "images", "-q", "openenv-base:latest"],
@@ -54,6 +62,8 @@ def check_base_image_exists(check_docker_available):
 
 @pytest.mark.docker
 class TestOpenEnvBaseImage:
+    # [CLASS DOC]
+    # Runs commands in throwaway openenv-base containers.
     """Tests for the openenv-base Docker image.
 
     These tests verify that console scripts from installed packages
@@ -61,6 +71,8 @@ class TestOpenEnvBaseImage:
     """
 
     def test_uvicorn_command_available(self, check_base_image_exists):
+        # [FUNCTION DOC]
+        # "uvicorn --version" exits 0 and mentions uvicorn.
         """Test that uvicorn command is available in openenv-base image.
 
         This verifies that console_scripts from installed packages
@@ -81,6 +93,8 @@ class TestOpenEnvBaseImage:
         assert "uvicorn" in result.stdout.lower() or "Running uvicorn" in result.stdout
 
     def test_fastapi_command_available(self, check_base_image_exists):
+        # [FUNCTION DOC]
+        # "fastapi --help" exits 0 and shows usage.
         """Test that fastapi CLI command is available in openenv-base image.
 
         This verifies that console_scripts from installed packages
@@ -101,6 +115,8 @@ class TestOpenEnvBaseImage:
         assert "fastapi" in result.stdout.lower() or "Usage" in result.stdout
 
     def test_uv_command_available(self, check_base_image_exists):
+        # [FUNCTION DOC]
+        # "uv --version" exits 0 (baseline).
         """Test that uv command is available (baseline check).
 
         This test should PASS since uv is already copied in the Dockerfile.
@@ -121,6 +137,8 @@ class TestOpenEnvBaseImage:
         assert "uv" in result.stdout.lower()
 
     def test_python_can_import_fastapi(self, check_base_image_exists):
+        # [FUNCTION DOC]
+        # Python imports fastapi and prints a non-empty version.
         """Test that Python can import fastapi module.
 
         This verifies that the packages are installed correctly,
@@ -150,6 +168,8 @@ class TestOpenEnvBaseImage:
         assert result.stdout.strip(), "fastapi version output is empty"
 
     def test_python_can_import_uvicorn(self, check_base_image_exists):
+        # [FUNCTION DOC]
+        # Python imports uvicorn and prints a non-empty version.
         """Test that Python can import uvicorn module.
 
         This verifies that the packages are installed correctly,

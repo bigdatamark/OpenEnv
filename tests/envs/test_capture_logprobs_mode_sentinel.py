@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Tests that validate_llm.probe_logprobs_mode reports "unknown" (not "raw")
+# when the top-two logprob gap is saturated by -inf sentinels, while still
+# detecting raw, processed and flat distributions. Skipped if the module is
+# unavailable.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -34,6 +39,9 @@ validate_llm = pytest.importorskip("openenv.core.harness.capture.validate_llm")
 
 
 def _payload(top: list[float]) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: builds a chat completion mapping whose first position has the given
+    # top_logprobs values.
     """A chat completion whose first position carries `top` as its `top_logprobs`."""
     return {
         "choices": [
@@ -43,10 +51,15 @@ def _payload(top: list[float]) -> dict:
 
 
 def _probe_with(monkeypatch, per_temperature: list[list[float]]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: monkeypatches validate_llm._post to return canned payloads in order
+    # (one per temperature) and returns probe_logprobs_mode's result.
     """Run the probe against canned responses, one per temperature it asks about."""
     answers = list(per_temperature)
 
     def fake_post(url, body, timeout, api_key=None, auth_header="Authorization"):
+        # [FUNCTION DOC]
+        # Pops the next canned top-logprob list and returns its payload.
         return _payload(answers.pop(0))
 
     monkeypatch.setattr(validate_llm, "_post", fake_post)
@@ -54,6 +67,8 @@ def _probe_with(monkeypatch, per_temperature: list[list[float]]) -> str:
 
 
 def test_saturated_gap_is_unknown_not_raw(monkeypatch):
+    # [FUNCTION DOC]
+    # Sentinel -9999 gaps at both temperatures give "unknown".
     # The real shape: top token at 0.0, runners-up at the -inf sentinel, unchanged by temperature.
     mode = _probe_with(monkeypatch, [[0.0, -9999.0, -9999.0], [0.0, -9999.0, -9999.0]])
     assert mode == "unknown", (
@@ -63,24 +78,32 @@ def test_saturated_gap_is_unknown_not_raw(monkeypatch):
 
 
 def test_genuinely_raw_is_still_detected(monkeypatch):
+    # [FUNCTION DOC]
+    # Identical real gaps give "raw".
     # The guard must not blind the check it lives in: a real, unchanging gap is still raw.
     mode = _probe_with(monkeypatch, [[-1.0, -7.75], [-1.0, -7.75]])
     assert mode == "raw"
 
 
 def test_processed_is_still_detected(monkeypatch):
+    # [FUNCTION DOC]
+    # A gap halving with doubled temperature gives "processed".
     # Gap halves as temperature doubles -> processed. Matches the measured 3.75 -> 1.875.
     mode = _probe_with(monkeypatch, [[-1.0, -4.75], [-1.0, -2.875]])
     assert mode == "processed"
 
 
 def test_flat_distribution_remains_unknown(monkeypatch):
+    # [FUNCTION DOC]
+    # Near-zero gaps give "unknown".
     # The pre-existing guard at the other extreme, kept honest alongside the new one.
     mode = _probe_with(monkeypatch, [[-1.0, -1.2], [-1.0, -1.1]])
     assert mode == "unknown"
 
 
 def test_sentinel_threshold_admits_real_tail_values(monkeypatch):
+    # [FUNCTION DOC]
+    # Deep but real values (-41/-21) are still measured as "processed".
     # A deep but REAL tail value must still be measured, or the guard would swallow valid data.
     mode = _probe_with(monkeypatch, [[-1.0, -41.0], [-1.0, -21.0]])
     assert mode == "processed"

@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# End-to-end Terminal-Bench 2 evaluation in a single Novita sandbox: an LLM agent with "bash" and "submit" tools works a
+# TB2 task through the environment's exec action, then the environment's evaluate action scores it with the task's own
+# verifier. Exit status 0 only for reward 1.0. Requires NOVITA_API_KEY and an OpenAI-compatible endpoint key.
+# Side effects: sys.path change, builds a template and starts/stops a remote sandbox, LLM calls, stdout.
 """End-to-end Terminal-Bench 2 evaluation on a Novita sandbox.
 
 The other TB2 examples stop short of an actual episode: ``novita_tbench2_simple.py``
@@ -100,6 +105,9 @@ TOOLS = [
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Defines and parses CLI options (task id, max steps, model, API base url and key, TB2 mode, per-command timeout,
+    # WebSocket message timeout, sandbox lifetime and readiness timeout, verbose). Returns the argparse namespace.
     parser = argparse.ArgumentParser(
         description="Run one real TB2 task end to end on a Novita sandbox.",
     )
@@ -183,6 +191,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+    # [FUNCTION DOC]
+    # Returns the text unchanged if within limit, else the first limit characters followed by a note of how many characters were dropped.
     """Clip *text* to *limit* characters, noting how much was dropped.
 
     Args:
@@ -209,6 +219,12 @@ async def run_agent(
     max_steps: int,
     verbose: bool,
 ) -> tuple[int, list[str]]:
+    # [FUNCTION DOC]
+    # Runs a temperature-0 tool-calling loop for up to max_steps turns: appends each assistant message (with tool calls),
+    # stops if no tool calls; for each call, "submit" adds an acknowledgement and marks submission, other calls are treated
+    # as bash (command from JSON arguments, empty on invalid JSON) executed via an exec action with the output (or "ERROR:"
+    # plus error, truncated) returned as a tool message; stops after a turn containing submit.
+    # Returns: tuple of (number of turns used, list of commands issued). Side effects: network I/O, optional printing.
     """Drive the task with a tool-calling agent until it submits or runs out of turns.
 
     Args:
@@ -298,6 +314,11 @@ async def run_agent(
 
 
 async def main() -> int:
+    # [FUNCTION DOC]
+    # Validates NOVITA_API_KEY and the API key (SystemExit otherwise), creates the LLM client and a provider with TB2 env vars
+    # and lifetime, starts the sandbox, waits for readiness, connects a client that owns the provider, resets to the task,
+    # runs the agent, then evaluates and prints the verifier output tail when verbose or failing. Always stops the sandbox.
+    # Returns 0 for reward 1.0, otherwise 1 (including when scoring failed).
     args = parse_args()
     if not os.environ.get("NOVITA_API_KEY"):
         raise SystemExit("Set NOVITA_API_KEY to create the sandbox.")

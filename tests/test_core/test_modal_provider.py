@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Unit tests for ModalProvider using a duck-typed fake adapter (no modal install needed):
+# start/tunnel/https checks, cpu/memory/extra forwarding, server command resolution,
+# image_from_dockerfile registry, lifecycle and cleanup, readiness and secret/URL redaction.
+# A fake "modal" module pins the real _DefaultModalAdapter SDK shape and the Sandbox v2 check.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Unit tests for ModalProvider.
@@ -26,13 +31,23 @@ from openenv.core.containers.runtime.providers import ContainerProvider
 # Fake adapter (duck-typed to _DefaultModalAdapter)
 # ---------------------------------------------------------------------------
 class _FakeImage:
+    # [CLASS DOC]
+    # HELPER: Image stand-in recording its kind ("registry"/"dockerfile") and reference.
     def __init__(self, kind: str, ref: str):
+        # [FUNCTION DOC]
+        # Stores kind and ref.
         self.kind = kind
         self.ref = ref
 
 
 class _FakeAdapter:
+    # [CLASS DOC]
+    # HELPER: In-memory Modal adapter recording created sandboxes, exec commands and
+    # terminations, with switches for create/terminate/tunnel failures, a dead process, a
+    # canned log and whether /app/env/openenv.yaml exists.
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initialises logs, the tunnel URL and failure switches.
         self.created: list[dict] = []
         self.exec_commands: list[str] = []
         self.terminated = 0
@@ -45,12 +60,18 @@ class _FakeAdapter:
         self.has_yaml = True
 
     def image_from_registry(self, tag):
+        # [FUNCTION DOC]
+        # Returns a registry _FakeImage for the tag.
         return _FakeImage("registry", tag)
 
     def image_from_dockerfile(self, dockerfile_path, context_dir):
+        # [FUNCTION DOC]
+        # Returns a dockerfile _FakeImage for the path.
         return _FakeImage("dockerfile", dockerfile_path)
 
     def create_sandbox(self, *, image, encrypted_ports, timeout, env, extra):
+        # [FUNCTION DOC]
+        # Raises if fail_create; otherwise records the call and returns a new opaque sandbox.
         if self.fail_create:
             raise RuntimeError("create failed")
         sandbox = object()
@@ -67,6 +88,9 @@ class _FakeAdapter:
         return sandbox
 
     def exec(self, sandbox, command, *, timeout=10):
+        # [FUNCTION DOC]
+        # Records the command and answers manifest existence/cat, find, liveness and log commands;
+        # otherwise "".
         self.exec_commands.append(command)
         if "test -f /app/env/openenv.yaml" in command:
             return "found" if self.has_yaml else ""
@@ -81,11 +105,15 @@ class _FakeAdapter:
         return ""
 
     def tunnel_url(self, sandbox, port):
+        # [FUNCTION DOC]
+        # Raises if fail_tunnel; otherwise returns the tunnel URL.
         if self.fail_tunnel:
             raise RuntimeError("tunnel failed")
         return self.tunnel
 
     def terminate(self, sandbox):
+        # [FUNCTION DOC]
+        # Counts the call; raises if fail_terminate.
         self.terminated += 1
         if self.fail_terminate:
             raise RuntimeError("terminate failed")
@@ -93,16 +121,22 @@ class _FakeAdapter:
 
 @pytest.fixture()
 def adapter():
+    # [FUNCTION DOC]
+    # Fixture returning a fresh _FakeAdapter.
     return _FakeAdapter()
 
 
 @pytest.fixture()
 def provider(adapter):
+    # [FUNCTION DOC]
+    # Fixture: ModalProvider with app name "test-app" on the fake adapter.
     return ModalProvider(app_name="test-app", _adapter=adapter)
 
 
 @pytest.fixture(autouse=True)
 def _fast_provider_sleep():
+    # [FUNCTION DOC]
+    # Autouse fixture patching time.sleep in the provider module.
     """Avoid real sleeps in ModalProvider (wait_for_ready)."""
     with patch("openenv.core.containers.runtime.modal_provider.time.sleep"):
         yield
@@ -110,6 +144,8 @@ def _fast_provider_sleep():
 
 @pytest.fixture(autouse=True)
 def _clean_dockerfile_registry():
+    # [FUNCTION DOC]
+    # Autouse fixture clearing the class-level Dockerfile registry around each test.
     """Clear the Dockerfile registry between tests."""
     ModalProvider._dockerfile_registry.clear()
     yield
@@ -117,6 +153,8 @@ def _clean_dockerfile_registry():
 
 
 def _write_dockerfile(tmp_path, body):
+    # [FUNCTION DOC]
+    # HELPER: Writes body to tmp_path/server/Dockerfile. Returns its path.
     server = tmp_path / "server"
     server.mkdir(exist_ok=True)
     df = server / "Dockerfile"
@@ -128,21 +166,31 @@ def _write_dockerfile(tmp_path, body):
 # Tests: start_container
 # ---------------------------------------------------------------------------
 class TestStartContainer:
+    # [CLASS DOC]
+    # Tests start_container.
     def test_returns_tunnel_url(self, provider):
+        # [FUNCTION DOC]
+        # Returns the https tunnel URL.
         assert provider.start_container("echo-env:latest") == (
             "https://sb-abc-8000.modal.host"
         )
 
     def test_rejects_non_8000_port(self, provider):
+        # [FUNCTION DOC]
+        # Ports other than 8000 raise ValueError.
         with pytest.raises(ValueError, match="only supports port 8000"):
             provider.start_container("echo-env:latest", port=9000)
 
     def test_port_8000_allowed(self, provider):
+        # [FUNCTION DOC]
+        # Port 8000 is accepted.
         assert provider.start_container("echo-env:latest", port=8000).startswith(
             "https://"
         )
 
     def test_registry_image_used(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Registry images are used with encrypted port 8000.
         provider.start_container("echo-env:latest")
         image = adapter.created[0]["image"]
         assert image.kind == "registry"
@@ -150,10 +198,14 @@ class TestStartContainer:
         assert adapter.created[0]["encrypted_ports"] == [8000]
 
     def test_env_vars_forwarded(self, provider, adapter):
+        # [FUNCTION DOC]
+        # env_vars reach the sandbox env.
         provider.start_container("echo-env:latest", env_vars={"FOO": "bar"})
         assert adapter.created[0]["env"] == {"FOO": "bar"}
 
     def test_constructor_image_used_when_start_omits_image(self, adapter):
+        # [FUNCTION DOC]
+        # Constructor image and env vars are used when start gets none.
         provider = ModalProvider(
             _adapter=adapter,
             image="constructor-env:latest",
@@ -166,17 +218,23 @@ class TestStartContainer:
         assert adapter.created[0]["env"] == {"FOO": "bar"}
 
     def test_start_image_overrides_constructor_image(self, adapter):
+        # [FUNCTION DOC]
+        # An explicit start image wins.
         provider = ModalProvider(_adapter=adapter, image="constructor-env:latest")
         provider.start_container("explicit-env:latest")
         image = adapter.created[0]["image"]
         assert image.ref == "explicit-env:latest"
 
     def test_requires_image_from_constructor_or_start(self, adapter):
+        # [FUNCTION DOC]
+        # No image raises ValueError.
         provider = ModalProvider(_adapter=adapter)
         with pytest.raises(ValueError, match="requires an image"):
             provider.start_container()
 
     def test_server_started_in_background(self, provider, adapter):
+        # [FUNCTION DOC]
+        # The server command is launched with nohup.
         provider.start_container("echo-env:latest")
         assert any(
             "nohup" in c and "uvicorn server.app:app" in c
@@ -184,6 +242,8 @@ class TestStartContainer:
         )
 
     def test_rejects_non_https_tunnel(self, adapter):
+        # [FUNCTION DOC]
+        # An http tunnel raises "non-HTTPS" and terminates the sandbox.
         adapter.tunnel = "http://insecure.modal.host"
         provider = ModalProvider(_adapter=adapter)
         with pytest.raises(RuntimeError, match="non-HTTPS"):
@@ -196,7 +256,11 @@ class TestStartContainer:
 # Tests: cpu / memory resources
 # ---------------------------------------------------------------------------
 class TestResources:
+    # [CLASS DOC]
+    # Tests resource and extra kwargs forwarding.
     def test_cpu_memory_forwarded_as_limits(self, adapter):
+        # [FUNCTION DOC]
+        # cpu/memory become (request, limit) tuples with small fixed requests.
         provider = ModalProvider(_adapter=adapter, cpu=2.0, memory=4096)
         provider.start_container("echo-env:latest")
         extra = adapter.created[0]["extra"]
@@ -205,12 +269,16 @@ class TestResources:
         assert extra["memory"] == (128, 4096)
 
     def test_no_resources_means_no_extra_keys(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Without resources, no cpu/memory keys are passed.
         provider.start_container("echo-env:latest")
         extra = adapter.created[0]["extra"]
         assert "cpu" not in extra
         assert "memory" not in extra
 
     def test_extra_kwargs_forwarded(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Unknown start kwargs (e.g. gpu) are forwarded as extras.
         provider.start_container("echo-env:latest", gpu="A100")
         assert adapter.created[0]["extra"]["gpu"] == "A100"
 
@@ -219,16 +287,24 @@ class TestResources:
 # Tests: server command resolution
 # ---------------------------------------------------------------------------
 class TestServerCmd:
+    # [CLASS DOC]
+    # Tests server command resolution.
     def test_explicit_cmd_constructor(self, adapter):
+        # [FUNCTION DOC]
+        # Constructor cmd is executed.
         provider = ModalProvider(_adapter=adapter, cmd="python -m myserver")
         provider.start_container("echo-env:latest")
         assert any("python -m myserver" in c for c in adapter.exec_commands)
 
     def test_kwarg_cmd_overrides(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Start-time cmd is executed.
         provider.start_container("echo-env:latest", cmd="custom-cmd")
         assert any("custom-cmd" in c for c in adapter.exec_commands)
 
     def test_discovers_from_yaml(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Discovered openenv.yaml app yields the uvicorn command.
         provider.start_container("echo-env:latest")
         assert any(
             "cd /app/env && python -m uvicorn server.app:app" in c
@@ -236,6 +312,8 @@ class TestServerCmd:
         )
 
     def test_no_yaml_raises(self, adapter):
+        # [FUNCTION DOC]
+        # No manifest raises ValueError and terminates the sandbox.
         adapter.has_yaml = False
         provider = ModalProvider(_adapter=adapter)
         with pytest.raises(ValueError, match="Could not find openenv.yaml"):
@@ -244,6 +322,8 @@ class TestServerCmd:
         assert adapter.terminated == 1
 
     def test_falls_back_to_dockerfile_cmd(self, adapter, tmp_path):
+        # [FUNCTION DOC]
+        # Without a manifest, a registered Dockerfile's CMD is used.
         adapter.has_yaml = False
         df = _write_dockerfile(
             tmp_path,
@@ -259,22 +339,32 @@ class TestServerCmd:
 # Tests: image_from_dockerfile
 # ---------------------------------------------------------------------------
 class TestImageFromDockerfile:
+    # [CLASS DOC]
+    # Tests image_from_dockerfile.
     def test_returns_dockerfile_uri(self, tmp_path):
+        # [FUNCTION DOC]
+        # Returns "dockerfile:" plus the resolved path.
         df = _write_dockerfile(tmp_path, "FROM python:3.11\nCMD uvicorn app:app\n")
         result = ModalProvider.image_from_dockerfile(str(df))
         assert result.startswith("dockerfile:")
         assert str(df.resolve()) in result
 
     def test_missing_dockerfile_raises(self, tmp_path):
+        # [FUNCTION DOC]
+        # A missing file raises FileNotFoundError.
         with pytest.raises(FileNotFoundError):
             ModalProvider.image_from_dockerfile(str(tmp_path / "nope"))
 
     def test_bad_context_dir_raises(self, tmp_path):
+        # [FUNCTION DOC]
+        # A missing context dir raises ValueError.
         df = _write_dockerfile(tmp_path, "FROM python:3.11\n")
         with pytest.raises(ValueError, match="context_dir does not exist"):
             ModalProvider.image_from_dockerfile(str(df), context_dir="/no/such/dir")
 
     def test_parses_cmd_into_registry(self, tmp_path):
+        # [FUNCTION DOC]
+        # The exec-form CMD is stored joined as server_cmd.
         df = _write_dockerfile(
             tmp_path, 'FROM python:3.11\nCMD ["uvicorn", "app:app"]\n'
         )
@@ -285,6 +375,8 @@ class TestImageFromDockerfile:
         )
 
     def test_dockerfile_image_built_from_dockerfile(self, provider, adapter, tmp_path):
+        # [FUNCTION DOC]
+        # A registered Dockerfile source builds a dockerfile image.
         df = _write_dockerfile(
             tmp_path, "FROM python:3.11\nCOPY . /app\nCMD uvicorn app:app\n"
         )
@@ -293,6 +385,8 @@ class TestImageFromDockerfile:
         assert adapter.created[0]["image"].kind == "dockerfile"
 
     def test_unregistered_dockerfile_raises(self, provider):
+        # [FUNCTION DOC]
+        # An unregistered dockerfile: source raises ValueError.
         with pytest.raises(ValueError, match="No registered Dockerfile metadata"):
             provider.start_container("dockerfile:/tmp/never-registered")
 
@@ -301,13 +395,21 @@ class TestImageFromDockerfile:
 # Tests: _parse_app_field
 # ---------------------------------------------------------------------------
 class TestParseAppField:
+    # [CLASS DOC]
+    # Tests _parse_app_field.
     def test_simple(self):
+        # [FUNCTION DOC]
+        # Returns the app value.
         assert ModalProvider._parse_app_field("app: server.app:app") == "server.app:app"
 
     def test_missing(self):
+        # [FUNCTION DOC]
+        # Missing key returns None.
         assert ModalProvider._parse_app_field("name: test\nport: 8000") is None
 
     def test_invalid_yaml(self):
+        # [FUNCTION DOC]
+        # Invalid YAML returns None.
         assert ModalProvider._parse_app_field("::: not yaml :::") is None
 
 
@@ -315,9 +417,13 @@ class TestParseAppField:
 # Tests: lifecycle (double-start, stop, close, context manager)
 # ---------------------------------------------------------------------------
 class TestLifecycle:
+    # [CLASS DOC]
+    # Tests start/stop/close and context manager behaviour.
     def test_double_start_raises_and_preserves_existing_sandbox(
         self, provider, adapter
     ):
+        # [FUNCTION DOC]
+        # A second start raises and leaves the first sandbox untouched.
         provider.start_container("echo-env:latest")
         first = provider._sandbox
 
@@ -329,33 +435,45 @@ class TestLifecycle:
         assert provider._sandbox is first
 
     def test_start_after_stop_is_allowed(self, provider, adapter):
+        # [FUNCTION DOC]
+        # Starting again after stop creates a new sandbox.
         provider.start_container("echo-env:latest")
         provider.stop_container()
         provider.start_container("other:latest")
         assert len(adapter.created) == 2
 
     def test_stop_terminates_sandbox(self, provider, adapter):
+        # [FUNCTION DOC]
+        # stop terminates and clears the sandbox.
         provider.start_container("echo-env:latest")
         provider.stop_container()
         assert adapter.terminated == 1
         assert provider._sandbox is None
 
     def test_stop_without_start_is_noop(self, provider, adapter):
+        # [FUNCTION DOC]
+        # stop without a sandbox does nothing.
         provider.stop_container()
         assert adapter.terminated == 0
 
     def test_close_terminates_sandbox(self, provider, adapter):
+        # [FUNCTION DOC]
+        # close terminates and clears the sandbox.
         provider.start_container("echo-env:latest")
         provider.close()
         assert adapter.terminated == 1
         assert provider._sandbox is None
 
     def test_context_manager_terminates_on_exit(self, adapter):
+        # [FUNCTION DOC]
+        # Leaving the with block terminates the sandbox.
         with ModalProvider(_adapter=adapter) as p:
             p.start_container("echo-env:latest")
         assert adapter.terminated == 1
 
     def test_context_manager_terminates_on_exception(self, adapter):
+        # [FUNCTION DOC]
+        # Cleanup also runs when the body raises.
         with pytest.raises(RuntimeError, match="boom"):
             with ModalProvider(_adapter=adapter) as p:
                 p.start_container("echo-env:latest")
@@ -363,6 +481,8 @@ class TestLifecycle:
         assert adapter.terminated == 1
 
     def test_is_container_provider(self, provider):
+        # [FUNCTION DOC]
+        # ModalProvider is a ContainerProvider.
         assert isinstance(provider, ContainerProvider)
 
 
@@ -370,7 +490,11 @@ class TestLifecycle:
 # Tests: cleanup does not mask the original error
 # ---------------------------------------------------------------------------
 class TestCleanup:
+    # [CLASS DOC]
+    # Tests start-failure cleanup.
     def test_cleanup_failure_does_not_mask_original_error(self, adapter):
+        # [FUNCTION DOC]
+        # A tunnel failure propagates even if terminate also fails; terminate was attempted.
         adapter.fail_tunnel = True  # original failure (after sandbox exists)
         adapter.fail_terminate = True  # secondary failure during cleanup
         provider = ModalProvider(_adapter=adapter)
@@ -381,6 +505,8 @@ class TestCleanup:
         assert adapter.terminated == 1  # cleanup was still attempted
 
     def test_create_failure_clears_secrets_without_terminating(self, adapter):
+        # [FUNCTION DOC]
+        # A create failure clears redaction values and terminates nothing.
         adapter.fail_create = True
         provider = ModalProvider(_adapter=adapter)
 
@@ -395,12 +521,18 @@ class TestCleanup:
 # Tests: wait_for_ready (health, secrets, URL non-leak)
 # ---------------------------------------------------------------------------
 class TestWaitForReady:
+    # [CLASS DOC]
+    # Tests readiness, crash reporting and redaction.
     def test_ready_when_health_200(self, provider):
+        # [FUNCTION DOC]
+        # Returns when /health answers 200.
         provider.start_container("echo-env:latest")
         with patch("requests.get", return_value=MagicMock(status_code=200)):
             provider.wait_for_ready("https://x.modal.host", timeout_s=5)
 
     def test_dead_process_raises_without_log_by_default(self, provider, adapter):
+        # [FUNCTION DOC]
+        # A dead process raises "not surfaced" without log content.
         import requests
 
         adapter.dead_process = True
@@ -413,6 +545,8 @@ class TestWaitForReady:
         assert "traceback" not in str(exc_info.value)
 
     def test_dead_process_surfaces_redacted_log_when_opted_in(self, adapter):
+        # [FUNCTION DOC]
+        # With surface_server_logs, the log is included with secrets replaced by "***".
         import requests
 
         adapter.dead_process = True
@@ -431,6 +565,11 @@ class TestWaitForReady:
         assert "***" in msg
 
     def test_timeout_does_not_leak_url(self, provider):
+        # [FUNCTION DOC]
+        # With no sandbox (death check skipped) and time patched past the deadline, the
+        # TimeoutError message omits the URL.
+        # KNOWN ISSUE: the inline comment says the process is kept "RUNNING", but the code sets
+        # the sandbox to None to skip the death check instead.
         import requests
 
         provider.start_container("echo-env:latest")
@@ -454,64 +593,103 @@ class TestWaitForReady:
 # Tests: _DefaultModalAdapter SDK shape + Sandbox v2 feature check
 # ---------------------------------------------------------------------------
 def _install_fake_modal(monkeypatch, *, has_experimental: bool = True):
+    # [FUNCTION DOC]
+    # HELPER: Registers a fake "modal" module (Sandbox with create and optionally
+    # _experimental_create, App.lookup, Image.from_dockerfile/from_registry) via monkeypatch,
+    # recording create calls in a calls mapping exposed as _calls. Returns: the module.
     """Install a minimal fake ``modal`` module pinned to the SDK shape used by
     ``_DefaultModalAdapter`` and return it for introspection."""
     modal_mod = types.ModuleType("modal")
     calls: dict = {"create": None, "create_v2": None}
 
     class _FakeProc:
+        # [CLASS DOC]
+        # HELPER: Process stand-in whose stdout.read returns the given output.
         def __init__(self, output=""):
+            # [FUNCTION DOC]
+            # Builds a stdout mock returning output.
             self.stdout = MagicMock()
             self.stdout.read = MagicMock(return_value=output)
 
         def wait(self):
+            # [FUNCTION DOC]
+            # Returns 0.
             return 0
 
     class _FakeTunnel:
+        # [CLASS DOC]
+        # HELPER: Tunnel with a fixed https URL.
         url = "https://sb-xyz-8000.modal.host"
 
     class _FakeSandboxInstance:
+        # [CLASS DOC]
+        # HELPER: Sandbox recording exec calls and termination.
         def __init__(self):
+            # [FUNCTION DOC]
+            # Initialises exec log and terminated flag.
             self.exec_calls = []
             self.terminated = False
 
         def exec(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # Records args and returns a process with output "ok".
             self.exec_calls.append(args)
             return _FakeProc("ok")
 
         def tunnels(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # Returns a mapping of port 8000 to a fake tunnel.
             return {8000: _FakeTunnel()}
 
         def terminate(self, *args, **kwargs):
+            # [FUNCTION DOC]
+            # Marks terminated.
             self.terminated = True
 
     class _FakeSandbox:
+        # [CLASS DOC]
+        # HELPER: Sandbox class with a recording static create.
         @staticmethod
         def create(*args, **kwargs):
+            # [FUNCTION DOC]
+            # Records (args, kwargs) as "create" and returns a new instance.
             calls["create"] = (args, kwargs)
             return _FakeSandboxInstance()
 
     if has_experimental:
 
         def _experimental_create(*args, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Records (args, kwargs) as "create_v2" and returns a new instance; attached as
+            # Sandbox._experimental_create when has_experimental is True.
             calls["create_v2"] = (args, kwargs)
             return _FakeSandboxInstance()
 
         _FakeSandbox._experimental_create = staticmethod(_experimental_create)
 
     class _FakeApp:
+        # [CLASS DOC]
+        # HELPER: App class with a recording lookup.
         @staticmethod
         def lookup(name, *, create_if_missing=False, **kwargs):
+            # [FUNCTION DOC]
+            # Records the app name and returns a dummy object.
             calls["app"] = name
             return object()
 
     class _FakeImage:
+        # [CLASS DOC]
+        # HELPER: Image class with tuple-returning constructors.
         @staticmethod
         def from_dockerfile(path, **kwargs):
+            # [FUNCTION DOC]
+            # Returns ("dockerfile", path, kwargs).
             return ("dockerfile", str(path), kwargs)
 
         @staticmethod
         def from_registry(tag, *args, **kwargs):
+            # [FUNCTION DOC]
+            # Returns ("registry", tag).
             return ("registry", tag)
 
     modal_mod.Sandbox = _FakeSandbox
@@ -523,7 +701,12 @@ def _install_fake_modal(monkeypatch, *, has_experimental: bool = True):
 
 
 class TestDefaultAdapter:
+    # [CLASS DOC]
+    # Tests _DefaultModalAdapter against the fake SDK.
     def test_matches_sdk_shape_v1(self, monkeypatch):
+        # [FUNCTION DOC]
+        # v1 creates a "sleep infinity" sandbox with ports/timeout/env/extras; exec, tunnel_url
+        # and terminate delegate correctly.
         modal_mod = _install_fake_modal(monkeypatch)
         adapter = _DefaultModalAdapter(app_name="openenv", use_sandbox_v2=False)
 
@@ -550,6 +733,8 @@ class TestDefaultAdapter:
         assert sandbox.terminated is True
 
     def test_v2_uses_experimental_create(self, monkeypatch):
+        # [FUNCTION DOC]
+        # v2 uses _experimental_create and not create.
         modal_mod = _install_fake_modal(monkeypatch)
         adapter = _DefaultModalAdapter(app_name="openenv", use_sandbox_v2=True)
         adapter.create_sandbox(
@@ -563,21 +748,31 @@ class TestDefaultAdapter:
         assert modal_mod._calls["create"] is None
 
     def test_v2_feature_check_raises_when_missing(self, monkeypatch):
+        # [FUNCTION DOC]
+        # v2 without _experimental_create raises RuntimeError at construction.
         _install_fake_modal(monkeypatch, has_experimental=False)
         with pytest.raises(RuntimeError, match="_experimental_create"):
             _DefaultModalAdapter(app_name="openenv", use_sandbox_v2=True)
 
     def test_v1_works_without_experimental_create(self, monkeypatch):
+        # [FUNCTION DOC]
+        # v1 needs no experimental API.
         _install_fake_modal(monkeypatch, has_experimental=False)
         # No feature check for the stable API.
         _DefaultModalAdapter(app_name="openenv", use_sandbox_v2=False)
 
 
 class TestSandboxV2Flag:
+    # [CLASS DOC]
+    # Tests the use_sandbox_v2 flag.
     def test_default_is_off(self, adapter):
+        # [FUNCTION DOC]
+        # Defaults to False.
         assert ModalProvider(_adapter=adapter)._use_sandbox_v2 is False
 
     def test_v2_emits_log(self, adapter, caplog):
+        # [FUNCTION DOC]
+        # Enabling it logs a "Sandbox v2" INFO message.
         import logging
 
         with caplog.at_level(logging.INFO):
@@ -585,6 +780,8 @@ class TestSandboxV2Flag:
         assert any("Sandbox v2" in r.message for r in caplog.records)
 
     def test_off_emits_no_log(self, adapter, caplog):
+        # [FUNCTION DOC]
+        # Disabled emits no such message.
         import logging
 
         with caplog.at_level(logging.INFO):

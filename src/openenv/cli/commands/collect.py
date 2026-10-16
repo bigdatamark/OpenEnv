@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Implements "openenv collect": runs a rollout collection job against a deployed environment
+# server with the harness CollectRunner, using a scripted teacher (first legal action) or an LLM
+# teacher (hosted OpenAI/Anthropic or a self-hosted OpenAI-compatible endpoint), writes
+# results.jsonl and metadata.json, and can push the output to a Hub dataset. Env specs are
+# "openspiel:<game>" or "reasoning_gym:<dataset>"; their client and session factory classes are
+# imported optionally at module import (None if unavailable).
+# KNOWN ISSUE: the module docstring says only openspiel_env is supported, but reasoning_gym is too.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Run a rollout collection job against a deployed OpenEnv environment.
@@ -63,11 +71,15 @@ valid argument. Only call one tool per turn."""
 
 
 def _uses_llm_teacher(provider: str, llm_endpoint: str | None) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if an LLM endpoint is given or the provider is not "scripted".
     """Return whether this collect job should use an LLM-backed teacher."""
     return llm_endpoint is not None or provider != "scripted"
 
 
 def _teacher_provider_label(provider: str, llm_endpoint: str | None) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns "openai-compatible" when an LLM endpoint is given, else the provider name.
     """Normalize the provider label shown in metadata and CLI output."""
     if llm_endpoint is not None:
         return "openai-compatible"
@@ -75,6 +87,9 @@ def _teacher_provider_label(provider: str, llm_endpoint: str | None) -> str:
 
 
 def _resolve_api_key(provider: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the first non-empty env var among the provider's key names (provider-specific,
+    # then API_KEY). Raises: typer.BadParameter if none is set or the provider is unknown.
     for name in _PROVIDER_API_KEY_ENVS.get(provider, []):
         value = os.getenv(name)
         if value:
@@ -87,6 +102,10 @@ def _resolve_api_key(provider: str) -> str:
 
 
 def _extract_legal_actions(messages: list[dict[str, Any]]) -> list[int]:
+    # [FUNCTION DOC]
+    # HELPER: scans messages newest first for legal actions, either a JSON-object content with a
+    # legal_actions list or text "Legal actions: [..]". Returns a list of ints (empty if not found or
+    # the textual list is empty). Raises: ValueError for non-integer entries.
     for message in reversed(messages):
         content = message.get("content") or ""
         if not isinstance(content, str):
@@ -109,6 +128,8 @@ def _extract_legal_actions(messages: list[dict[str, Any]]) -> list[int]:
 
 
 def _build_scripted_model_step():
+    # [FUNCTION DOC]
+    # HELPER: returns a scripted model-step function for smoke tests without API keys.
     """Default teacher: pick the first legal action from the latest observation.
 
     Matches the scripted teacher in ``examples/ttt_collect_demo.py``. Lets
@@ -116,6 +137,9 @@ def _build_scripted_model_step():
     """
 
     def model_step(messages, tools, sampling):
+        # [FUNCTION DOC]
+        # Picks the first legal action from the messages (0 if none) and returns a ModelStepResult calling
+        # the first offered tool (or "play_move") with that action_id. Sampling is ignored.
         del sampling
         legal = _extract_legal_actions(messages)
         action_id = legal[0] if legal else 0
@@ -146,6 +170,11 @@ def _build_llm_model_step(
     max_tokens: int,
     system_prompt: str | None = None,
 ):
+    # [FUNCTION DOC]
+    # HELPER: builds an LLM model-step function. With llm_endpoint, creates an OpenAIClient for that
+    # endpoint/port (API key from OPENAI_API_KEY or a placeholder) and prints its base URL; otherwise
+    # creates a hosted client for the provider with its API key. Uses the given system prompt or the
+    # default one. Raises: typer.BadParameter for an invalid endpoint or missing API key.
     effective_system_prompt = system_prompt or _SYSTEM_PROMPT
 
     if llm_endpoint:
@@ -183,6 +212,11 @@ def _build_session_factory(
     base_url: str,
     dataset_config: dict[str, Any] | None = None,
 ):
+    # [FUNCTION DOC]
+    # HELPER: splits the env spec on ":" and returns an OpenSpielSessionFactory (game variant) or
+    # ReasoningGymSessionFactory (dataset variant with optional config), each creating a client for
+    # base_url. Raises: typer.BadParameter for a missing variant, an unavailable env package or an
+    # unknown family.
     """Dispatch an env spec to a session factory.
 
     Supported specs:
@@ -355,6 +389,12 @@ def collect(
         ),
     ] = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: validates that --model is set for LLM teachers, parses --dataset-config JSON
+    # (BadParameter if invalid), builds the session factory and model step, writes metadata, runs
+    # CollectRunner for num_episodes with max_turns, resume and (unless --keep-losses) a filter
+    # keeping rewards >= 0, prints counts and averages, and optionally pushes the output directory
+    # to a Hub dataset repo. Side effects: network calls, file writes, Hub upload.
     """Collect rollouts from a deployed OpenEnv environment."""
     uses_llm_teacher = _uses_llm_teacher(provider, llm_endpoint)
     teacher_provider = _teacher_provider_label(provider, llm_endpoint)
@@ -452,4 +492,6 @@ def collect(
 
 
 def _invoke_via_entry_point() -> None:  # pragma: no cover - wired in __main__
+    # [FUNCTION DOC]
+    # HELPER: runs this module's Typer app and exits with its return value.
     sys.exit(app())

@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Entry point of the openenv CLI. Builds the top-level Typer app and registers the subcommands
+# init, import, build, validate, push, serve, fork, collect and discover, and the sub-apps
+# harbor, skills and catalog. Running the module invokes main.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -73,6 +77,9 @@ app.command(name="discover")(catalog.discover)
 
 # Entry point for setuptools
 def main() -> None:
+    # [FUNCTION DOC]
+    # Runs the Typer app. Exits 130 (after a message) on KeyboardInterrupt and exits 1 after
+    # printing "Error: ..." to stderr on any other uncaught exception.
     """Main entry point for the CLI."""
     try:
         app()

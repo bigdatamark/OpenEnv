@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Public pydantic wire models for ThinkingBox (the only benchmark-specific values crossing the OpenEnv
+# WebSocket). Also defines the pinned data release constants (release name, data commit, bundle SHA-256,
+# manifest path, archive URL) and CANONICAL_TEST_UIDS, the tuple of task UIDs from the pinned manifest.
+# Actions are discriminated by a "type" literal: list_tools, call_tool, submit_message, and a private
+# _finish used only by trusted harness code.
 """Define the public action, observation, and state models for ThinkingBox.
 
 These Pydantic models are the only benchmark-specific values serialized across
@@ -532,6 +538,9 @@ CANONICAL_TEST_UIDS: tuple[str, ...] = (
 
 
 class SubmittedToolCall(BaseModel):
+    # [CLASS DOC]
+    # One provider tool call (extra fields forbidden): tool name, arguments mapping, required call id and an
+    # optional provider parse error (calls with a parse error are never executed).
     """Represent one provider tool call within an assistant turn.
 
     Args:
@@ -557,6 +566,9 @@ class SubmittedToolCall(BaseModel):
 
 
 class ToolCallResult(BaseModel):
+    # [CLASS DOC]
+    # Result of one executed call (extra fields forbidden): tool name, call id, model-visible content, optional
+    # error class (tool_not_found, invalid_args, execution_error) and optional direct-response rendering.
     """Represent one model-visible result in a parallel tool batch.
 
     Args:
@@ -584,6 +596,9 @@ class ToolCallResult(BaseModel):
 
 
 class CallToolAction(Action):
+    # [CLASS DOC]
+    # Tool-call action: either a single call (tool_name, arguments, optional call_id) or an ordered parallel
+    # batch of SubmittedToolCalls.
     """Call one tool or one native parallel tool batch.
 
     Args:
@@ -608,6 +623,9 @@ class CallToolAction(Action):
 
     @model_validator(mode="after")
     def require_single_or_parallel(self) -> "CallToolAction":
+        # [FUNCTION DOC]
+        # After-validator. Raises ValueError unless exactly one of tool_name / non-empty batch is supplied, if a
+        # batch is combined with top-level arguments or call_id, or if batch call ids are not unique. Returns self.
         """Require exactly one valid single-call or parallel-call representation."""
         has_single = self.tool_name is not None
         has_parallel = bool(self.parallel_tool_calls)
@@ -626,6 +644,9 @@ class CallToolAction(Action):
 
 
 class SubmitMessageAction(Action):
+    # [CLASS DOC]
+    # Message action: optional assistant-visible content, terminal tool calls (recorded but never executed) and
+    # whether those calls came before the text in the provider turn.
     """Submit assistant-visible text or a terminal provider turn.
 
     Args:
@@ -644,6 +665,8 @@ class SubmitMessageAction(Action):
 
     @model_validator(mode="after")
     def require_visible_turn(self) -> "SubmitMessageAction":
+        # [FUNCTION DOC]
+        # After-validator. Raises ValueError if content is None and there are no terminal tool calls. Returns self.
         """Require visible text or at least one terminal provider call."""
         if self.content is None and not self.terminal_tool_calls:
             raise ValueError(
@@ -653,6 +676,9 @@ class SubmitMessageAction(Action):
 
 
 class _FinishAction(Action):
+    # [CLASS DOC]
+    # HELPER: trusted harness-only finish action with a reason (default "harness"); excluded from the public
+    # schema.
     """Trusted harness finish action; intentionally absent from public schemas."""
 
     type: Literal["_finish"] = "_finish"
@@ -672,10 +698,16 @@ _wire_action_adapter = TypeAdapter(_WireAction)
 
 
 class ThinkingBoxAction(Action):
+    # [CLASS DOC]
+    # Facade action type whose validation dispatches to the concrete action by "type" (including _finish) and
+    # whose JSON schema advertises only the public actions.
     """Expose the discriminated public action union used on the wire."""
 
     @classmethod
     def model_validate(cls, obj: Any, **kwargs: Any) -> Action:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Validates obj via the wire discriminated-union adapter and returns the concrete action instance
+        # (ValidationError on invalid payloads).
         """Validate a payload into its concrete ThinkingBox action.
 
         Args:
@@ -692,6 +724,8 @@ class ThinkingBoxAction(Action):
 
     @classmethod
     def model_json_schema(cls, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Returns the JSON schema of the public union (list_tools, call_tool, submit_message).
         """Return the public schema without the trusted harness finish action.
 
         Args:
@@ -706,6 +740,10 @@ class ThinkingBoxAction(Action):
 
 
 class ThinkingBoxExecutionProvenance(BaseModel):
+    # [CLASS DOC]
+    # Frozen, extra-forbidding record of execution provenance: ThinkingBox revision, source hash and source
+    # type, data release and revision, optional config SHA-256, data bundle hash, manifest path, manifest and
+    # UID-list hashes, and a positive task count.
     """Describe the public, credential-free server execution identity."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -724,6 +762,11 @@ class ThinkingBoxExecutionProvenance(BaseModel):
 
 
 class ThinkingBoxObservation(Observation):
+    # [CLASS DOC]
+    # Observation (extra fields forbidden) with a kind (reset, tools, tool, tool_batch, user, terminal, error)
+    # and optional fields per kind: task uid/text, system and bot instructions, tools, visible messages, single
+    # tool result fields, batch results, user message, final response, finish reason, reward type
+    # (pass/fail/system_error), system error flag, test summary, error text and steps taken.
     """Represent the privacy-reviewed model-visible episode observation.
 
     Reset observations expose the task, instructions, permitted tools, and
@@ -759,6 +802,8 @@ class ThinkingBoxObservation(Observation):
     steps_taken: int = 0
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Dumps the model, excluding None-valued fields by default (caller may override). Returns a mapping.
         """Serialize the observation without absent optional fields.
 
         Args:
@@ -774,6 +819,9 @@ class ThinkingBoxObservation(Observation):
 
 
 class ThinkingBoxState(State):
+    # [CLASS DOC]
+    # State with the active task UID, lifecycle status (idle, active, finalizing, done, closed, error) and a
+    # latched system-error flag.
     """Represent non-sensitive OpenEnv lifecycle state.
 
     Args:

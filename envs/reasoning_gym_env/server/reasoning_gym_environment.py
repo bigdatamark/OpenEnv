@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Server-side Reasoning Gym environment: builds a reasoning_gym dataset (simple or composite) and
+# serves its questions one per episode, scoring answers with the dataset's own scorer. The dataset and
+# its iterator persist across resets until new dataset parameters are given. Defaults: dataset
+# "leg_counting", size 1000, seed 42.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,6 +36,9 @@ DEFAULT_DATASET_SEED = 42
 
 
 class ReasoningGymEnvironment(Environment):
+    # [CLASS DOC]
+    # Single-step question/answer environment supporting concurrent sessions. Holds State, the dataset,
+    # its iterator, the current entry and the dataset configuration last used.
     """
     Reasoning Gym environment for single-step reasoning tasks.
 
@@ -63,6 +71,8 @@ class ReasoningGymEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Creates a fresh State and empty dataset tracking fields; no dataset is built until reset.
         """Initialize the reasoning gym environment."""
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
@@ -87,6 +97,16 @@ class ReasoningGymEnvironment(Environment):
         size: Optional[int] = None,
         episode_id: Optional[str] = None,
     ) -> ReasoningGymObservation:
+        # [FUNCTION DOC]
+        # Gets the next question. With dataset_name: requires seed and size (ValueError otherwise); for
+        # "composite" requires a non-empty dataset_specs list (each with name, optional weight and config)
+        # and builds a composite dataset; otherwise builds the named dataset with dataset_config as keyword
+        # arguments (default empty); resets the iterator and records the configuration. Without dataset_name
+        # and no existing dataset, builds the default dataset. Then takes the next entry (restarting the
+        # iterator when exhausted), creates a new State (episode_id or a new UUID) and returns an observation
+        # with the question, reward 0.0 and done False. Errors from reasoning_gym (unknown name, bad config)
+        # propagate.
+        # KNOWN ISSUE: the docstring says the default dataset size is 100, but DEFAULT_DATASET_SIZE is 1000.
         """
         Reset the environment and get the next question.
 
@@ -211,6 +231,11 @@ class ReasoningGymEnvironment(Environment):
         )
 
     def step(self, action: ReasoningGymAction) -> ReasoningGymObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Scores action.answer against the current entry with the dataset scorer. Increments step_count.
+        # Returns a done observation with score, reward (score as float), the correct answer and the entry
+        # metadata (None if empty). Without a current entry returns a done observation with reward 0.0.
+        # The current entry is not cleared, so repeated steps re-score the same question.
         """
         Execute a step by scoring the agent's answer.
 
@@ -253,6 +278,8 @@ class ReasoningGymEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        # [FUNCTION DOC]
+        # Property: returns the current State.
         """
         Get the current environment state.
 

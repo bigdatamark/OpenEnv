@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# FastAPI app for the WebSearch environment, created at import as module-level "app" with a main() entry
+# point. Imports the models via a top-level "models" module, so it only works when the env directory is on
+# sys.path.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -30,6 +34,10 @@ from .web_search_environment import WebSearchEnvironment
 
 
 def _create_websearch_app():
+    # [FUNCTION DOC]
+    # HELPER: builds the app while supporting create_app variants that expect an environment instance or a
+    # factory (decided from the first parameter's annotation; falls back to factory). Env name "websearch_env".
+    # Returns the app.
     """Build app across create_app variants that may expect a factory or an instance."""
     try:
         first_param = next(iter(inspect.signature(create_app).parameters.values()))
@@ -54,6 +62,8 @@ app = _create_websearch_app()
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --host (default 0.0.0.0) and --port (default 8000) and serves the app with uvicorn; blocks.
     """
     Entry point for direct execution via uv run or python -m.
 

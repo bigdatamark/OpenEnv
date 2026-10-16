@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the chat environment: token actions, message/token history state, and
+# observations carrying the full conversation and its tokens.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -17,6 +20,10 @@ from pydantic import Field, field_validator
 
 
 def _flatten_tokens(value) -> list[int]:
+    # [FUNCTION DOC]
+    # HELPER: Recursively flattens tensors (anything with tolist), tuples and lists into a flat list of
+    # ints; scalars are converted with int().
+    # Raises: TypeError/ValueError for values not convertible to int.
     """Coerce nested tensor-like or sequence inputs into a flat token list."""
     if hasattr(value, "tolist") and callable(value.tolist):
         value = value.tolist()
@@ -34,6 +41,8 @@ def _flatten_tokens(value) -> list[int]:
 
 
 class ChatAction(Action):
+    # [CLASS DOC]
+    # Action holding a non-empty flat list of token ids (tensors or nested sequences are accepted and flattened).
     """Action for chat environments.
 
     Contains tokens that represent the action to be taken.
@@ -45,6 +54,9 @@ class ChatAction(Action):
     @field_validator("tokens", mode="before")
     @classmethod
     def _coerce_tokens(cls, value):
+        # [FUNCTION DOC]
+        # HELPER: Before-validator flattening list/tuple/tensor inputs.
+        # Raises: TypeError for any other input type.
         """Accept either tensors or JSON arrays on the public HTTP surface."""
         if isinstance(value, (list, tuple)) or hasattr(value, "tolist"):
             return _flatten_tokens(value)
@@ -52,6 +64,8 @@ class ChatAction(Action):
 
 
 class ChatState(State):
+    # [CLASS DOC]
+    # Episode state: history_messages (role/content dicts) and history_tokens (one token list per message).
     """State of the ChatEnvironment containing message history."""
 
     history_messages: list[Message] = Field(default_factory=list)
@@ -59,6 +73,9 @@ class ChatState(State):
 
 
 class ChatObservation(Observation):
+    # [CLASS DOC]
+    # Observation with the full message history and a flat token list for the whole conversation;
+    # inherits reward, done and metadata.
     """Observation returned by ChatEnvironment.
 
     Contains the message history in Huggingface format (list of dicts with role/content)

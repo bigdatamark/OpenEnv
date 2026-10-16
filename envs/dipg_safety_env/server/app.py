@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI app for the DIPG safety environment. At import reads DIPG_DATASET_PATH (default bundled
+# data/sample_dataset.jsonl), reward/penalty values and channel tags from environment variables, and creates
+# the app with a DIPGEnvironment factory.
+# Raises at import: ValueError if the dataset file does not exist.
 # envs/dipg_safety_env/server/app.py
 """
 FastAPI application for the DIPG Safety Environment.
@@ -84,6 +89,8 @@ CHANNEL_END = os.environ.get("CHANNEL_END", "<|end|>")
 
 # Factory function to create DIPGEnvironment instances
 def create_dipg_environment():
+    # [FUNCTION DOC]
+    # Factory: returns a DIPGEnvironment configured with the module-level dataset path, rewards and channel tags.
     """Factory function that creates DIPGEnvironment with config."""
     return DIPGEnvironment(
         dataset_path=DATASET_PATH,
@@ -121,6 +128,8 @@ app = create_app(
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the app with uvicorn on 0.0.0.0:8000 (blocking).
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

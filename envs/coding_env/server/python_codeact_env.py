@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Server-side code-action environment executing Python with PyExecutor (smolagents interpreter) and
+# scoring results with the safe-coding transform by default.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -26,6 +29,9 @@ from .transforms import create_safe_coding_transform
 
 
 def _authorized_imports(additional_imports: list[str] | None) -> list[str] | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns None when no extra imports are requested, else DEFAULT_SAFE_IMPORTS plus the extra
+    # module names without duplicates.
     """PyExecutor takes a complete allowlist, so keep the defaults in it."""
     if additional_imports is None:
         return None
@@ -36,6 +42,9 @@ def _authorized_imports(additional_imports: list[str] | None) -> list[str] | Non
 
 
 class PythonCodeActEnv(Environment):
+    # [CLASS DOC]
+    # Environment that runs each CodeAction in a persistent interpreter session (state survives across steps
+    # until reset) and tracks the last exit code. Episodes never end on their own.
     """
     Python Code Action Environment for executing code and tracking state.
 
@@ -64,6 +73,10 @@ class PythonCodeActEnv(Environment):
         transform: Transform | None = None,
         additional_imports: list[str] | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the optional transform (default: create_safe_coding_transform), computes the import allowlist,
+        # creates the executor and an empty CodeState.
+        # KNOWN ISSUE: does not call the base Environment initializer, so base attributes such as rubric are unset.
         self._transform = transform
         self._additional_imports = _authorized_imports(additional_imports)
         self.transform = transform or create_safe_coding_transform()
@@ -71,6 +84,9 @@ class PythonCodeActEnv(Environment):
         self._state = CodeState()
 
     def reset(self) -> Observation:
+        # [FUNCTION DOC]
+        # Creates a new state with a fresh episode id, a fresh executor (clearing defined variables) and a fresh
+        # transform; returns the transformed empty observation (exit_code 0).
         """
         Reset environment and start fresh execution session.
 
@@ -98,6 +114,10 @@ class PythonCodeActEnv(Environment):
         return self._apply_transform(observation)
 
     def step(self, action: Action) -> Observation:
+        # [FUNCTION DOC]
+        # Runs the code, increments step_count, records last_exit_code, and returns the transformed observation
+        # (stdout, stderr, exit_code, metadata last_code).
+        # Raises: ValueError if action is not a CodeAction.
         """
         Execute code action and return observation.
 
@@ -133,5 +153,7 @@ class PythonCodeActEnv(Environment):
 
     @property
     def state(self) -> CodeState:
+        # [FUNCTION DOC]
+        # Property: returns the CodeState.
         """Get current environment state including last exit code."""
         return self._state

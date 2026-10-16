@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Smoke check (uv inline metadata) that runs the coding_env Space image through the Hugging Face sandbox provider:
+# starts a sandbox, waits up to 300 s, executes two snippets over two separate client connections and verifies their
+# outputs. Side effects: sys.path change, provisions and tears down a remote sandbox, network I/O, stdout.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -28,6 +32,9 @@ IMAGE = "hf.co/spaces/openenv/coding_env"
 
 
 def run_code(base_url: str, code: str) -> str:
+    # [FUNCTION DOC]
+    # Opens a synchronous CodingEnv connection, resets, executes the code, and closes. Returns stripped stdout.
+    # Raises RuntimeError with stderr if the exit code is non-zero.
     with CodingEnv(base_url=base_url).sync() as env:
         env.reset()
         result = env.step(CodeAction(code=code))
@@ -38,6 +45,9 @@ def run_code(base_url: str, code: str) -> str:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Starts the sandbox, runs two snippets on separate connections and checks the outputs ("42", "second connection ok"),
+    # raising RuntimeError on mismatch; prints progress and a success line. The provider context stops the sandbox.
     with HFSandboxProvider(image=IMAGE) as provider:
         base_url = provider.start_container()
         print(f"provider URL: {base_url}")

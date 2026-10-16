@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# WebSearch server subpackage. Re-exports WebSearchEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Graded validation (FATAL / WARN / INFO findings) for captured data at every stage:
+# check_turn per model call (token ids and logprob alignment), check_turn_eval for
+# endpoints without token ids, validate_training_turn for trainer-facing turns,
+# check_sequence for flattened paths, check_rollout for graph structure, and
+# check_upstream_response for an endpoint's capture capability. Pure functions.
 """Token-in / token-out validation. Nothing leaves this system unchecked.
 
 Capture failures in this stack are silent by construction. Every bug found so far returned a
@@ -29,16 +35,23 @@ FATAL, WARN, INFO = "FATAL", "WARN", "INFO"
 
 @dataclass
 class Finding:
+    # [CLASS DOC]
+    # One finding: level (FATAL/WARN/INFO), code and detail; str() is "[LEVEL] code: detail".
     level: str
     code: str
     detail: str
 
     def __str__(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "[<level>] <code>: <detail>".
         return f"[{self.level}] {self.code}: {self.detail}"
 
 
 @dataclass
 class Report:
+    # [CLASS DOC]
+    # Collection of findings plus aux_node_ids (nodes excluded as auxiliary by a trace
+    # reconciler). ok is True when there are no FATAL findings.
     findings: list[Finding] = field(default_factory=list)
     # Nodes the harness's own trace does not count as agent steps (auxiliary calls). Populated only
     # by a harness-trace reconciler. Captured correctly, but excluded from training so they cannot be credited
@@ -46,21 +59,31 @@ class Report:
     aux_node_ids: list[str] = field(default_factory=list)
 
     def add(self, level: str, code: str, detail: str) -> None:
+        # [FUNCTION DOC]
+        # Appends a Finding with the given level, code and detail.
         self.findings.append(Finding(level, code, detail))
 
     @property
     def fatal(self) -> list[Finding]:
+        # [FUNCTION DOC]
+        # Returns the FATAL findings.
         return [f for f in self.findings if f.level == FATAL]
 
     @property
     def ok(self) -> bool:
+        # [FUNCTION DOC]
+        # True if there are no FATAL findings.
         return not self.fatal
 
     def merge(self, other: "Report") -> "Report":
+        # [FUNCTION DOC]
+        # Appends other's findings (not aux_node_ids) to this report and returns self.
         self.findings.extend(other.findings)
         return self
 
     def text(self) -> str:
+        # [FUNCTION DOC]
+        # Returns "all checks passed" or newline-joined finding strings.
         if not self.findings:
             return "all checks passed"
         return "\n".join(str(f) for f in self.findings)
@@ -70,6 +93,13 @@ class Report:
 def check_turn(
     prompt_ids, sampled_ids, logprobs, *, finish_reason=None, index=0
 ) -> Report:
+    # [FUNCTION DOC]
+    # Validates one captured call. FATAL: any prompt/sampled id not a non-negative int
+    # (invalid_token_id); logprobs non-finite or non-numeric (invalid_logprob) or positive
+    # (positive_logprob); empty prompt ids (no_prompt_ids); sampled ids without logprobs
+    # (no_logprobs); logprob count differs from sampled count (logprob_misalign). WARN: no
+    # sampled ids (no_sampled_ids); finish_reason "length" (truncated_turn).
+    # Returns: Report. index is used only in messages.
     """Validate one captured call before it becomes a graph node."""
     report = Report()
     tag = f"turn {index}"
@@ -144,6 +174,10 @@ def check_turn(
 
 
 def validate_training_turn(prompt_ids, sampled_ids, logprobs, loss_mask) -> None:
+    # [FUNCTION DOC]
+    # Validates a trainer-facing turn: runs check_turn and additionally requires loss_mask
+    # length == prompt + completion length, values only int 0/1, and all prompt positions 0.
+    # Raises: ValueError listing the FATAL findings if any. Returns None.
     """Reject a malformed trainer-facing turn, preserving partial completion masks.
 
     The mask covers prompt plus completion. Masked completion tokens may retain their real
@@ -167,6 +201,10 @@ def validate_training_turn(prompt_ids, sampled_ids, logprobs, loss_mask) -> None
 
 
 def check_turn_eval(response_message, *, finish_reason=None, index=0) -> Report:
+    # [FUNCTION DOC]
+    # Validates one call on a non-token endpoint: WARN empty_completion if the message has
+    # neither non-blank content nor tool calls; INFO truncated_turn if finish_reason is
+    # "length". Returns: Report.
     """Validate one captured call on an endpoint that cannot return token ids.
 
     `check_turn` is the wrong instrument here: every one of its FATALs (`no_prompt_ids`,
@@ -201,6 +239,13 @@ def check_turn_eval(response_message, *, finish_reason=None, index=0) -> Report:
 
 # --- per flattened sequence -------------------------------------------
 def check_sequence(seq, *, min_trainable: int = 1) -> Report:
+    # [FUNCTION DOC]
+    # Validates a flattened TrainingSequence. FATAL: length mismatch between input_ids,
+    # loss_mask and logprobs (returns early); validate_training_turn failure treating the
+    # first prompt_len tokens as prompt and the rest as completion (returns early); fewer
+    # than min_trainable (default 1) trainable tokens; masked positions with non-zero
+    # logprob; prompt_len covering the whole sequence; any positive logprob. INFO: count of
+    # trainable tokens with logprob exactly 0.0. Returns: Report.
     """Validate a flattened path. These are the invariants the trainer assumes and never re-checks."""
     report = Report()
     n = len(seq.input_ids)
@@ -284,6 +329,15 @@ def check_rollout(
     capture_level: str = "tokens",
     budget_stop_count: int = 0,
 ) -> Report:
+    # [FUNCTION DOC]
+    # Validates graph structure. FATAL no_turns if the graph is empty (returns early). If every
+    # turn is its own root (more than one turn): WARN per_turn_capture_only at tokens level,
+    # else INFO per_turn_trace_only. Else multiple roots -> WARN multiple_roots; else if
+    # expect_single_root and root count != 1 -> FATAL root_count. WARN degenerate_rollout for
+    # exactly one turn when budget_stop_count <= 0; WARN discarded_turns when any discarded;
+    # INFO forks when any forks. Returns: Report.
+    # KNOWN ISSUE: the root_count branch is effectively unreachable, since it is only
+    # evaluated when there is at most one root and a non-empty graph always has one.
     """Validate graph structure. This is where harness-specific weirdness shows up first.
 
     `capture_level` below `tokens` changes what a root count MEANS. On the token path, one root per
@@ -367,6 +421,11 @@ def check_rollout(
 
 # --- endpoint capability, before spending a sandbox --------------------
 def check_upstream_response(payload: dict[str, Any]) -> Report:
+    # [FUNCTION DOC]
+    # Checks a raw chat-completions reply for capture support. FATAL: no choices (returns
+    # early); no top-level prompt_token_ids; no choices[0].token_ids; no logprobs content; or
+    # logprob count != token id count. WARN token_strings when the first logprob entry's token
+    # is not in "token_id:N" form (capture flags likely missing). Returns: Report.
     """Assert a raw chat-completions reply actually carries what capture needs.
 
     Run this against the endpoint before booting anything. The failure it catches (an endpoint served

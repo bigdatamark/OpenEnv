@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Server-side wrapper of Unity ML-Agents registry environments behind the OpenEnv interface: lazy download
+# and launch of Unity binaries (cached under a persistent directory), environment switching on reset,
+# discrete/continuous actions applied to all agents, observations from the first agent, optional base64
+# PNG camera images, and web playground hooks.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -68,6 +73,11 @@ PERSISTENT_CACHE_DIR = os.path.join(str(Path.home()), ".mlagents-cache")
 
 
 def get_cached_binary_path(cache_dir: str, name: str, url: str) -> Optional[str]:
+    # [FUNCTION DOC]
+    # Returns the path of a cached Unity executable for name/url on this platform (globbing the binaries dir
+    # for a folder named name plus the URL's MD5, skipping crash handlers), or None if not found or the
+    # platform is unsupported.
+    # KNOWN ISSUE: appears unused in this module.
     """Check if binary is cached and return its path."""
     if platform == "darwin":
         extension = "*.app"
@@ -90,6 +100,10 @@ def get_cached_binary_path(cache_dir: str, name: str, url: str) -> Optional[str]
 
 
 class UnityMLAgentsEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment for one Unity ML-Agents environment process. Holds configuration, the Unity env
+    # handle, behavior name/spec, engine configuration side channel, visual-observation flags and UnityState.
+    # Not marked as supporting concurrent sessions.
     """
     Wraps Unity ML-Agents environments with the OpenEnv interface.
 
@@ -134,6 +148,11 @@ class UnityMLAgentsEnvironment(Environment):
         quality_level: Optional[int] = None,
         cache_dir: Optional[str] = None,
     ):
+        # [FUNCTION DOC]
+        # Reads configuration from arguments or env vars (UNITY_ENV_ID default PushBlock, UNITY_NO_GRAPHICS,
+        # UNITY_TIME_SCALE, UNITY_WIDTH, UNITY_HEIGHT, UNITY_QUALITY_LEVEL, UNITY_CACHE_DIR, UNITY_INCLUDE_VISUAL),
+        # creates the initial state and the cache directory. Does not start Unity (that happens on reset).
+        # Raises ValueError on malformed numeric env vars.
         """
         Initialize the Unity ML-Agents environment.
 
@@ -215,6 +234,13 @@ class UnityMLAgentsEnvironment(Environment):
         os.makedirs(self._cache_dir, exist_ok=True)
 
     def _load_environment(self, env_id: str) -> None:
+        # [FUNCTION DOC]
+        # HELPER: closes any current Unity env (errors ignored), imports mlagents_envs (ImportError with install
+        # hint), validates env_id against the default registry (ValueError listing available ids), re-creates the
+        # registry entry with the persistent cache dir, picks a free local port, launches the environment with the
+        # engine side channel, applies engine settings (size/quality only with graphics), steps once if no
+        # behaviors are known yet, and records the first behavior's name and spec plus spec info and available ids
+        # in state. Side effects: may download binaries; starts a Unity process.
         """Load or switch to a Unity environment."""
         # Close existing environment if any
         if self._unity_env is not None:
@@ -302,6 +328,9 @@ class UnityMLAgentsEnvironment(Environment):
         self._state.available_envs = list(default_registry.keys())
 
     def _get_action_spec_info(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns a mapping describing the action spec: discrete/continuous flags, discrete size and
+        # branch sizes, continuous size.
         """Get information about the action space."""
         spec = self._behavior_spec.action_spec
         return {
@@ -315,6 +344,8 @@ class UnityMLAgentsEnvironment(Environment):
         }
 
     def _get_observation_spec_info(self) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # HELPER: returns {"observations": per-spec index/shape/dimension property/type, "count": n}.
         """Get information about the observation space."""
         specs = self._behavior_spec.observation_specs
         obs_info = []
@@ -336,6 +367,11 @@ class UnityMLAgentsEnvironment(Environment):
         reward: float = 0.0,
         done: bool = False,
     ) -> UnityObservation:
+        # [FUNCTION DOC]
+        # HELPER: builds a UnityObservation from Unity steps. Terminal steps take precedence (done True, reward of
+        # the first terminal agent); else decision steps (reward of the first agent); with no agents returns an
+        # empty observation. Vector observations (2-D) of the first agent are concatenated; 4-D visual
+        # observations are converted to PNG base64 when visuals are enabled and Pillow is available.
         """Convert Unity observation to UnityObservation."""
         vector_obs = []
         visual_obs = []
@@ -398,6 +434,9 @@ class UnityMLAgentsEnvironment(Environment):
     def web_actions(
         self, observation: Dict[str, Any]
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        # [FUNCTION DOC]
+        # Returns one button per option when the action spec has exactly one discrete branch (PushBlock options
+        # named), else an empty list.
         """One button per option of a single discrete action branch (PushBlock moves are named)."""
         branches = observation["action_spec_info"].get("discrete_branches", [])
         if len(branches) != 1:
@@ -412,6 +451,8 @@ class UnityMLAgentsEnvironment(Environment):
         ]
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Returns an img tag showing the first visual observation as a data URL, or None if there is none.
         """Draw the agent's camera image, when the observation carries one."""
         images = observation.get("visual_observations")
         if not images:
@@ -430,6 +471,10 @@ class UnityMLAgentsEnvironment(Environment):
         include_visual: Optional[bool] = None,
         **kwargs,
     ) -> UnityObservation:
+        # [FUNCTION DOC]
+        # Sets the visual flag (argument or default), loads/switches the Unity environment if none is loaded or a
+        # different env_id is requested, resets it, creates a fresh state (new UUID, step 0, keeping spec info),
+        # and returns the initial observation with reward 0.0. Seed and extra kwargs are ignored.
         """
         Reset the environment and return initial observation.
 
@@ -477,6 +522,11 @@ class UnityMLAgentsEnvironment(Environment):
         )
 
     def step(self, action: UnityAction) -> UnityObservation:
+        # [FUNCTION DOC]
+        # Raises RuntimeError if not reset. If the episode already has terminal steps, returns a done observation
+        # without stepping. With no agents awaiting decisions, just steps the simulation. Otherwise broadcasts the
+        # given discrete and/or continuous actions to all agents (defaulting missing parts to zeros), steps,
+        # increments step_count and returns the new observation.
         """
         Execute one step in the environment.
 
@@ -565,6 +615,8 @@ class UnityMLAgentsEnvironment(Environment):
         include_visual: Optional[bool] = None,
         **kwargs,
     ) -> UnityObservation:
+        # [FUNCTION DOC]
+        # Runs reset in a worker thread so the event loop stays responsive.
         """
         Async version of reset - runs in a thread to avoid blocking the event loop.
 
@@ -583,6 +635,8 @@ class UnityMLAgentsEnvironment(Environment):
         )
 
     async def step_async(self, action: UnityAction) -> UnityObservation:
+        # [FUNCTION DOC]
+        # Runs step in a worker thread.
         """
         Async version of step - runs in a thread to avoid blocking the event loop.
 
@@ -595,10 +649,14 @@ class UnityMLAgentsEnvironment(Environment):
 
     @property
     def state(self) -> UnityState:
+        # [FUNCTION DOC]
+        # Property returning the current UnityState.
         """Get the current environment state."""
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the Unity environment if open (errors ignored) and drops the handle.
         """Close the Unity environment."""
         unity_env = getattr(self, "_unity_env", None)
         if unity_env is not None:
@@ -609,6 +667,8 @@ class UnityMLAgentsEnvironment(Environment):
             self._unity_env = None
 
     def __del__(self):
+        # [FUNCTION DOC]
+        # Calls close on garbage collection, swallowing errors.
         """Cleanup on deletion."""
         try:
             self.close()

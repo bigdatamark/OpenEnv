@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# kernrl problem (level 10): Merkle tree root over 1024 leaves of 32 bytes,
+# using a simplified byte-mixing hash (not SHA-256) for internal nodes.
 """
 Merkle Tree Root Computation
 
@@ -25,6 +28,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference Merkle root model; parent = simple_hash(left concatenated with
+    # right). No parameters.
     """
     Merkle tree root computation from leaf hashes.
 
@@ -33,9 +39,16 @@ class Model(nn.Module):
     """
 
     def __init__(self):
+        # [FUNCTION DOC]
+        # Initializes the module; no state.
         super(Model, self).__init__()
 
     def _simple_hash(self, data: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Toy 32-byte hash: folds each input byte into position i mod 32 by
+        # XOR with byte*32 (byte + byte*31), masked to 8 bits, then performs 4 rounds
+        # of mixing each position with positions +7 and +13. Returns a (32,) int64
+        # tensor.
         """Simple hash function using XOR and rotation (for demo)."""
         # In practice, use SHA-256; this is a simplified version
         result = torch.zeros(32, dtype=torch.int64, device=data.device)
@@ -54,6 +67,10 @@ class Model(nn.Module):
         return result
 
     def forward(self, leaves: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Pads the leaves with zero rows up to the next power of two, then repeatedly
+        # hashes adjacent pairs level by level until one node remains. Returns the
+        # (32,) root.
         """
         Compute Merkle tree root from leaf hashes.
 
@@ -101,10 +118,14 @@ num_leaves = 1024
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [leaves] with random byte values of shape (num_leaves, 32).
     # Random leaf hashes
     leaves = torch.randint(0, 256, (num_leaves, 32), dtype=torch.int64)
     return [leaves]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns an empty list (no constructor arguments).
     return []

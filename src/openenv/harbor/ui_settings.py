@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Deployment policy for the Harbor web UI, resolved from environment variables with
+# defaults depending on whether the server runs on a HF Space or is otherwise exposed
+# (not loopback-only): which features visitors get (rollouts, shared endpoint, own
+# endpoints, private URLs, local HF token, adding datasets, run history/visibility,
+# concurrency limits, bucket, HF login, headline reward key). Also provides SSRF guards
+# for visitor-supplied URLs, the visitor id encryption secret, and owner digests.
 """What a Harbor UI deployment lets its visitors do.
 
 The same page runs on a laptop and as a public Space, and the right answer to "may a visitor do
@@ -37,12 +44,17 @@ LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
 
 def _flag(env: str, default: bool) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: reads env var as a boolean (1/true/yes/on or 0/false/no/off, case-insensitive);
+    # returns default when unset or unrecognized.
     raw = (os.environ.get(env) or "").strip().lower()
     return True if raw in _TRUE else False if raw in _FALSE else default
 
 
 @dataclass(frozen=True)
 class UISettings:
+    # [CLASS DOC]
+    # Frozen dataclass of resolved UI settings (see module doc for meaning of each field).
     """The resolved settings. [`load`] reads the environment each time it is called; the UI calls it
     once, when the page is built, so a change takes effect on the next server start."""
 
@@ -69,6 +81,8 @@ class UISettings:
 
 
 def _count(env: str, default: int) -> int:
+    # [FUNCTION DOC]
+    # HELPER: reads a positive int env var (minimum 1); returns default when unset or invalid.
     try:
         return max(1, int(os.environ.get(env) or default))
     except ValueError:
@@ -76,6 +90,15 @@ def _count(env: str, default: int) -> int:
 
 
 def load() -> UISettings:
+    # [FUNCTION DOC]
+    # Reads the environment and returns UISettings. On a Space (SPACE_ID set) or when
+    # OPENENV_HARBOR_UI_HOST is not a loopback name, the server is "exposed". Run history
+    # defaults on except on a Space; runs dir is OPENENV_HARBOR_RUNS_DIR, else /data/harbor-runs
+    # on a Space with /data, else ~/.cache/openenv/harbor/runs. Server endpoint defaults off on
+    # a Space; private URLs, local token (never on a Space) and add-datasets default to not
+    # exposed; visibility defaults own on a Space else all; max runs default 4, per-visitor
+    # default 2 on a Space (capped at max runs); bucket and its mount (must exist); HF login
+    # only on a Space with OAUTH_CLIENT_ID; reward key from OPENENV_HARBOR_REWARD_KEY.
     space = bool(os.environ.get("SPACE_ID"))
     host = (os.environ.get("OPENENV_HARBOR_UI_HOST") or "").strip().lower()
     exposed = space or host not in LOOPBACK
@@ -123,6 +146,9 @@ def load() -> UISettings:
 
 
 def _mount() -> Path | None:
+    # [FUNCTION DOC]
+    # HELPER: returns OPENENV_HARBOR_BUCKET_MOUNT as a Path if a bucket is configured and the
+    # directory exists, else None.
     raw = os.environ.get("OPENENV_HARBOR_BUCKET_MOUNT")
     if not raw or not os.environ.get("OPENENV_HARBOR_BUCKET"):
         return None
@@ -132,6 +158,9 @@ def _mount() -> Path | None:
 
 @dataclass(frozen=True)
 class Row:
+    # [CLASS DOC]
+    # Frozen dataclass describing one setting for the Setup tab: attribute name, label, env
+    # var, CLI flag and help text.
     """One setting as the Setup tab lists it."""
 
     attr: str
@@ -247,6 +276,9 @@ _COMPAT = ipaddress.ip_network("::/96")
 
 
 def _public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if an IP address is globally routable; for IPv6 also requires any embedded
+    # IPv4 (mapped, 6to4, NAT64, IPv4-compatible, Teredo client) to be global.
     if isinstance(address, ipaddress.IPv6Address):
         inner = address.ipv4_mapped or address.sixtofour
         if inner is None and (address in _NAT64 or address in _COMPAT):
@@ -259,6 +291,10 @@ def _public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
 
 def url_problem(url: str, *, private_ok: bool) -> str | None:
+    # [FUNCTION DOC]
+    # Returns an error message if url is not http(s) with a host; when private_ok is False,
+    # resolves the host (port or 443) and returns an error if resolution fails or any
+    # resolved address is not public. Returns None when allowed. Side effects: DNS lookup.
     """Why this server should not call `url` for a visitor, or `None` when it may.
 
     A visitor's endpoint is called by this server, so on a public deployment a URL is a request to
@@ -286,9 +322,14 @@ def url_problem(url: str, *, private_ok: bool) -> str | None:
 
 
 class _PublicRedirects(urllib.request.HTTPRedirectHandler):
+    # [CLASS DOC]
+    # HELPER: urllib redirect handler that only follows redirects to public addresses.
     """Follows a redirect only to a public address, so a public URL cannot bounce the probe inward."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102 - urllib's hook
+        # [FUNCTION DOC]
+        # Raises HTTPError with the private-address message if the redirect target fails
+        # url_problem (private not allowed); otherwise defers to the default handler.
         if url_problem(newurl, private_ok=False):
             raise urllib.error.HTTPError(newurl, code, _PRIVATE, headers, fp)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -298,6 +339,9 @@ _GUARDED = False
 
 
 def guard_redirects() -> None:
+    # [FUNCTION DOC]
+    # Installs (once per process) a global urllib opener using _PublicRedirects, so all
+    # urllib requests in the process refuse redirects to private addresses. Mutates global state.
     """Refuse redirects to private addresses in every `urllib` request this process makes.
 
     The endpoint checks (`validate_llm`, `list_models`) use `urllib`, which follows redirects, so
@@ -312,6 +356,10 @@ def guard_redirects() -> None:
 
 
 def visitor_secret(settings: UISettings) -> str:
+    # [FUNCTION DOC]
+    # Returns OPENENV_HARBOR_UI_SECRET if set; else a random token when no runs dir; else the
+    # saved <runs_dir>/.visitor-secret, creating and atomically persisting a new random one
+    # (mode 0600) if absent. Persist failures issue a RuntimeWarning and still return the value.
     """The key Gradio encrypts each browser's visitor id with in its local storage.
 
     Gradio encrypts in the browser, so the key is sent to the page and hides the id from nothing but
@@ -347,6 +395,9 @@ def visitor_secret(settings: UISettings) -> str:
 
 
 def shared_endpoint(settings: UISettings) -> object | None:
+    # [FUNCTION DOC]
+    # Returns the current HarborService if it exists, has an LLM URL and settings allow
+    # visitors to use the server endpoint; else None.
     """The running service when it has an endpoint of its own that visitors may use, else `None`."""
     from .serving import HarborService
 
@@ -357,9 +408,13 @@ def shared_endpoint(settings: UISettings) -> object | None:
 
 
 def new_visitor() -> str:
+    # [FUNCTION DOC]
+    # Returns a new random URL-safe visitor id.
     return secrets.token_urlsafe(24)
 
 
 def owner_of(visitor: str | None) -> str:
+    # [FUNCTION DOC]
+    # Returns the first 24 hex chars of sha256(visitor), or "" for an empty/None visitor.
     """What a run records about who started it: a digest, so a saved run never holds a live id."""
     return hashlib.sha256(visitor.encode()).hexdigest()[:24] if visitor else ""

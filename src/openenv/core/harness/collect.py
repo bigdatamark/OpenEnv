@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Rollout collection for synthetic dataset generation: EpisodeRecord (serializable
+# episode), RolloutSerializer (append-only results.jsonl plus metadata.json, with resume
+# support), CollectRunner (runs repeated white-box harness rollouts, verifies, filters and
+# writes them), build_model_step (adapts an LLMClient into a ModelStep), and helpers to
+# build a dataset card README and push the output directory to the Hugging Face Hub.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Rollout collection helpers for synthetic dataset generation.
@@ -45,6 +51,9 @@ METADATA_FILENAME = "metadata.json"
 
 
 def _tool_trace_entry_to_plain(entry: Any) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Converts a tool trace entry to a plain dict: tool_name, arguments (copy) and
+    # result with data, done, metadata (copy) and error.
     return {
         "tool_name": entry.tool_name,
         "arguments": dict(entry.arguments),
@@ -58,11 +67,16 @@ def _tool_trace_entry_to_plain(entry: Any) -> dict[str, Any]:
 
 
 def _tool_trace_to_plain(rollout: HarnessRolloutResult) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # HELPER: Converts every entry of rollout.tool_trace to plain dicts.
     return [_tool_trace_entry_to_plain(entry) for entry in rollout.tool_trace]
 
 
 @dataclass
 class EpisodeRecord:
+    # [CLASS DOC]
+    # Serializable episode: episode_id, messages, reward, done, tool_trace, metrics,
+    # verify_metrics, artifacts, optional task and extra annotations.
     """Serializable view of one collected episode."""
 
     episode_id: str
@@ -85,6 +99,11 @@ class EpisodeRecord:
         task: Any = None,
         extra: dict[str, Any] | None = None,
     ) -> "EpisodeRecord":
+        # [FUNCTION DOC]
+        # Builds a record from a rollout and its VerifyResult. Reward comes from
+        # _resolve_env_reward (raises if environment and verify rewards disagree); done is the OR
+        # of rollout and verify done; messages, metrics, verify metrics and artifacts are copied;
+        # tool trace is plain-converted.
         """Build a record from a harness rollout and its verification.
 
         Uses ``_resolve_env_reward`` so that any disagreement between the
@@ -106,28 +125,46 @@ class EpisodeRecord:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns a JSON-safe dict of the record (round-trips through JSON with str() fallback).
         return json.loads(json.dumps(asdict(self), default=str))
 
 
 class RolloutSerializer:
+    # [CLASS DOC]
+    # Append-only writer for collected episodes under an output directory
+    # (results.jsonl and metadata.json).
     """Append-only JSONL writer for collected episodes."""
 
     def __init__(self, output_dir: Path | str):
+        # [FUNCTION DOC]
+        # Stores the output directory as a Path. No I/O.
         self._output_dir = Path(output_dir)
 
     @property
     def output_dir(self) -> Path:
+        # [FUNCTION DOC]
+        # Returns the output directory.
         return self._output_dir
 
     @property
     def results_path(self) -> Path:
+        # [FUNCTION DOC]
+        # Returns output_dir / "results.jsonl".
         return self._output_dir / RESULTS_FILENAME
 
     @property
     def metadata_path(self) -> Path:
+        # [FUNCTION DOC]
+        # Returns output_dir / "metadata.json".
         return self._output_dir / METADATA_FILENAME
 
     def write_episode(self, record: EpisodeRecord) -> None:
+        # [FUNCTION DOC]
+        # Appends one record as a JSON line to results.jsonl, creating the directory if needed
+        # and inserting a newline first if the existing file's last line is unterminated.
+        # Raises: ValueError if that unterminated final line is not a valid record.
+        # Side effects: filesystem writes.
         self._output_dir.mkdir(parents=True, exist_ok=True)
         line = (json.dumps(record.to_dict(), default=str) + "\n").encode("utf-8")
         with self.results_path.open("a+b") as handle:
@@ -135,6 +172,8 @@ class RolloutSerializer:
             handle.write(separator + line)
 
     def write_metadata(self, metadata: dict[str, Any]) -> None:
+        # [FUNCTION DOC]
+        # Writes metadata as indented JSON to metadata.json (overwriting), creating the directory.
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_path.write_text(
             json.dumps(metadata, indent=2, default=str),
@@ -142,6 +181,10 @@ class RolloutSerializer:
         )
 
     def collected_episode_ids(self) -> set[str]:
+        # [FUNCTION DOC]
+        # Returns the set of episode ids in results.jsonl (empty if the file is missing), skipping
+        # blank lines.
+        # Raises: ValueError for any non-empty line that is not a valid record.
         """Return episode ids already persisted on disk. Used for resume.
 
         Raises:
@@ -160,6 +203,11 @@ class RolloutSerializer:
         return ids
 
     def _append_separator(self, handle: BinaryIO) -> bytes:
+        # [FUNCTION DOC]
+        # HELPER: Given a file opened for append+read, returns b"" if the file is empty or ends
+        # with a newline; otherwise reads backwards to extract the final line, validates it as a
+        # record if non-blank (ValueError if invalid), and returns b"\n".
+        # Side effects: moves the file position.
         """Return a newline when an existing complete final record lacks one."""
         end = handle.seek(0, 2)
         if not end:
@@ -186,6 +234,10 @@ class RolloutSerializer:
         return b"\n"
 
     def _episode_id_from_line(self, raw: bytes, line_number: int | str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Decodes a raw line as UTF-8 JSON object and returns its string episode_id.
+        # Raises: ValueError (with path:line location) for invalid UTF-8, invalid JSON, non-object
+        # payloads or a missing/non-string episode_id.
         """Parse and validate one non-empty JSONL episode record."""
         location = f"{self.results_path}:{line_number}"
         try:
@@ -205,6 +257,9 @@ class RolloutSerializer:
 
 
 def _rollout_final_state(rollout: HarnessRolloutResult) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Builds the final_state dict passed to session.verify(): done, metrics copy,
+    # events as {type, payload} dicts, and the plain tool trace.
     """Build the structured payload passed to ``session.verify()``.
 
     Mirrors the shape used by ``build_harness_rollout_func`` so verifiers
@@ -223,6 +278,10 @@ def _rollout_final_state(rollout: HarnessRolloutResult) -> dict[str, Any]:
 
 @dataclass
 class CollectResult:
+    # [CLASS DOC]
+    # Summary of a collection run: counts of collected, skipped (resumed), dropped (filtered)
+    # and failed episodes, planned episode ids, average reward and success rate (reward > 0)
+    # over collected episodes.
     """Summary returned by ``CollectRunner.run()``."""
 
     num_collected: int
@@ -235,6 +294,12 @@ class CollectResult:
 
 
 class CollectRunner:
+    # [CLASS DOC]
+    # Runs repeated rollouts into a JSONL dataset using a session factory, a harness adapter,
+    # a serializer, an optional task iterable (consumed one task per planned episode) and
+    # optional run limits. Resume state lives on disk.
+    # KNOWN ISSUE: the docstring says the runner is stateless across run() calls, but the task
+    # iterator is created once in the constructor and is consumed across runs.
     """Drive repeated rollouts into an append-only JSONL dataset.
 
     The runner is stateless across ``run()`` calls — resume state lives on
@@ -251,6 +316,8 @@ class CollectRunner:
         tasks: Iterable[Any] | None = None,
         limits: HarnessRunLimits | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores collaborators and converts tasks to an iterator (None if not given).
         self._session_factory = session_factory
         self._harness_adapter = harness_adapter
         self._serializer = serializer
@@ -258,6 +325,8 @@ class CollectRunner:
         self._limits = limits
 
     def _next_task(self) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns the next task, or None when there are no tasks or they are exhausted.
         if self._tasks is None:
             return None
         try:
@@ -274,6 +343,17 @@ class CollectRunner:
         resume: bool = True,
         should_keep: Callable[[EpisodeRecord], bool] | None = None,
     ) -> CollectResult:
+        # [FUNCTION DOC]
+        # Collects num_episodes episodes with ids "<prefix>-<6-digit index>".
+        # Behavior: with resume, skips ids already on disk; without resume, moves an existing
+        # results file to a timestamped backup first. Shows a rich progress bar. For each
+        # non-skipped id (a task is drawn for every id, including skipped ones): creates a
+        # session, runs the adapter's white-box rollout with model_step and limits, verifies the
+        # transcript and final state, builds a record; any exception counts as failed (printed)
+        # and the session is always closed. Records rejected by should_keep are dropped; others
+        # are written.
+        # Returns: CollectResult.
+        # Side effects: filesystem writes, console output, environment sessions.
         planned_ids = [f"{episode_id_prefix}-{i:06d}" for i in range(num_episodes)]
 
         if resume:
@@ -379,6 +459,9 @@ class CollectRunner:
         )
 
     def _reset_results_file(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: If results.jsonl exists, renames it to "results.<UTC timestamp>[.<n>].bak.jsonl"
+        # (first free name) and emits a RuntimeWarning.
         if self._serializer.results_path.exists():
             results_path = self._serializer.results_path
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -401,6 +484,8 @@ class CollectRunner:
 
 
 def _tool_to_mcp_dict(tool: Tool) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # HELPER: Converts a Tool to an MCP-style dict with name, description and inputSchema.
     return {
         "name": tool.name,
         "description": tool.description,
@@ -410,6 +495,9 @@ def _tool_to_mcp_dict(tool: Tool) -> dict[str, Any]:
 
 @functools.cache
 def _model_step_loop() -> asyncio.AbstractEventLoop:
+    # [FUNCTION DOC]
+    # HELPER: Cached; creates one asyncio event loop running forever on a daemon thread and
+    # returns it (same loop on every call).
     """Start the event loop shared by every model step, on its first use."""
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, daemon=True).start()
@@ -421,6 +509,9 @@ def build_model_step(
     *,
     system_prompt: str | None = None,
 ) -> ModelStep:
+    # [FUNCTION DOC]
+    # Returns a ModelStep that calls llm_client.complete_with_tools on the shared background
+    # event loop.
     """Adapt any OpenEnv ``LLMClient`` into a ``ModelStep`` for the harness.
 
     Works with every provider the ``LLMClient`` hierarchy already covers —
@@ -440,6 +531,11 @@ def build_model_step(
         tools: list[Tool],
         sampling: dict[str, Any],
     ) -> ModelStepResult:
+        # [FUNCTION DOC]
+        # The returned ModelStep. Prepends a system message with system_prompt if given and no
+        # system message exists; converts tools to MCP dicts; warns (RuntimeWarning) about and
+        # drops sampling keys other than temperature/max_tokens/top_p; blocks on the coroutine's
+        # result and wraps it in ModelStepResult. Propagates client exceptions.
         effective_messages = list(messages)
         if system_prompt and not any(
             m.get("role") == "system" for m in effective_messages
@@ -472,6 +568,8 @@ def build_model_step(
 
 
 def _count_episodes(results_path: Path) -> int:
+    # [FUNCTION DOC]
+    # HELPER: Counts non-blank lines in results_path (0 if missing).
     if not results_path.exists():
         return 0
     with results_path.open("r", encoding="utf-8") as handle:
@@ -491,6 +589,10 @@ configs:
 
 
 def build_dataset_readme(output_dir: Path) -> str:
+    # [FUNCTION DOC]
+    # Builds the dataset card README text: YAML front matter pinning results.jsonl as the
+    # train split, title, episode count, a metadata table from metadata.json (ignored if
+    # unreadable/invalid), schema description and a load snippet. Returns the string.
     """Build the README.md written alongside ``results.jsonl`` on the Hub.
 
     The YAML front-matter pins ``results.jsonl`` as the only dataset file
@@ -562,6 +664,16 @@ def push_to_hf_hub(
     commit_message: str | None = None,
     token: str | None = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # Uploads a collected directory to the Hub as a dataset.
+    # Writes README.md into output_dir, creates the dataset repo (exist_ok, optional
+    # private), and uploads the whole folder with a commit message (default "Add N
+    # collected episode(s)").
+    # Returns: "https://huggingface.co/datasets/<repo_id>".
+    # Raises: FileNotFoundError if results.jsonl is missing; huggingface_hub errors propagate.
+    # Side effects: writes README.md locally; network uploads.
+    # KNOWN ISSUE: the docstring says only results.jsonl, metadata.json and README.md are
+    # uploaded, but upload_folder uploads every file in the directory (e.g. .bak backups).
     """Upload a collected rollout directory to the Hugging Face Hub as a dataset.
 
     Uploads ``results.jsonl``, ``metadata.json`` (if present), and an

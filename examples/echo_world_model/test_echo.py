@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Pytest unit tests for the ECHO loss and the per-token role masks (torch only, no model downloads): lambda 0 equals
+# the GRPO term, verifier-free equals coeff times env CE, uniform logits give CE of log V, differentiability, and mask
+# alignment/disjointness including world_loss_target "all".
 """Unit tests for the ECHO loss + the per-token role masks.
 
 Run from this directory with the example venv:  python -m pytest test_echo.py -q
@@ -22,18 +26,26 @@ from trajectory import (
 
 
 def _fake_logits(B, T, V, seed=0):
+    # [FUNCTION DOC]
+    # HELPER: Returns seeded random logits of shape B x T x V that require gradients.
     g = torch.Generator().manual_seed(seed)
     return torch.randn(B, T, V, generator=g, requires_grad=True)
 
 
 class _CharTokenizer:
+    # [CLASS DOC]
+    # HELPER: Character tokenizer mapping each character to its code point modulo 256.
     """Minimal tokenizer: one id per character (no model download needed)."""
 
     def __call__(self, text, add_special_tokens=False):
+        # [FUNCTION DOC]
+        # Returns a dict with "input_ids" for the text; add_special_tokens is ignored.
         return {"input_ids": [ord(c) % 256 for c in text]}
 
 
 def test_lambda_zero_is_vanilla_grpo():
+    # [FUNCTION DOC]
+    # Checks that with coefficient 0 the loss equals the GRPO term while l_env is still reported positive.
     """world_model_coeff=0 ⇒ the env term drops out entirely (loss == GRPO term)."""
     B, T, V = 2, 6, 50
     logits = _fake_logits(B, T, V)
@@ -49,6 +61,8 @@ def test_lambda_zero_is_vanilla_grpo():
 
 
 def test_verifier_free_is_env_only():
+    # [FUNCTION DOC]
+    # Checks that with use_rl false the GRPO term is 0 and the loss equals 0.5 times the env CE.
     """use_rl=False ⇒ GRPO term is exactly zero; loss == coeff * env-CE."""
     B, T, V = 2, 6, 50
     logits = _fake_logits(B, T, V)
@@ -64,6 +78,8 @@ def test_verifier_free_is_env_only():
 
 
 def test_env_ce_matches_uniform_baseline():
+    # [FUNCTION DOC]
+    # Checks that all-zero logits yield an env CE of log(V).
     """With ~uniform logits the env cross-entropy is ≈ log(V)."""
     B, T, V = 1, 5, 100
     logits = torch.zeros(B, T, V)  # uniform → CE = log V
@@ -78,6 +94,8 @@ def test_env_ce_matches_uniform_baseline():
 
 
 def test_loss_is_differentiable():
+    # [FUNCTION DOC]
+    # Checks backpropagation populates gradients on the logits.
     B, T, V = 2, 6, 30
     logits = _fake_logits(B, T, V)
     ids = torch.randint(0, V, (B, T))
@@ -91,6 +109,8 @@ def test_loss_is_differentiable():
 
 
 def test_role_masks_are_disjoint_and_aligned():
+    # [FUNCTION DOC]
+    # Checks mask lengths match input ids, action and observation masks do not overlap, and counts for env-only observation, warning and action tokens.
     tok = _CharTokenizer()
     traj = Trajectory(
         segments=[
@@ -114,6 +134,8 @@ def test_role_masks_are_disjoint_and_aligned():
 
 
 def test_world_loss_target_all_includes_warnings():
+    # [FUNCTION DOC]
+    # Checks that "all" adds warning tokens to the observation mask compared with env_only.
     tok = _CharTokenizer()
     traj = Trajectory(
         segments=[Segment(WARNING, "[w]"), Segment(ENV_OUTPUT, "xy")], reward=0.0

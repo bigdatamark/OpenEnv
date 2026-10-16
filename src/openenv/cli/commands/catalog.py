@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Implements the metadata-only environment catalog CLI: the "catalog" sub-app with build and
+# inspect commands, and the top-level "discover" command (registered by the CLI entry point).
+# Delegates to openenv.discovery; never instantiates or executes environments.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Metadata catalog production and inspection. No environment is instantiated."""
@@ -30,6 +34,12 @@ def build(
     root: str = typer.Option("envs", help="Direct-child environment inventory root."),
     namespace: str = typer.Option("openenv", help="Publisher-owned namespace."),
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: builds a catalog snapshot from committed metadata in a local Git repository at a
+    # revision (default HEAD) under an inventory root (default envs), with the given repository URI,
+    # publisher and namespace, and writes it to the output JSON. Prints the record count, digest,
+    # completeness and any issues to stderr.
+    # Raises: typer.Exit(1) on a CatalogError or if the snapshot is incomplete.
     """Build from committed metadata; uncommitted files and candidate code are not used."""
     try:
         snapshot = build_catalog(
@@ -60,6 +70,9 @@ def inspect(
     identifier: str = typer.Argument(..., help="Exact revision-card identifier."),
     catalog: Path = typer.Option(..., help="Complete configured snapshot."),
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: loads a snapshot and prints the entry with the exact identifier as indented JSON
+    # (by alias, no None fields). Raises: typer.Exit(1) on CatalogError (e.g. unknown identifier).
     """Return the complete selected entry without guessing or fetching a URL."""
     try:
         entry = resolve_entry(load_catalog(catalog), identifier)
@@ -78,6 +91,12 @@ def discover(
     filter: list[str] = typer.Option([], "--filter", help="Exact field=value filter."),
     as_json: bool = typer.Option(False, "--json", help="Emit complete ARD entry data."),
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: parses repeated --filter field=value options (exit 1 if malformed or a key is
+    # repeated), loads the snapshot and searches it for the query (limit 1..1000). With --json prints
+    # the results (entry data plus score), snapshot digest and metadataOnly flag; otherwise prints a
+    # human-readable block per match (description, source uri/path/revision, license, artifact
+    # availability, identifier) and a closing note. Raises: typer.Exit(1) on CatalogError.
     """Find unfamiliar environments by task before any installation or execution."""
     filters = {}
     for item in filter:

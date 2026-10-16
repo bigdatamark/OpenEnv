@@ -1,3 +1,5 @@
+# [MODULE DOC]
+# Tests the Connect4 environment's web playground hooks.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the Connect4 drawing and buttons in the web playground."""
@@ -7,6 +9,10 @@ from connect4_env.server.connect4_environment import Connect4Environment
 
 
 def test_connect4_web_playground():
+    # [FUNCTION DOC]
+    # web_actions offers one button per column; after dropping in column 3 the
+    # SVG board highlights exactly one disc, draws 41 empty holes plus frame, uses
+    # no hex colours; render_web returns None for an empty observation.
     env = Connect4Environment()
     obs = env.reset().model_dump()
     assert env.web_actions(obs) == [(f"col {c}", {"column": c}) for c in range(7)]

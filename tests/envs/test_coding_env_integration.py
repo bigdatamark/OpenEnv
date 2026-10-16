@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Docker integration tests for CodingEnv against the coding-env:latest image.
+# Disabled unless SKIP_DOCKER_TESTS=0. Prepends repo root, src/ and envs/ to
+# sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Integration tests for CodingEnv with Docker.
@@ -36,6 +40,9 @@ from coding_env import CodeAction, CodingEnv
 
 @pytest.fixture(scope="module")
 def coding_env_client():
+    # [FUNCTION DOC]
+    # Module fixture: starts a CodingEnv client from the Docker image, yields it,
+    # then closes it (stopping the container).
     """Create a CodingEnv client from Docker image.
 
     This fixture is module-scoped to avoid starting/stopping containers
@@ -53,9 +60,13 @@ def coding_env_client():
 
 @docker_available
 class TestCodingEnvDocker:
+    # [CLASS DOC]
+    # Tests run against one shared container.
     """Integration tests that run against the Docker container."""
 
     def test_reset(self, coding_env_client):
+        # [FUNCTION DOC]
+        # reset gives exit code 0 and empty stderr.
         """Test that reset returns a valid observation."""
         result = coding_env_client.reset()
 
@@ -64,6 +75,8 @@ class TestCodingEnvDocker:
         assert result.observation.stderr == ""
 
     def test_step_simple_print(self, coding_env_client):
+        # [FUNCTION DOC]
+        # print output appears in stdout; reward is set.
         """Test executing a simple print statement."""
         coding_env_client.reset()
 
@@ -74,6 +87,8 @@ class TestCodingEnvDocker:
         assert result.reward is not None
 
     def test_step_calculation(self, coding_env_client):
+        # [FUNCTION DOC]
+        # Arithmetic result is printed.
         """Test executing a calculation."""
         coding_env_client.reset()
 
@@ -85,6 +100,8 @@ class TestCodingEnvDocker:
         assert "Result: 8" in result.observation.stdout
 
     def test_step_import_math(self, coding_env_client):
+        # [FUNCTION DOC]
+        # math import works.
         """Test importing and using the math module."""
         coding_env_client.reset()
 
@@ -96,6 +113,8 @@ class TestCodingEnvDocker:
         assert "Pi: 3.1416" in result.observation.stdout
 
     def test_step_multiline(self, coding_env_client):
+        # [FUNCTION DOC]
+        # Multi-line loops run.
         """Test executing multi-line code."""
         coding_env_client.reset()
 
@@ -111,6 +130,8 @@ for i in range(1, 4):
         assert "3 squared is 9" in result.observation.stdout
 
     def test_error_division_by_zero(self, coding_env_client):
+        # [FUNCTION DOC]
+        # Division by zero gives exit code 1 and stderr.
         """Test that division by zero returns an error."""
         coding_env_client.reset()
 
@@ -123,6 +144,8 @@ for i in range(1, 4):
         )
 
     def test_error_undefined_variable(self, coding_env_client):
+        # [FUNCTION DOC]
+        # NameError gives exit code 1.
         """Test that undefined variable returns an error."""
         coding_env_client.reset()
 
@@ -131,6 +154,8 @@ for i in range(1, 4):
         assert result.observation.exit_code == 1
 
     def test_error_syntax_error(self, coding_env_client):
+        # [FUNCTION DOC]
+        # Syntax error gives exit code 1.
         """Test that syntax error returns an error."""
         coding_env_client.reset()
 
@@ -139,6 +164,8 @@ for i in range(1, 4):
         assert result.observation.exit_code == 1
 
     def test_state_tracking(self, coding_env_client):
+        # [FUNCTION DOC]
+        # step_count goes 0, 1, 2 and episode_id is set.
         """Test that state is properly tracked."""
         coding_env_client.reset()
 
@@ -155,6 +182,8 @@ for i in range(1, 4):
         assert state.step_count == 2
 
     def test_reward_safe_code(self, coding_env_client):
+        # [FUNCTION DOC]
+        # Safe code gets a non-negative reward.
         """Test that safe code receives a positive or zero reward."""
         coding_env_client.reset()
 
@@ -164,6 +193,8 @@ for i in range(1, 4):
         assert result.reward >= 0  # Safe code should not be penalized
 
     def test_reward_dangerous_code(self, coding_env_client):
+        # [FUNCTION DOC]
+        # "import os" gets a negative reward.
         """Test that dangerous code receives a negative reward."""
         coding_env_client.reset()
 
@@ -173,6 +204,8 @@ for i in range(1, 4):
         assert result.reward < 0  # Dangerous code should be penalized
 
     def test_variable_persistence_within_episode(self, coding_env_client):
+        # [FUNCTION DOC]
+        # Variables persist across steps in an episode.
         """Test that variables persist within an episode."""
         coding_env_client.reset()
 
@@ -186,6 +219,8 @@ for i in range(1, 4):
         assert "42" in result.observation.stdout
 
     def test_reset_clears_variables(self, coding_env_client):
+        # [FUNCTION DOC]
+        # reset clears variables (later use fails).
         """Test that reset clears variables from previous episode."""
         # Define a variable
         coding_env_client.reset()

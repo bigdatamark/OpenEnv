@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Unity server subpackage. Re-exports UnityMLAgentsEnvironment.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

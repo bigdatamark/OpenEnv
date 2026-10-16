@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Backends that implement the REPL's LLM helper functions: a direct backend sending single-message
+# chats (with threaded batching and optional result truncation) and a recursive backend that spawns
+# child RLM runners for recursive queries, bounded by depth, a tree-wide child count, per-batch caps
+# and a cooperative per-child timeout. Records a trace for each child run.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -25,25 +30,43 @@ ChatFn = Callable[..., str]
 
 
 class RecursiveBackend(Protocol):
+    # [CLASS DOC]
+    # Structural protocol for backends: max_depth, depth, child_traces and the four query methods.
     max_depth: int
     depth: int
     child_traces: list["ChildTrace"]
 
-    def query(self, prompt: str, model: str | None = None) -> str: ...
+    def query(self, prompt: str, model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Protocol: single LLM query returning text.
+        ...
 
     def query_batched(
         self, prompts: list[str], model: str | None = None
-    ) -> list[str]: ...
+    ) -> list[str]:
+        # [FUNCTION DOC]
+        # Protocol: batched LLM queries returning texts in input order.
+        ...
 
-    def recursive_query(self, prompt: str, model: str | None = None) -> str: ...
+    def recursive_query(self, prompt: str, model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Protocol: recursive (child RLM) query returning text.
+        ...
 
     def recursive_query_batched(
         self, prompts: list[str], model: str | None = None
-    ) -> list[str]: ...
+    ) -> list[str]:
+        # [FUNCTION DOC]
+        # Protocol: batched recursive queries returning texts in input order.
+        ...
 
 
 @dataclass
 class BackendLimits:
+    # [CLASS DOC]
+    # Mutable limits shared by a recursion tree: max depth, batch thread workers, optional total children,
+    # per-batch children, result truncation length and per-child timeout, plus an internal spawned-children
+    # counter guarded by a thread lock.
     max_depth: int = 1
     max_batch_workers: int = 8
     max_children_total: int | None = None
@@ -63,6 +86,9 @@ class BackendLimits:
 
 @dataclass
 class ChildTrace:
+    # [CLASS DOC]
+    # Mutable record of one child run: depth, duration in seconds, first 80 characters of prompt and result
+    # (or None) and error text.
     depth: int
     duration_s: float
     prompt_preview: str
@@ -71,6 +97,8 @@ class ChildTrace:
 
 
 class DirectLMBackend:
+    # [CLASS DOC]
+    # Backend calling the chat function directly; recursive queries fall back to plain queries.
     """Direct LM backend with no child recursion beyond fallback to itself."""
 
     def __init__(
@@ -80,6 +108,8 @@ class DirectLMBackend:
         depth: int = 0,
         limits: BackendLimits | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Stores the chat function, depth and limits (default BackendLimits) and an empty trace list.
         self.llm_chat_fn = llm_chat_fn
         self.depth = depth
         self.limits = limits or BackendLimits()
@@ -87,6 +117,11 @@ class DirectLMBackend:
         self.child_traces: list[ChildTrace] = []
 
     def query(self, prompt: str, model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Sends one user message (calling the chat function with the model, retrying without it on TypeError)
+        # and returns the possibly truncated reply.
+        # KNOWN ISSUE: a TypeError raised inside the chat call itself also triggers the retry, so a failing
+        # call may be made twice.
         try:
             result = self.llm_chat_fn([{"role": "user", "content": prompt}], model)
         except TypeError:
@@ -94,6 +129,9 @@ class DirectLMBackend:
         return self._truncate(result)
 
     def query_batched(self, prompts: list[str], model: str | None = None) -> list[str]:
+        # [FUNCTION DOC]
+        # Runs query for each prompt in a thread pool (up to max_batch_workers) and returns replies in input
+        # order; a failed prompt yields "Error: <message>". Empty input returns an empty list.
         if not prompts:
             return []
         max_workers = min(len(prompts), self.limits.max_batch_workers)
@@ -112,14 +150,20 @@ class DirectLMBackend:
         return results
 
     def recursive_query(self, prompt: str, model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Same as query.
         return self.query(prompt, model)
 
     def recursive_query_batched(
         self, prompts: list[str], model: str | None = None
     ) -> list[str]:
+        # [FUNCTION DOC]
+        # Same as query_batched.
         return self.query_batched(prompts, model)
 
     def _truncate(self, result: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Truncates result to result_truncation_limit characters when set.
         limit = self.limits.result_truncation_limit
         if limit is not None and len(result) > limit:
             return result[:limit]
@@ -127,6 +171,9 @@ class DirectLMBackend:
 
 
 class LocalChildRLMBackend(DirectLMBackend):
+    # [CLASS DOC]
+    # Backend that runs recursive queries in child runners created by runner_factory, sharing limits
+    # across the tree and optionally reporting subcall start/completion to callbacks.
     """Recursive backend that spawns child LocalRLMRunner instances."""
 
     def __init__(
@@ -143,6 +190,9 @@ class LocalChildRLMBackend(DirectLMBackend):
         on_subcall_complete: Callable[[int, str, float, str | None], None]
         | None = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # Initialises the direct backend part and stores the runner factory, system prompt, iteration settings
+        # and callbacks.
         super().__init__(llm_chat_fn, depth=depth, limits=limits)
         self.runner_factory = runner_factory
         self.system_prompt = system_prompt
@@ -152,6 +202,12 @@ class LocalChildRLMBackend(DirectLMBackend):
         self.on_subcall_complete = on_subcall_complete
 
     def recursive_query(self, prompt: str, model: str | None = None) -> str:
+        # [FUNCTION DOC]
+        # Runs a child RLM on the prompt (used as both context and task). Falls back to a plain query when the
+        # next depth reaches max_depth. Returns "Error: max_children_total exceeded" when the shared cap is
+        # hit; otherwise increments the shared counter, calls the start callback (errors ignored), runs the
+        # child with the per-child timeout and returns its truncated final answer (empty if none). Child
+        # exceptions are re-raised. Always appends a ChildTrace and calls the completion callback (errors ignored).
         next_depth = self.depth + 1
         if next_depth >= self.max_depth:
             return self.query(prompt, model)
@@ -215,6 +271,10 @@ class LocalChildRLMBackend(DirectLMBackend):
     def recursive_query_batched(
         self, prompts: list[str], model: str | None = None
     ) -> list[str]:
+        # [FUNCTION DOC]
+        # Runs recursive_query for each prompt (first max_children_per_batch only, if set) in a thread pool and
+        # returns results in order, with "Error: <message>" for failures. Prompts beyond the cap are dropped
+        # silently, so the result can be shorter than the input.
         if not prompts:
             return []
         batch_limit = self.limits.max_children_per_batch
@@ -238,6 +298,10 @@ class LocalChildRLMBackend(DirectLMBackend):
     def _child_backend_factory(
         self, llm_chat_fn: ChatFn, **kwargs
     ) -> "LocalChildRLMBackend":
+        # [FUNCTION DOC]
+        # HELPER: Builds a child LocalChildRLMBackend at the given depth sharing this backend's limits,
+        # factory and callbacks. Reads system_prompt, max_iterations, env_max_iterations_multiplier and depth
+        # from kwargs (KeyError if missing).
         return LocalChildRLMBackend(
             llm_chat_fn,
             runner_factory=self.runner_factory,

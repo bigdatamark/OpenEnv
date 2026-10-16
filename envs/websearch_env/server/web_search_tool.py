@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Web search helper (inspired by search-r1 in slime): queries Serper.dev's Google Search endpoint and
+# optionally fetches each result page to expand snippets into full paragraphs. Imports the models via a
+# top-level "models" module.
 # Copyright 2025 Yuan He. All Rights Reserved.
 
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,6 +27,9 @@ from models import WebContent, WebSearchAction, WebSearchObservation
 
 
 class WebSearchTool:
+    # [CLASS DOC]
+    # Search tool configured with an API key, number of results, request timeout, snippet-only mode and an
+    # optional HTTP(S) proxy.
     """A tool for searching the web using Google Search API (via Serper.dev)."""
 
     def __init__(
@@ -33,6 +40,8 @@ class WebSearchTool:
         snippet_only: bool = False,
         proxy: str | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores the configuration.
         self.api_key = api_key
         self.top_k = top_k
         self.timeout = timeout
@@ -40,6 +49,11 @@ class WebSearchTool:
         self.proxy = proxy
 
     def execute(self, web_search_action: WebSearchAction) -> WebSearchObservation:
+        # [FUNCTION DOC]
+        # Searches for the stripped query using the action's temporary key or the configured one. Returns an
+        # observation with formatted content, the results and metadata {"query"} on success; an "[ERROR] No search
+        # results" observation if empty; on any exception an "[ERROR]" observation whose content and metadata
+        # include the error and full traceback. Never raises; done is always False.
         """
         Execute a web search based on the query.
         """
@@ -87,6 +101,14 @@ class WebSearchTool:
         timeout: int = 60,
         snippet_only: bool = False,
     ) -> list[WebContent]:
+        # [FUNCTION DOC]
+        # POSTs the query to Serper (num = top_k, US/English) with the API key header and optional proxy; raises
+        # requests errors on HTTP failure. For each organic result: in snippet mode, content is the snippet's
+        # segments longer than 5 words; otherwise fetches all result pages and expands the snippet within the page
+        # text (falling back to the snippet). Results with neither title nor content are skipped; missing values
+        # get placeholders. Returns a list of WebContent.
+        # KNOWN ISSUE: pages are fetched only for results that have a "link" but indexed by result position, so
+        # if a result lacks a link, later results are matched with the wrong page content.
         """
         Perform a Google search using Serper.dev API.
 
@@ -166,6 +188,12 @@ class WebSearchTool:
 
     @staticmethod
     def fetch_web_contents(urls: list[str], limit: int = 8) -> list[str]:
+        # [FUNCTION DOC]
+        # Fetches each URL sequentially (random desktop/bot user agent, 10 s timeout), decoding the body with the
+        # encoding detected by chardet (default utf-8, errors ignored). Returns one string per URL, "" for empty
+        # URLs or failures.
+        # KNOWN ISSUE: the docstring says requests are concurrent with a limit, but fetching is sequential and
+        # limit is unused.
         """
         Fetch multiple web contents concurrently with rate limiting.
 
@@ -178,6 +206,8 @@ class WebSearchTool:
         """
 
         def _fetch(url: str) -> str:
+            # [FUNCTION DOC]
+            # HELPER: fetches and decodes one URL, returning "" on any error.
             if url == "":
                 return ""
 
@@ -207,6 +237,8 @@ class WebSearchTool:
 
     @staticmethod
     def parse_search_snippet(snippet: str) -> list[str]:
+        # [FUNCTION DOC]
+        # Splits a snippet on "..." and returns the stripped segments with more than 5 words.
         """
         Parse a search snippet into meaningful segments.
 
@@ -221,6 +253,10 @@ class WebSearchTool:
 
     @staticmethod
     def expand_search_snippet(snippet: str, web_content: str) -> str:
+        # [FUNCTION DOC]
+        # For each snippet segment found in the page text (searching with newlines replaced by spaces), expands to
+        # the surrounding newline-delimited paragraph and collects unique paragraphs. Returns them joined by
+        # newlines ("" if none found).
         """
         Finds snippet segments in the web content and expands them to full paragraphs.
 
@@ -257,6 +293,9 @@ class WebSearchTool:
 
     @staticmethod
     def format_web_contents(web_contents: list[WebContent], query: str) -> str:
+        # [FUNCTION DOC]
+        # Returns readable text: a header with the query, then per result its index, title, URL (or N/A) and the
+        # first 500 characters of content (with "..." when truncated).
         """
         Format search results into a readable string.
 

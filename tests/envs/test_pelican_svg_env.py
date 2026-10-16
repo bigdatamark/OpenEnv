@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Offline tests for the pelican_svg_env environment: SVG extraction from replies, the source gate
+# (rasters, external refs, scripts, text labels, DTDs, size, root), rendering and ink measurement,
+# geometry extraction (path flattening, visibility/paint, units, transforms), structural analysis
+# (wheel rows, rider, frame), the full admission gate over the fixture corpus, task grid, scoring
+# with a stubbed vision judge, rubric consistency and the Gym-style environment contract. Skipped
+# without resvg_py. Fixture SVGs are read from envs/pelican_svg_env/fixtures.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the Pelican SVG environment.
@@ -69,50 +76,74 @@ PELICAN_TERMS = ["pelican", "bicycle", "bike", "bird"]
 
 
 def fixture(name: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the text of fixtures/<name>.svg.
     return (FIXTURES / f"{name}.svg").read_text()
 
 
 def svg(body: str, view_box: str = "0 0 100 100") -> str:
+    # [FUNCTION DOC]
+    # HELPER: Wraps a body in an svg root element with the SVG namespace and the given viewBox.
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}">{body}</svg>'
 
 
 class TestExtraction:
+    # [CLASS DOC]
+    # Pulling the SVG document out of a raw model reply.
     """Pulling the SVG out of a raw model reply."""
 
     def test_extracts_from_fenced_block(self):
+        # [FUNCTION DOC]
+        # extract_svg returns the svg inside a fenced code block.
         reply = "Sure!\n```svg\n<svg><circle r='1'/></svg>\n```\nHope that helps."
         assert extract_svg(reply) == "<svg><circle r='1'/></svg>"
 
     def test_extracts_from_surrounding_prose(self):
+        # [FUNCTION DOC]
+        # extract_svg returns an svg embedded in prose.
         assert extract_svg("Here: <svg><rect/></svg> done!") == "<svg><rect/></svg>"
 
     def test_last_attempt_wins(self):
+        # [FUNCTION DOC]
+        # With two svg documents the last one is returned.
         reply = "First:\n<svg><rect id='a'/></svg>\nBetter:\n<svg><rect id='b'/></svg>"
         assert "id='b'" in extract_svg(reply)
 
     def test_missing_svg_raises(self):
+        # [FUNCTION DOC]
+        # No svg raises SvgParseError.
         with pytest.raises(SvgParseError):
             extract_svg("I cannot draw that.")
 
     def test_truncated_svg_is_distinguished_from_absent(self):
+        # [FUNCTION DOC]
+        # An unclosed svg raises TruncatedSvgError.
         """A generation cut off by a token limit is a different fact."""
         with pytest.raises(TruncatedSvgError):
             extract_svg("<svg xmlns='http://www.w3.org/2000/svg'><circle r='1'/>")
 
 
 class TestSourceGate:
+    # [CLASS DOC]
+    # inspect_source and parse_svg rejections.
     """Source-level rejection of degenerate and bad-faith submissions."""
 
     def test_clean_drawing_has_no_violations(self):
+        # [FUNCTION DOC]
+        # The good fixture has no violations.
         report = inspect_source(fixture("good_pelican_bike"), PELICAN_TERMS)
         assert report.ok, report.codes
 
     def test_rejects_data_uri_raster(self):
+        # [FUNCTION DOC]
+        # A data-URI raster is flagged "embedded_raster".
         """The cheat that renders convincingly and only shows up in the source."""
         report = inspect_source(fixture("cheat_raster_datauri"), PELICAN_TERMS)
         assert "embedded_raster" in report.codes
 
     def test_rejects_xlink_href_raster(self):
+        # [FUNCTION DOC]
+        # An image via xlink:href data URI is flagged "embedded_raster".
         body = (
             '<image xlink:href="data:image/png;base64,AAAA" width="10" height="10"/>'
             '<circle cx="1" cy="1" r="1"/><rect width="2" height="2"/>'
@@ -124,27 +155,39 @@ class TestSourceGate:
         assert "embedded_raster" in inspect_source(document).codes
 
     def test_rejects_external_reference(self):
+        # [FUNCTION DOC]
+        # An external href is flagged "external_reference".
         body = '<use href="https://evil.example/x.svg"/><circle r="1"/><rect/><line/>'
         assert "external_reference" in inspect_source(svg(body)).codes
 
     def test_rejects_script_element(self):
+        # [FUNCTION DOC]
+        # A script element is flagged "forbidden_element".
         body = '<script>fetch("/")</script><circle r="1"/><rect/><line/>'
         assert "forbidden_element" in inspect_source(svg(body)).codes
 
     def test_rejects_text_naming_the_subject(self):
+        # [FUNCTION DOC]
+        # Text naming the subject is flagged "text_label".
         body = '<text>a pelican</text><circle r="1"/><rect/><line/>'
         assert "text_label" in inspect_source(svg(body), PELICAN_TERMS).codes
 
     def test_rejects_subject_named_inside_tspan(self):
+        # [FUNCTION DOC]
+        # Subject words split across tspan and text are flagged.
         body = '<text><tspan>a</tspan> pelican</text><circle r="1"/><rect/><line/>'
         assert "text_label" in inspect_source(svg(body), PELICAN_TERMS).codes
 
     def test_text_after_closing_tag_is_not_rendered_and_not_counted(self):
+        # [FUNCTION DOC]
+        # Tail text after a closing text element is not flagged.
         """An element's tail sits outside it, so it never reaches the canvas."""
         body = '<text>hi</text>pelican<circle r="1"/><rect/><line/>'
         assert "text_label" not in inspect_source(svg(body), PELICAN_TERMS).codes
 
     def test_rejects_entity_declarations(self):
+        # [FUNCTION DOC]
+        # A DTD with entities raises SvgParseError ("DTD").
         """ElementTree expands internal entities, so a DTD is a billion-laughs vector."""
         bomb = (
             '<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol">]>'
@@ -154,10 +197,14 @@ class TestSourceGate:
             parse_svg(bomb)
 
     def test_rejects_oversized_source(self):
+        # [FUNCTION DOC]
+        # Very large sources raise SvgParseError ("exceeds").
         with pytest.raises(SvgParseError, match="exceeds"):
             parse_svg(svg("<rect/>" * 40000))
 
     def test_rejects_non_svg_root(self):
+        # [FUNCTION DOC]
+        # A non-svg root raises SvgParseError ("root element").
         with pytest.raises(SvgParseError, match="root element"):
             parse_svg(
                 '<html><body><svg xmlns="http://www.w3.org/2000/svg"/></body></html>'
@@ -165,21 +212,31 @@ class TestSourceGate:
 
 
 class TestRender:
+    # [CLASS DOC]
+    # Rasterisation and image statistics.
     """Rasterisation and the measurements taken from it."""
 
     def test_render_is_deterministic(self):
+        # [FUNCTION DOC]
+        # Rendering the same source three times yields identical bytes.
         source = fixture("good_pelican_bike")
         digests = {render_png(source, 256) for _ in range(3)}
         assert len(digests) == 1
 
     def test_malformed_source_raises(self):
+        # [FUNCTION DOC]
+        # A malformed fixture raises RenderError.
         with pytest.raises(RenderError):
             render_png(fixture("malformed"))
 
     def test_blank_canvas_has_no_ink(self):
+        # [FUNCTION DOC]
+        # The blank fixture has ink fraction 0.
         assert image_stats(render_png(fixture("blank"))).ink_fraction == 0.0
 
     def test_ink_is_measured_against_the_background_not_transparency(self):
+        # [FUNCTION DOC]
+        # A painted backdrop with a small circle has ink fraction below 0.2.
         """A painted backdrop must not read as a full canvas of ink."""
         source = svg(
             '<rect width="100" height="100" fill="#eef"/><circle cx="50" cy="50" r="10"/>'
@@ -187,12 +244,16 @@ class TestRender:
         assert image_stats(render_png(source)).ink_fraction < 0.2
 
     def test_black_on_white_counts_as_ink(self):
+        # [FUNCTION DOC]
+        # A black half-canvas rect gives ink fraction above 0.4.
         """Squared channel differences overflow int16 and silently vanish."""
         source = svg('<rect x="0" y="0" width="100" height="50" fill="black"/>')
         assert image_stats(render_png(source)).ink_fraction > 0.4
 
 
 class TestGeometry:
+    # [CLASS DOC]
+    # Shape extraction independent of how shapes are spelled.
     """Shape extraction must not depend on how the shape was spelled."""
 
     CIRCLES = {
@@ -209,18 +270,25 @@ class TestGeometry:
 
     @pytest.mark.parametrize("spelling", sorted(CIRCLES))
     def test_every_circle_spelling_agrees(self, spelling):
+        # [FUNCTION DOC]
+        # Parametrized: circle, bezier and arc spellings (including compact arc flags) give circularity ~1,
+        # radius 0.25 and centre (0.5, 0.5).
         shape = extract_shapes(parse_svg(svg(self.CIRCLES[spelling])))[0]
         assert shape.circularity == pytest.approx(1.0, abs=0.01)
         assert shape.radius == pytest.approx(0.25, abs=0.005)
         assert shape.centroid == pytest.approx((0.5, 0.5), abs=0.005)
 
     def test_square_is_not_round(self):
+        # [FUNCTION DOC]
+        # A square has circularity ~pi/4.
         shape = extract_shapes(
             parse_svg(svg('<rect x="25" y="25" width="50" height="50"/>'))
         )[0]
         assert shape.circularity == pytest.approx(math.pi / 4, abs=0.01)
 
     def test_centroid_is_not_biased_by_vertex_count(self):
+        # [FUNCTION DOC]
+        # A square's centroid is exactly centred.
         """A duplicated closing vertex used to drag the centroid off centre."""
         shape = extract_shapes(
             parse_svg(svg('<rect x="25" y="25" width="50" height="50"/>'))
@@ -228,6 +296,8 @@ class TestGeometry:
         assert shape.centroid == pytest.approx((0.5, 0.5), abs=0.001)
 
     def test_radius_variation_survives_coarse_sampling(self):
+        # [FUNCTION DOC]
+        # A square's radius coefficient of variation is ~0.107.
         """With four raw segments a square's radius variation reads as zero."""
         shape = extract_shapes(
             parse_svg(svg('<rect x="25" y="25" width="50" height="50"/>'))
@@ -235,6 +305,8 @@ class TestGeometry:
         assert shape.radius_cv == pytest.approx(0.107, abs=0.02)
 
     def test_smooth_cubic_after_quadratic_does_not_reflect_its_control(self):
+        # [FUNCTION DOC]
+        # S after Q does not reflect the quadratic control, so no point goes below y 0.
         """S may only reflect after C/S; after Q its first control is the cursor."""
         points = [
             p
@@ -244,6 +316,8 @@ class TestGeometry:
         assert min(y for _, y in points) >= 0
 
     def test_smooth_quadratic_after_cubic_does_not_reflect_its_control(self):
+        # [FUNCTION DOC]
+        # T after C does not reflect the cubic control.
         """T may only reflect after Q/T; after C its control is the cursor."""
         points = [
             p
@@ -262,42 +336,61 @@ class TestGeometry:
         ],
     )
     def test_hidden_geometry_is_not_scored(self, hiding):
+        # [FUNCTION DOC]
+        # Parametrized: display none, visibility hidden and opacity 0 remove the shape.
         source = svg(f'<circle cx="50" cy="50" r="25" {hiding}/>')
         assert extract_shapes(parse_svg(source)) == []
 
     def test_a_hidden_group_hides_its_children(self):
+        # [FUNCTION DOC]
+        # Children of a display-none group are dropped.
         source = svg('<g display="none"><circle cx="50" cy="50" r="25"/></g>')
         assert extract_shapes(parse_svg(source)) == []
 
     def test_unpainted_geometry_is_not_scored(self):
+        # [FUNCTION DOC]
+        # fill and stroke none removes the shape.
         source = svg('<circle cx="50" cy="50" r="25" fill="none" stroke="none"/>')
         assert extract_shapes(parse_svg(source)) == []
 
     def test_a_stroked_outline_with_no_fill_still_counts(self):
+        # [FUNCTION DOC]
+        # A stroked unfilled circle counts.
         source = svg('<circle cx="50" cy="50" r="25" fill="none" stroke="black"/>')
         assert len(extract_shapes(parse_svg(source))) == 1
 
     def test_a_child_can_repaint_inside_an_unpainted_group(self):
+        # [FUNCTION DOC]
+        # A child with its own fill inside an unpainted group counts.
         source = svg(
             '<g fill="none" stroke="none"><circle cx="50" cy="50" r="25" fill="black"/></g>'
         )
         assert len(extract_shapes(parse_svg(source))) == 1
 
     def test_off_canvas_geometry_is_not_scored(self):
+        # [FUNCTION DOC]
+        # Fully off-canvas shapes are dropped.
         source = svg('<circle cx="-500" cy="50" r="25"/>')
         assert extract_shapes(parse_svg(source)) == []
 
     def test_partially_visible_geometry_still_counts(self):
+        # [FUNCTION DOC]
+        # Partially visible shapes count.
         source = svg('<circle cx="0" cy="50" r="25"/>')
         assert len(extract_shapes(parse_svg(source))) == 1
 
     def test_long_ellipse_is_rejected_by_aspect(self):
+        # [FUNCTION DOC]
+        # An ellipse with rx 2x ry has aspect ~2.
+        # KNOWN ISSUE: despite the name, it only checks the aspect measurement, not any rejection.
         shape = extract_shapes(
             parse_svg(svg('<ellipse cx="50" cy="50" rx="30" ry="15"/>'))
         )[0]
         assert shape.aspect == pytest.approx(2.0, abs=0.05)
 
     def test_group_transforms_are_applied(self):
+        # [FUNCTION DOC]
+        # A group translate moves the extracted centroid.
         source = svg(
             '<g transform="translate(20 20)"><circle cx="30" cy="30" r="25"/></g>'
         )
@@ -305,6 +398,8 @@ class TestGeometry:
         assert shape.centroid == pytest.approx((0.5, 0.5), abs=0.005)
 
     def test_transform_composition_is_left_to_right(self):
+        # [FUNCTION DOC]
+        # parse_transform composes left to right (first transform outermost).
         assert apply(parse_transform("translate(10 0) scale(2)"), (5.0, 5.0)) == (
             20.0,
             10.0,
@@ -315,11 +410,15 @@ class TestGeometry:
         )
 
     def test_rotate_about_a_point(self):
+        # [FUNCTION DOC]
+        # rotate(90) maps (1, 0) to (0, 1).
         x, y = apply(parse_transform("rotate(90)"), (1.0, 0.0))
         assert (x, y) == pytest.approx((0.0, 1.0), abs=1e-9)
 
 
 class TestLengthUnits:
+    # [CLASS DOC]
+    # CSS units and percentages in geometry attributes.
     """Percentages and CSS units are legal in every geometry attribute.
 
     Models use them freely, `width="100%"` most of all, so the raw attribute
@@ -344,10 +443,14 @@ class TestLengthUnits:
         ],
     )
     def test_units_resolve(self, value, expected):
+        # [FUNCTION DOC]
+        # Parametrized: px, %, pt, in, pc, mm, cm, em and exponent forms resolve against a 400 reference.
         assert length(value, reference=400.0) == pytest.approx(expected)
 
     @pytest.mark.parametrize("value", ["garbage", "", None, "12 34", "calc(1px)"])
     def test_unparseable_falls_back_to_the_default(self, value):
+        # [FUNCTION DOC]
+        # Parametrized: garbage, empty, None, multiple numbers and calc return the default.
         assert length(value, reference=400.0, default=7.0) == 7.0
 
     @pytest.mark.parametrize(
@@ -363,9 +466,13 @@ class TestLengthUnits:
         ],
     )
     def test_extraction_survives_units(self, body):
+        # [FUNCTION DOC]
+        # Parametrized: extraction with various units or nonsense values does not fail.
         assert extract_shapes(parse_svg(svg(body, "0 0 400 300"))) is not None
 
     def test_percentages_resolve_against_the_matching_axis(self):
+        # [FUNCTION DOC]
+        # Width/height percentages use their own viewport axis; bbox is normalised by the longer side.
         """Width percentages use viewport width, height percentages the height."""
         shape = extract_shapes(
             parse_svg(
@@ -377,21 +484,31 @@ class TestLengthUnits:
 
 
 class TestStructure:
+    # [CLASS DOC]
+    # analyse_structure and find_wheels over extracted shapes.
     """Structural checks over the extracted shapes."""
 
     def structure(self, name, expected_wheels=2):
+        # [FUNCTION DOC]
+        # HELPER: Runs analyse_structure on a fixture's extracted shapes with the expected wheel count.
         return analyse_structure(
             extract_shapes(parse_svg(fixture(name))), expected_wheels=expected_wheels
         )
 
     def test_complete_scene_passes_everything(self):
+        # [FUNCTION DOC]
+        # The good fixture scores 1.0.
         assert self.structure("good_pelican_bike").score == 1.0
 
     def test_wheels_drawn_as_paths_score_the_same(self):
+        # [FUNCTION DOC]
+        # Path-drawn wheels score 1.0.
         """Representation must not change the structural verdict."""
         assert self.structure("wheels_as_paths").score == 1.0
 
     def test_wheels_placed_with_use_score_the_same(self):
+        # [FUNCTION DOC]
+        # Wheels placed via use score 1.0 at the use positions.
         """A model that factors its SVG must not be punished for it.
 
         Nothing inside `<defs>` is painted and every `<use>` is, so the
@@ -402,6 +519,8 @@ class TestStructure:
         assert [round(w.centroid[0], 3) for w in report.wheels] == [0.325, 0.675]
 
     def test_definitions_alone_draw_nothing(self):
+        # [FUNCTION DOC]
+        # Shapes only in defs produce no geometry.
         """`<defs>` content is a template, not paint. Without a `<use>` to
         instantiate it there is no geometry on the canvas at all."""
         source = svg(
@@ -411,27 +530,39 @@ class TestStructure:
         assert extract_shapes(parse_svg(source)) == []
 
     def test_background_rect_is_not_mistaken_for_a_rider(self):
+        # [FUNCTION DOC]
+        # The rider is found and is not the background rect.
         report = self.structure("good_pelican_bike")
         assert report.rider is not None
         assert report.rider.area < 0.35
 
     def test_animal_head_is_not_counted_as_a_wheel(self):
+        # [FUNCTION DOC]
+        # Exactly two wheels are found in the good fixture.
         """Any circle passes a roundness test, so wheels are found by row."""
         assert len(self.structure("good_pelican_bike").wheels) == 2
 
     def test_vehicle_without_rider_loses_only_the_rider_checks(self):
+        # [FUNCTION DOC]
+        # A bike without bird fails the rider check but keeps partial score and two wheels.
         report = self.structure("bike_no_bird")
         assert not report.checks[-1].passed
         assert 0.0 < report.score < 1.0
         assert len(report.wheels) == 2
 
     def test_rider_without_vehicle_scores_zero(self):
+        # [FUNCTION DOC]
+        # A bird without bike scores 0.
         assert self.structure("bird_no_bike").score == 0.0
 
     def test_scribble_scores_zero(self):
+        # [FUNCTION DOC]
+        # A scribble scores 0.
         assert self.structure("bad_scribble").score == 0.0
 
     def test_a_pedal_below_the_axle_does_not_displace_a_single_wheel(self):
+        # [FUNCTION DOC]
+        # With one expected wheel the big rim, not a lower pedal, is chosen.
         """With one expected wheel, rows are ranked by bottom edge.
 
         A pedal drawn below the axle has a lower centre than the wheel, but
@@ -450,6 +581,8 @@ class TestStructure:
         assert wheels[0].radius == pytest.approx(0.15, abs=0.01)
 
     def test_frame_check_spans_the_outermost_wheels(self):
+        # [FUNCTION DOC]
+        # With three wheel candidates the frame check spans the outermost ones and passes.
         """A third wheel-like shape in the row must not shrink the span.
 
         The frame connects the outermost hubs, and anything sitting between
@@ -471,6 +604,8 @@ class TestStructure:
         assert report["checks"]["frame_spans_wheels"] is True
 
     def test_two_real_wheels_beat_a_pedal_when_one_wheel_is_expected(self):
+        # [FUNCTION DOC]
+        # Two real wheels are found even when one is expected, failing wheel_count.
         """A bicycle scored as a unicycle must fail wheel_count.
 
         The expected count is a preference and the ground is a fact, so the
@@ -491,6 +626,8 @@ class TestStructure:
         assert report.to_dict()["checks"]["wheel_count"] is False
 
     def test_a_rider_bigger_than_the_wheels_does_not_hide_them(self):
+        # [FUNCTION DOC]
+        # A large round body above does not displace the wheel row; score 1.0.
         """A body drawn larger than the wheels must not become the anchor.
 
         Wheels are found as a row, so the largest round shape in the drawing
@@ -511,6 +648,8 @@ class TestStructure:
         assert report.score == 1.0
 
     def test_wheels_are_taken_from_the_lower_row(self):
+        # [FUNCTION DOC]
+        # Wheels come from the lower row of round shapes.
         """Two round shapes level at the top must not be read as the wheels."""
         source = svg(
             '<circle cx="120" cy="90" r="40" fill="#fff" stroke="#333" stroke-width="3"/>'
@@ -527,6 +666,8 @@ class TestStructure:
         assert all(w.centroid[1] > 0.5 for w in wheels), "picked the upper row"
 
     def test_a_hub_does_not_outrank_the_rim_it_sits_in(self):
+        # [FUNCTION DOC]
+        # A concentric hub does not beat its rim; rider found; score 1.0.
         """The bug that made the same drawing score differently on two machines.
 
         A hub is concentric with its rim but too small to share a row with it, so
@@ -552,6 +693,8 @@ class TestStructure:
         assert report.score == 1.0
 
     def test_row_choice_survives_last_bit_noise_in_height(self):
+        # [FUNCTION DOC]
+        # Nudging centroids by a few ulps never changes the chosen wheel radius.
         """Whatever wins must not be decided by floating-point rounding."""
         import math as _math
         from dataclasses import replace as _replace
@@ -576,6 +719,8 @@ class TestStructure:
         assert len(radii) == 1, f"the choice moved with float noise: {radii}"
 
     def test_single_wheel_vehicle_drops_the_pair_checks(self):
+        # [FUNCTION DOC]
+        # With one expected wheel there is no wheels_apart check but wheel_count remains.
         """Scoring a unicycle against bicycle geometry punished a good drawing."""
         names = {
             c.name for c in self.structure("bike_no_bird", expected_wheels=1).checks
@@ -585,52 +730,79 @@ class TestStructure:
 
 
 class TestGate:
+    # [CLASS DOC]
+    # run_gate admission over the corpus.
     """The full deterministic admission check."""
 
     @pytest.mark.parametrize("name", sorted(p.stem for p in FIXTURES.glob("*.svg")))
     def test_corpus_admission_matches_ground_truth(self, name):
+        # [FUNCTION DOC]
+        # Parametrized over every fixture: passes iff the fixture is in ADMISSIBLE.
         result = run_gate(fixture(name), PELICAN_TERMS)
         assert result.passed is (name in ADMISSIBLE), result.codes
 
     def test_off_canvas_is_distinguished_from_blank(self):
+        # [FUNCTION DOC]
+        # Off-canvas and blank fixtures get distinct codes.
         assert "content_off_canvas" in run_gate(fixture("offcanvas")).codes
         assert "blank_canvas" in run_gate(fixture("blank")).codes
 
     def test_passing_gate_returns_the_raster_for_reuse(self):
+        # [FUNCTION DOC]
+        # A passing gate result carries the rendered PNG.
         """The submission is rasterised once and the judge reuses the bytes."""
         assert run_gate(fixture("good_pelican_bike"), PELICAN_TERMS).png is not None
 
 
 class TestTasks:
+    # [CLASS DOC]
+    # Subject-by-vehicle task grid.
     """The subject-by-vehicle grid."""
 
     def test_only_the_canonical_pair_is_not_held_out(self):
+        # [FUNCTION DOC]
+        # Only pelican_bicycle is not held out.
         not_held_out = [t.task_id for t in all_tasks() if not t.held_out]
         assert not_held_out == ["pelican_bicycle"]
 
     def test_held_out_only_excludes_the_canonical_pair(self):
+        # [FUNCTION DOC]
+        # held_out_only returns only held-out tasks.
         assert all(t.held_out for t in all_tasks(held_out_only=True))
 
     def test_sampling_is_reproducible_under_a_seed(self):
+        # [FUNCTION DOC]
+        # sample_task is deterministic per seed.
         assert sample_task(seed=7).task_id == sample_task(seed=7).task_id
 
     def test_prompt_forbids_the_two_known_cheats(self):
+        # [FUNCTION DOC]
+        # The prompt mentions raster and text.
         prompt = make_task("pelican", "bicycle").prompt
         assert "raster" in prompt and "text" in prompt
 
     def test_forbidden_terms_cover_subject_and_vehicle(self):
+        # [FUNCTION DOC]
+        # Forbidden terms include subject, vehicle and "bird".
         terms = make_task("pelican", "bicycle").forbidden_terms
         assert "pelican" in terms and "bicycle" in terms and "bird" in terms
 
     def test_unknown_task_id_names_the_valid_ones(self):
+        # [FUNCTION DOC]
+        # An unknown id raises ValueError listing valid ids.
         with pytest.raises(ValueError, match="pelican_bicycle"):
             task_from_ids(["pelican_bicycel"])
 
 
 class StubVisionClient:
+    # [CLASS DOC]
+    # HELPER: Scripted vision judge client; returns a caption for free-form prompts and a JSON object
+    # answering every schema property with the configured boolean; can raise to simulate failure.
     """A judge endpoint that answers from a script instead of a network."""
 
     def __init__(self, caption="a pelican riding a bicycle", answer=True, fail=False):
+        # [FUNCTION DOC]
+        # HELPER: Stores caption, answer, fail flag, model "stub" and a call counter.
         self.model = "stub"
         self.caption = caption
         self.answer = answer
@@ -640,6 +812,9 @@ class StubVisionClient:
     async def complete_with_image(
         self, prompt, png_bytes, *, schema=None, max_tokens=400
     ):
+        # [FUNCTION DOC]
+        # HELPER: Counts the call; raises RuntimeError if failing; returns the caption when no schema, else a
+        # JSON string with every schema key set to the answer.
         self.calls += 1
         if self.fail:
             raise RuntimeError("judge is down")
@@ -650,24 +825,35 @@ class StubVisionClient:
 
 
 class TestScoring:
+    # [CLASS DOC]
+    # evaluate_submission / evaluate_deterministic composition.
     """Composition of the layers into one reward."""
 
     task = make_task("pelican", "bicycle")
 
     def evaluate(self, name, judge=None):
+        # [FUNCTION DOC]
+        # HELPER: Runs evaluate_submission on a fenced fixture for the pelican/bicycle task with an optional
+        # judge.
         return asyncio.run(
             evaluate_submission(f"```svg\n{fixture(name)}\n```", self.task, judge)
         )
 
     def test_rejected_submission_scores_zero(self):
+        # [FUNCTION DOC]
+        # A raster cheat scores 0.
         assert self.evaluate("cheat_raster_datauri").reward == 0.0
 
     def test_offline_mode_scores_on_structure_alone(self):
+        # [FUNCTION DOC]
+        # Without a judge the reward equals the structure score.
         evaluation = self.evaluate("good_pelican_bike")
         assert not evaluation.judge_enabled
         assert evaluation.reward == pytest.approx(evaluation.structure_score)
 
     def test_judge_failure_does_not_raise_the_reward(self):
+        # [FUNCTION DOC]
+        # A failing judge leaves the result unjudged with a lower reward than offline scoring.
         """Otherwise breaking the judge becomes a winning strategy."""
         broken = self.evaluate(
             "good_pelican_bike", VisionJudge(StubVisionClient(fail=True))
@@ -676,12 +862,16 @@ class TestScoring:
         assert broken.reward < self.evaluate("good_pelican_bike").reward
 
     def test_perfect_judge_gives_full_marks(self):
+        # [FUNCTION DOC]
+        # An all-yes judge gives reward 1.0.
         evaluation = self.evaluate(
             "good_pelican_bike", VisionJudge(StubVisionClient(answer=True))
         )
         assert evaluation.reward == pytest.approx(1.0)
 
     def test_blind_caption_that_misses_the_subject_costs_marks(self):
+        # [FUNCTION DOC]
+        # A caption that does not name the subject lowers the reward.
         named = self.evaluate(
             "good_pelican_bike",
             VisionJudge(StubVisionClient(caption="a pelican on a bicycle")),
@@ -692,6 +882,8 @@ class TestScoring:
         assert unnamed.reward < named.reward
 
     def test_not_riding_is_penalised_but_not_erased(self):
+        # [FUNCTION DOC]
+        # A judge denying the riding posture lowers but does not zero the semantic score.
         judge = VisionJudge(StubVisionClient(answer=True))
         riding = self.evaluate("good_pelican_bike", judge)
         # Same drawing, judge says nothing is riding.
@@ -705,6 +897,8 @@ class TestScoring:
         assert 0.0 < not_riding.semantic_score < riding.semantic_score
 
     def test_truncated_reply_is_reported_as_such(self):
+        # [FUNCTION DOC]
+        # A truncated reply has gate code "truncated_svg".
         evaluation = evaluate_deterministic(
             "<svg xmlns='http://www.w3.org/2000/svg'><circle r='1'/>", self.task
         )
@@ -712,11 +906,15 @@ class TestScoring:
 
 
 class _NotRidingClient(StubVisionClient):
+    # [CLASS DOC]
+    # HELPER: Stub judge answering true to everything except riding_posture.
     """Answers yes to everything except the riding posture."""
 
     async def complete_with_image(
         self, prompt, png_bytes, *, schema=None, max_tokens=400
     ):
+        # [FUNCTION DOC]
+        # HELPER: Returns the caption without schema, else JSON with riding_posture false and others true.
         if schema is None:
             return self.caption
         keys = list(schema["properties"])
@@ -725,15 +923,22 @@ class _NotRidingClient(StubVisionClient):
 
 
 class TestRewardConsistency:
+    # [CLASS DOC]
+    # Rubric and evaluation agreement.
     """The rubric tree and the evaluation must never disagree."""
 
     @pytest.mark.parametrize("judge_enabled", [True, False])
     def test_weights_come_from_one_place(self, judge_enabled):
+        # [FUNCTION DOC]
+        # Parametrized: component weights sum to 1.
         structure_weight, semantic_weight = component_weights(judge_enabled)
         assert structure_weight + semantic_weight == pytest.approx(1.0)
 
     @pytest.mark.parametrize("name", sorted(ADMISSIBLE))
     def test_rubric_matches_evaluation_reward(self, name):
+        # [FUNCTION DOC]
+        # Parametrized over admissible fixtures: the step reward equals the offline rubric applied to the
+        # observation.
         environment = PelicanSvgEnvironment(
             subject="pelican", vehicle="bicycle", enable_judge=False
         )
@@ -744,23 +949,33 @@ class TestRewardConsistency:
 
 
 class TestEnvironment:
+    # [CLASS DOC]
+    # PelicanSvgEnvironment reset/step contract, task pinning and web playground.
     """The Gym-shaped contract."""
 
     def environment(self, **kwargs):
+        # [FUNCTION DOC]
+        # HELPER: Builds a PelicanSvgEnvironment with the judge disabled unless overridden.
         kwargs.setdefault("enable_judge", False)
         return PelicanSvgEnvironment(**kwargs)
 
     def test_reset_returns_a_prompt_and_no_reward(self):
+        # [FUNCTION DOC]
+        # reset gives a prompt, no reward and not done.
         observation = self.environment().reset(seed=3)
         assert observation.prompt
         assert observation.reward is None
         assert not observation.done
 
     def test_step_before_reset_raises(self):
+        # [FUNCTION DOC]
+        # step before reset raises RuntimeError ("reset").
         with pytest.raises(RuntimeError, match="reset"):
             self.environment().step(PelicanSvgAction(response=fixture("blank")))
 
     def test_step_ends_the_episode(self):
+        # [FUNCTION DOC]
+        # A good drawing ends the episode with reward 1.0 and marks state submitted.
         environment = self.environment(subject="pelican", vehicle="bicycle")
         environment.reset()
         observation = environment.step(
@@ -771,6 +986,9 @@ class TestEnvironment:
         assert environment.state.submitted
 
     def test_step_async_scores_off_the_event_loop(self, monkeypatch):
+        # [FUNCTION DOC]
+        # step_async runs CPU scoring off the event loop: a patched scorer waits until another coroutine
+        # has run, and the reward is still 1.0.
         """Scoring is CPU-bound, so it must not stall other sessions sharing
         the server's event loop."""
         from envs.pelican_svg_env.server import scoring
@@ -779,6 +997,8 @@ class TestEnvironment:
         evaluate_deterministic = scoring.evaluate_deterministic
 
         def evaluate_once_the_loop_ran(response, task):
+            # [FUNCTION DOC]
+            # HELPER: Waits up to 5s for the loop event, then delegates to the real scorer.
             assert loop_ran.wait(timeout=5), "scoring blocked the event loop"
             return evaluate_deterministic(response, task)
 
@@ -789,9 +1009,13 @@ class TestEnvironment:
         environment.reset()
 
         async def other_session():
+            # [FUNCTION DOC]
+            # HELPER: Sets the loop event.
             loop_ran.set()
 
         async def run():
+            # [FUNCTION DOC]
+            # HELPER: Gathers step_async with other_session and returns the observation.
             action = PelicanSvgAction(response=fixture("good_pelican_bike"))
             observation, _ = await asyncio.gather(
                 environment.step_async(action), other_session()
@@ -801,6 +1025,9 @@ class TestEnvironment:
         assert asyncio.run(run()).reward == pytest.approx(1.0)
 
     def test_pelican_svg_web_playground(self):
+        # [FUNCTION DOC]
+        # render_web shows the task without hex colours, then the drawing as a base64 img (never inline
+        # svg) with the reward; empty observation returns None.
         environment = self.environment(subject="pelican", vehicle="bicycle")
         task = environment.render_web(environment.reset().model_dump())
         assert "pelican" in task
@@ -818,12 +1045,16 @@ class TestEnvironment:
         assert environment.render_web({}) is None
 
     def test_task_can_be_pinned_by_id(self):
+        # [FUNCTION DOC]
+        # reset(task_id=...) pins the task and expected wheel count.
         """A benchmark run must ask every model the same question."""
         observation = self.environment().reset(task_id="capybara_unicycle")
         assert observation.task_id == "capybara_unicycle"
         assert observation.expected_wheels == 1
 
     def test_truthy_strings_do_not_pass_the_checklist(self):
+        # [FUNCTION DOC]
+        # _parse_checklist accepts only JSON true.
         """Only a JSON true counts. A judge that answers "false" as a string
         ignored the schema, and that must not read as approval."""
         from envs.pelican_svg_env.server.vision_judge import _parse_checklist
@@ -838,6 +1069,8 @@ class TestEnvironment:
         }
 
     def test_partial_pin_is_honoured(self):
+        # [FUNCTION DOC]
+        # Pinning only subject or vehicle fills the other with the default.
         """Pinning one dimension must not be silently ignored."""
         assert self.environment(subject="octopus").reset().task_id == "octopus_bicycle"
         observation = self.environment(vehicle="skateboard").reset()
@@ -845,15 +1078,21 @@ class TestEnvironment:
         assert observation.expected_wheels == 2
 
     def test_partial_pin_works_at_reset_time_too(self):
+        # [FUNCTION DOC]
+        # Partial pins also work as reset arguments.
         environment = self.environment()
         assert environment.reset(subject="octopus").task_id == "octopus_bicycle"
         assert environment.reset(vehicle="skateboard").task_id == "pelican_skateboard"
 
     def test_pin_takes_precedence_over_sampling(self):
+        # [FUNCTION DOC]
+        # A pin overrides sample_tasks.
         environment = self.environment(sample_tasks=True, subject="octopus")
         assert environment.reset(seed=5).task_id == "octopus_bicycle"
 
     def test_held_out_only_rejects_a_pin_that_resolves_canonical(self):
+        # [FUNCTION DOC]
+        # held_out_only raises ValueError ("held-out") for pins resolving to pelican_bicycle.
         """held_out_only is a hard promise, not a default."""
         with pytest.raises(ValueError, match="held-out"):
             self.environment(held_out_only=True, subject="pelican").reset()
@@ -861,20 +1100,28 @@ class TestEnvironment:
             self.environment(held_out_only=True).reset(task_id="pelican_bicycle")
 
     def test_held_out_only_accepts_a_held_out_pin(self):
+        # [FUNCTION DOC]
+        # held_out_only accepts a held-out pin.
         environment = self.environment(held_out_only=True, subject="capybara")
         assert environment.reset().task_id == "capybara_bicycle"
 
     def test_default_task_is_the_original_prompt(self):
+        # [FUNCTION DOC]
+        # Default reset always serves pelican_bicycle.
         """A default that changes per reset makes two runs incomparable."""
         assert self.environment().reset().task_id == "pelican_bicycle"
         assert self.environment().reset(seed=99).task_id == "pelican_bicycle"
 
     def test_seeded_sampling_is_reproducible(self):
+        # [FUNCTION DOC]
+        # Seeded sampling is reproducible.
         first = self.environment(sample_tasks=True).reset(seed=11).task_id
         second = self.environment(sample_tasks=True).reset(seed=11).task_id
         assert first == second
 
     def test_held_out_only_never_serves_the_original_prompt(self):
+        # [FUNCTION DOC]
+        # Over 25 seeds held_out_only never serves pelican_bicycle and varies tasks.
         ids = {
             self.environment(held_out_only=True).reset(seed=s).task_id
             for s in range(25)
@@ -883,6 +1130,8 @@ class TestEnvironment:
         assert len(ids) > 1
 
     def test_violations_are_surfaced_to_the_caller(self):
+        # [FUNCTION DOC]
+        # A raster cheat reports "embedded_raster" in violations with reward 0.
         environment = self.environment(subject="pelican", vehicle="bicycle")
         environment.reset()
         observation = environment.step(

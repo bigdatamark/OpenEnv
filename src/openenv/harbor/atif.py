@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Cross-checks the capture proxy's exported rollout document against the harness's own
+# trajectory (Harbor ATIF agent/trajectory.json, or a fallback such as pi's session log):
+# per-call completion token counts must agree, extra auxiliary calls are identified,
+# retries/subagents/prompt length are flagged, and findings are recorded in a capture
+# validation Report (INFO/WARN/FATAL). Also merges captured token ids/logprobs into ATIF.
 """Reconcile our token capture against Harbor's ATIF trajectory. The independent cross-check.
 
 Harbor agents write `agent/trajectory.json` in ATIF (Agent Trajectory Interchange Format, currently
@@ -41,6 +47,9 @@ from openenv.core.harness.capture.validate import FATAL, INFO, Report, WARN
 
 
 def load_atif(trial_dir: str | Path) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # Reads <trial_dir>/agent/trajectory.json and returns the parsed dict, or None if missing
+    # or unparsable (any exception swallowed).
     """Read `agent/trajectory.json` from a Harbor trial dir. None if the agent emitted none."""
     path = Path(trial_dir) / "agent" / "trajectory.json"
     if not path.is_file():
@@ -52,6 +61,11 @@ def load_atif(trial_dir: str | Path) -> dict[str, Any] | None:
 
 
 def _pi_session_as_atif(trial_dir: Path) -> dict[str, Any] | None:
+    # [FUNCTION DOC]
+    # HELPER: reads the last (sorted) agent/pi/sessions/*.jsonl, and for each assistant
+    # message record builds an ATIF-like agent step whose completion_tokens is usage.output
+    # (0 if absent); malformed lines are skipped. Returns {"steps": [...]} or None if no
+    # sessions or no assistant steps.
     """pi's own session log, reshaped into the two ATIF fields reconciliation reads.
 
     pi writes no `trajectory.json`, but it does write `agent/pi/sessions/*.jsonl`, and every
@@ -88,6 +102,9 @@ _FALLBACK_TRACES = (_pi_session_as_atif,)
 
 
 def load_trace(trial_dir: str | Path) -> tuple[dict[str, Any] | None, str]:
+    # [FUNCTION DOC]
+    # Returns (ATIF, "atif") if present; else the first fallback reader result with its
+    # derived name (e.g. "pi_session"), ignoring reader exceptions; else (None, "").
     """The best available independent record of this rollout.
 
     Returns:
@@ -109,11 +126,15 @@ def load_trace(trial_dir: str | Path) -> tuple[dict[str, Any] | None, str]:
 
 
 def agent_steps(atif: dict[str, Any]) -> list[dict[str, Any]]:
+    # [FUNCTION DOC]
+    # Returns ATIF steps whose source is "agent".
     """Steps the agent produced. `source` is one of user | agent | system."""
     return [s for s in (atif.get("steps") or []) if s.get("source") == "agent"]
 
 
 def atif_turn_lengths(atif: dict[str, Any]) -> list[int]:
+    # [FUNCTION DOC]
+    # Returns completion_tokens (0 when missing/None) for each agent step.
     return [
         int((s.get("metrics") or {}).get("completion_tokens") or 0)
         for s in agent_steps(atif)
@@ -121,6 +142,9 @@ def atif_turn_lengths(atif: dict[str, Any]) -> list[int]:
 
 
 def _subsequence_gap(needle: list[int], haystack: list[int]) -> list[int] | None:
+    # [FUNCTION DOC]
+    # HELPER: if needle is strictly shorter than haystack and is a subsequence of it (greedy
+    # match), returns indices of haystack elements not matched; else None.
     """Indices of `haystack` skipped when `needle` is matched as a subsequence, else None.
 
     Greedy two-pointer, which is exact for subsequence membership. Returns None the moment a needle
@@ -145,6 +169,11 @@ def _subsequence_gap(needle: list[int], haystack: list[int]) -> list[int] | None
 def _reconcile_eval(
     document: dict[str, Any], atif: dict[str, Any], report: Report
 ) -> Report:
+    # [FUNCTION DOC]
+    # HELPER: for eval rollouts compares only call counts (captured turns vs ATIF agent
+    # steps): INFO if ATIF has no agent steps; otherwise INFO noting count-only comparison,
+    # WARN if fewer calls were captured than ATIF logged, INFO if more (auxiliary). Mutates
+    # and returns report.
     """Cross-check an eval rollout against ATIF on call COUNT, since token counts do not exist.
 
     The main path compares per-call completion token counts, which an eval endpoint never returns —
@@ -193,6 +222,11 @@ def _reconcile_eval(
 
 
 def _partial_usage_matches_by_call_id(turns, steps) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True only when turns and agent steps have equal non-zero length and some (not
+    # all, not none) steps lack completion_tokens: steps with counts must equal the turn's
+    # n_sampled, and steps without counts must have the same ordered, non-empty, unique
+    # (globally) string tool call IDs as the captured response's tool calls. False otherwise.
     """Match missing usage by unique native call identity, never by treating None as zero.
 
     ACP can report usage only on the final response while retaining model-generated
@@ -230,6 +264,19 @@ def _partial_usage_matches_by_call_id(turns, steps) -> bool:
 
 
 def reconcile(document: dict[str, Any], atif: dict[str, Any] | None) -> Report:
+    # [FUNCTION DOC]
+    # Builds a Report comparing the document with ATIF. INFO and return if ATIF is None;
+    # records schema/agent INFO. Drops synthetic zero-token "API Error:" agent steps (WARN)
+    # and up to budget_stop_count zero-token proxy budget-stop messages (INFO). Eval rollouts
+    # go to _reconcile_eval. For train: no agent sequences -> INFO if no turns at all, else
+    # FATAL. Collects all turns under agent roots in arrival order and their n_sampled:
+    # partial-usage tool-id match -> WARN and return; all ATIF counts zero/none -> WARN and
+    # return; ATIF a strict subsequence covering under half of captured calls -> FATAL; a
+    # subsequence otherwise -> WARN, sets report.aux_node_ids to the extra calls' node ids
+    # and returns; exact equality -> INFO; any other difference -> FATAL turn_mismatch.
+    # Then WARNs on first-turn prompt length mismatch and on steps with llm_call_count > 1,
+    # and FATALs if ATIF reports subagent trajectories. Returns the report.
+    # Raises KeyError if the document lacks expected keys (sequences, stats, etc.).
     """Compare the exported rollout against ATIF. Disagreement is the signal.
 
     Deliberately FATAL on a per-turn mismatch. Two independent measurements of the same rollout
@@ -496,6 +543,13 @@ def reconcile(document: dict[str, Any], atif: dict[str, Any] | None) -> Report:
 
 
 def merge_into_atif(atif: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns a deep copy of ATIF with captured completion token ids and logprobs written
+    # into each agent step's metrics (discarded turns flagged instead), plus an
+    # extra.intercept block (first prompt ids, trainable count, agent sequence count, session
+    # id). Returns the original ATIF unchanged if there are no agent sequences, call counts
+    # or per-call token counts differ, or a sequence's node and mask-run counts differ.
+    # Never mutates the input.
     """Fill ATIF's empty `completion_token_ids` / `logprobs` with our captured values.
 
     Produces one artifact that is both the human-readable trace and the training data, rather than

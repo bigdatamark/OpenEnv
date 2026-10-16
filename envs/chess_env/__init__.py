@@ -1,3 +1,6 @@
+# [PACKAGE DOC]
+# Chess environment package (python-chess rules, moonfish engine opponent/evaluation). Re-exports the
+# ChessEnv client and ChessAction, ChessObservation, ChessState models.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #

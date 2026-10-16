@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Implements "openenv import": detects a third-party environment in a local source directory
+# with the registered importers and generates an OpenEnv wrapper package for it, then generates
+# its uv.lock.
 """Import third-party environments into OpenEnv wrappers."""
 
 from __future__ import annotations
@@ -19,6 +23,12 @@ def _select_match(
     source_type: str | None,
     env_class: str | None,
 ):
+    # [FUNCTION DOC]
+    # HELPER: runs importer detection on the source (optionally restricted to a source type), narrows
+    # matches by class name or qualified name when env_class is given, and returns the single
+    # (importer, detected environment) pair.
+    # Raises: typer.BadParameter if detection fails, nothing matches, several source formats are
+    # detected without --type, or several entrypoints remain.
     try:
         matches = registry.detect(source, source_type=source_type)
     except ValueError as e:
@@ -87,6 +97,12 @@ def import_env(
         ),
     ] = None,
 ) -> None:
+    # [FUNCTION DOC]
+    # CLI command: validates the package name, requires the source to be an existing directory, and
+    # refuses an output env directory inside the source tree, an existing file, or a non-empty
+    # directory (BadParameter). Selects the importer match, creates the directory, generates the
+    # wrapper and tries to generate uv.lock (warning if it fails). On any generation error removes the
+    # output directory, prints the error and raises typer.Exit(1).
     """Deterministically import a third-party environment into OpenEnv."""
     env_name = _validate_env_name(name)
     source_path = Path(source).expanduser().resolve()

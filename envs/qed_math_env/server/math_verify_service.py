@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Process-pool answer verifier built on math_verify. Answers are extracted from the last \boxed{...}
+# in the prediction, parsed and compared with the gold answer in spawned worker processes (so
+# math_verify's signal-based timeout works). An async service manages the pool, admission
+# (back-pressure), per-request timeouts, retries, pool restarts and metrics. Outcomes map to
+# statuses: correct, wrong, no_answer, unparsable, timeout, internal_error.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -33,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class VerifyRequest:
+    # [CLASS DOC]
+    # Serializable verification request: id, prediction text, gold text, strict flag, math_verify
+    # timeout seconds, max boxed answer length, numeric precision and float rounding.
     """Request payload for answer verification."""
 
     request_id: str
@@ -47,6 +56,9 @@ class VerifyRequest:
 
 @dataclass
 class VerifyResponse:
+    # [CLASS DOC]
+    # Verification response: id, status string, elapsed milliseconds, retry count, worker id (unused),
+    # worker_restarted flag, and optional error type and message.
     """Response payload from verification."""
 
     request_id: str
@@ -60,6 +72,9 @@ class VerifyResponse:
 
 
 def _parse_math_verify_expression(value: str):
+    # [FUNCTION DOC]
+    # HELPER: Parses value with math_verify; if that yields nothing and value contains \boxed{, parses
+    # the brace-balanced contents of the first boxed block instead. Returns the parse result (possibly empty).
     """Parse an expression with a boxed fallback for parser compatibility."""
     parsed = math_verify.parse(value)
     if parsed:
@@ -85,22 +100,34 @@ def _parse_math_verify_expression(value: str):
 
 
 class VerificationError(Exception):
+    # [CLASS DOC]
+    # Base exception for verification failures.
     """Base exception for verification failures."""
 
 
 class UnparsableException(VerificationError):
+    # [CLASS DOC]
+    # Raised when a boxed answer has unbalanced braces.
     """Raised when a math answer cannot be parsed for verification."""
 
 
 class NoAnswerException(VerificationError):
+    # [CLASS DOC]
+    # Raised when the text contains no \boxed{ block.
     """Raised when a model output does not contain a boxed final answer."""
 
 
 class EmptyBoxedException(VerificationError):
+    # [CLASS DOC]
+    # Raised when the boxed answer is empty or whitespace.
     """Raised when a boxed final answer is present but empty."""
 
 
 def _extract_boxed_answer(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the contents of the last \boxed{...} in text using brace-depth tracking.
+    # Raises NoAnswerException if absent, UnparsableException if braces never balance,
+    # EmptyBoxedException if the contents are blank.
     """Extract the content from the innermost \\boxed{...} block.
 
     Handles nested braces correctly by tracking brace depth.
@@ -131,6 +158,13 @@ def _extract_boxed_answer(text: str) -> str:
 
 
 def _verify_answer_worker(request: VerifyRequest) -> VerifyResponse:
+    # [FUNCTION DOC]
+    # Worker-process function: extracts the boxed prediction; too long gives "unparsable"; parses gold
+    # and prediction (either empty gives "unparsable"); runs math_verify.verify with the request
+    # settings giving "correct" or "wrong". A verify exception mentioning "timeout" gives "timeout",
+    # any other gives "internal_error" with error details. No answer gives "no_answer"; malformed or
+    # empty boxes give "unparsable"; other exceptions give "internal_error". Returns a VerifyResponse
+    # with elapsed time.
     """Worker process function that performs the actual verification.
 
     This runs in an isolated process so that math_verify's signal-based timeout
@@ -207,6 +241,10 @@ def _verify_answer_worker(request: VerifyRequest) -> VerifyResponse:
 
 
 class MathVerifierService:
+    # [CLASS DOC]
+    # Async verification service over a ProcessPoolExecutor (spawn context). Tracks request counter,
+    # in-flight count with an admission lock, restart count, and aggregate metrics (requests,
+    # timeouts, errors, total latency, last activity time).
     """Async service that manages a pool of verification worker processes.
 
     This service:
@@ -243,6 +281,9 @@ class MathVerifierService:
         numeric_precision: int = 5,
         float_rounding: int = 10,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration with clamping: at least 1 worker, queue size at least 1, request timeout at
+        # least 1 ms, retries at least 0. Creates asyncio locks and zeroed counters. Does not start the pool.
         """Initialize the verifier service.
 
         Args:
@@ -275,6 +316,8 @@ class MathVerifierService:
         self._last_activity_monotonic = time.perf_counter()
 
     async def start(self) -> None:
+        # [FUNCTION DOC]
+        # Creates the process pool if not already running. Idempotent.
         """Start the worker process pool.
 
         Safe to call multiple times (idempotent).
@@ -290,6 +333,8 @@ class MathVerifierService:
         logger.info("MathVerifierService started with %d workers", self.max_workers)
 
     async def stop(self) -> None:
+        # [FUNCTION DOC]
+        # Shuts down the pool (waiting, cancelling pending futures) in a thread executor and clears it. Idempotent.
         """Stop the worker process pool and clean up resources.
 
         Safe to call multiple times (idempotent).
@@ -305,6 +350,8 @@ class MathVerifierService:
         logger.info("MathVerifierService stopped")
 
     def close_sync(self) -> None:
+        # [FUNCTION DOC]
+        # Shuts the pool down without waiting (cancelling pending futures) and clears it; for sync callers.
         """Synchronously cancel and release the worker pool.
 
         Called from synchronous close() hooks where no event loop is available.
@@ -318,6 +365,8 @@ class MathVerifierService:
         logger.info("MathVerifierService pool released (sync close)")
 
     async def _restart_pool(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Under the restart lock, stops and restarts the pool and increments the restart count.
         """Restart the worker pool after a fatal worker/executor failure."""
         async with self._restart_lock:
             await self.stop()
@@ -326,6 +375,9 @@ class MathVerifierService:
 
     @staticmethod
     def _requires_restart(response: VerifyResponse) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True if an internal_error response has a fatal error type (broken pool, EOF, connection
+        # reset/aborted) or a message containing a fatal fragment.
         """Return True when response indicates executor/worker death."""
         if response.status != "internal_error":
             return False
@@ -351,6 +403,9 @@ class MathVerifierService:
         return any(fragment in msg for fragment in fatal_fragments)
 
     async def health_probe(self) -> dict[str, str | bool | int | float]:
+        # [FUNCTION DOC]
+        # Returns a health mapping: status ("healthy"/"stopped"), executor_running, inflight_requests,
+        # queue_size, max_workers, restart_count and heartbeat lag in ms since the last recorded result.
         """Return lightweight health status for long-lived training runs."""
         executor_running = self._executor is not None
         status = "healthy" if executor_running else "stopped"
@@ -369,6 +424,9 @@ class MathVerifierService:
         }
 
     async def metrics_snapshot(self) -> dict[str, float | int]:
+        # [FUNCTION DOC]
+        # Returns a metrics mapping under the metrics lock: request count, average latency, timeout and
+        # error counts, restart count, queue depth (in-flight) and heartbeat lag.
         """Return rollout-oriented verifier metrics snapshot."""
         async with self._metrics_lock:
             requests_count = self._requests_total
@@ -390,6 +448,9 @@ class MathVerifierService:
             }
 
     async def _record_result_metrics(self, response: VerifyResponse) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Under the metrics lock, increments request count, adds latency, counts timeouts and
+        # internal errors, and updates last activity time.
         """Update aggregate counters for rollout/staging observability."""
         async with self._metrics_lock:
             self._requests_total += 1
@@ -401,6 +462,8 @@ class MathVerifierService:
             self._last_activity_monotonic = time.perf_counter()
 
     async def _try_admit_request(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: Increments the in-flight count and returns True if below queue_size, else returns False.
         """Try to admit a request without blocking when saturated."""
         async with self._admission_lock:
             if self._inflight_requests >= self.queue_size:
@@ -409,12 +472,17 @@ class MathVerifierService:
             return True
 
     async def _release_request_slot(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Decrements the in-flight count (not below zero).
         """Release a previously admitted request slot."""
         async with self._admission_lock:
             self._inflight_requests = max(0, self._inflight_requests - 1)
 
     @staticmethod
     def _is_retryable_response(response: VerifyResponse) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True for timeout responses and internal errors with transient types (client timeout,
+        # broken pool, cancellation, timeout, EOF, connection reset/aborted) or matching message fragments.
         """Return True when a response represents a transient infra failure."""
         if response.status == "timeout":
             return True
@@ -449,6 +517,10 @@ class MathVerifierService:
         self,
         request: VerifyRequest,
     ) -> VerifyResponse:
+        # [FUNCTION DOC]
+        # HELPER: Runs the worker function in the pool with a client-side timeout. Returns its response, a
+        # "timeout" response (error type ClientTimeout) on timeout, or an "internal_error" response with the
+        # exception details on any other failure (logged).
         """Execute one verifier attempt without retries."""
         loop = asyncio.get_running_loop()
         request_id = request.request_id
@@ -500,6 +572,13 @@ class MathVerifierService:
         numeric_precision: Optional[int] = None,
         float_rounding: Optional[int] = None,
     ) -> VerifyResponse:
+        # [FUNCTION DOC]
+        # Main entry: starts the pool if needed; rejects with an internal_error "QueueFull" response (recorded
+        # in metrics) when saturated; otherwise builds a request (strict/precision/rounding default to service
+        # settings, math_verify timeout at least 1 s) and runs it, retrying retryable responses up to
+        # max_retries (restarting the pool for fatal ones). Sets retry_count, worker_restarted and total
+        # elapsed time, records metrics, releases the slot and returns the response.
+        # KNOWN ISSUE: the rejection id uses the counter without incrementing it, so consecutive rejections share an id.
         """Verify an answer prediction against a gold reference.
 
         This is the main async entry point for answer verification. It submits
