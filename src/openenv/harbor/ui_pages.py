@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# HELPER: server-side HTML builders for the Harbor UI pages: header, task page, run list,
+# run page (live and finished), run comparison and setup view, plus small badges/format
+# helpers and an in-memory, expiring grant-token registry that authorizes run downloads.
+# All dataset/model/sandbox values are HTML-escaped. Data comes from ui.py handlers.
 """The Harbor UI's pages, rendered as HTML: the header, a task, the run list, a run, a comparison,
 and the setup view. The task browser and the run card render themselves in the browser (see
 `ui_assets/`); everything else is built here, from data the handlers in `ui.py` hand over.
@@ -37,10 +42,15 @@ LEVEL_TEXT = {
 
 
 def _short(spec: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: last path segment of a dataset spec (trailing slash ignored).
     return str(spec or "").rstrip("/").split("/")[-1]
 
 
 def reward_badge(reward: Any) -> str:
+    # [FUNCTION DOC]
+    # Returns a reward span classed full (>= 0.999), part (> 0) or zero with 2 decimals, or
+    # a "–" badge when the value is not numeric.
     try:
         value = float(reward)
     except (TypeError, ValueError):
@@ -58,6 +68,9 @@ _STATUS = {
 
 
 def status_badge(status: str | None) -> str:
+    # [FUNCTION DOC]
+    # Returns a status span for starting/running (pulsing), done (check), failed (x), or the
+    # raw/unknown status label.
     tone, label = _STATUS.get(status or "", ("", status or "unknown"))
     mark = (
         '<span class="hb-pulse"></span>'
@@ -70,6 +83,10 @@ def status_badge(status: str | None) -> str:
 
 
 def ago(ts: Any) -> str:
+    # [FUNCTION DOC]
+    # Returns a relative time ("just now", "N min ago", "N h ago") or a local "Mon D" date
+    # for older timestamps; "" for falsy input.
+    # KNOWN ISSUE: uses the "%-d" strftime directive, which is not supported on all platforms (e.g. Windows).
     if not ts:
         return ""
     s = time.time() - float(ts)
@@ -83,12 +100,16 @@ def ago(ts: Any) -> str:
 
 
 def size(n: int) -> str:
+    # [FUNCTION DOC]
+    # Formats a byte count as B, KB (rounded) or MB (one decimal).
     if n < 1024:
         return f"{n} B"
     return f"{n / 1024:.0f} KB" if n < 1048576 else f"{n / 1048576:.1f} MB"
 
 
 def empty(ic: str, title: str, text: str = "") -> str:
+    # [FUNCTION DOC]
+    # Returns an empty-state block with icon, escaped title and optional (unescaped) HTML text.
     return f'<div class="hb-empty">{icon(ic, 20)}<h3>{_e(title)}</h3>{f"<p>{text}</p>" if text else ""}</div>'
 
 
@@ -104,6 +125,10 @@ _GRANT_TTL = 6 * 3600
 
 
 def grant(run_id: str) -> str:
+    # [FUNCTION DOC]
+    # Returns a download token for run_id: under a lock, purges grants older than 6 hours,
+    # reuses the run's existing token unless it is older than 3 hours, else issues a new
+    # random token. Mutates module-level grant maps.
     """A token for `run_id`'s downloads. A live run page is redrawn every two seconds, so an
     existing token for the run is reused rather than a new one issued each time."""
     now = time.time()
@@ -121,6 +146,8 @@ def grant(run_id: str) -> str:
 
 
 def granted(token: str) -> str | None:
+    # [FUNCTION DOC]
+    # Returns the run id a token grants if it exists and is younger than 6 hours, else None.
     with _GRANTS_LOCK:
         hit = _GRANTS.get(str(token or ""))
     return hit[0] if hit and time.time() - hit[1] <= _GRANT_TTL else None
@@ -137,6 +164,10 @@ def header_html(
     caps: Any = None,
     settings: ui_settings.UISettings | None = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # Builds the top bar: title plus facts — read-only mode, the shared server model with
+    # training/eval capture, or "bring your own model"; and the count of ready sandboxes when
+    # capabilities are given and rollouts are enabled.
     from .serving import HarborService
 
     settings = settings or ui_settings.load()
@@ -166,6 +197,8 @@ def header_html(
 
 
 def _config_value(detail: dict[str, Any], section: str, key: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the value of row key in config section of a task detail, or "".
     for s in detail.get("config") or []:
         if s["label"] == section:
             for r in s["rows"]:
@@ -175,6 +208,10 @@ def _config_value(detail: dict[str, Any], section: str, key: str) -> str:
 
 
 def task_head_html(detail: dict[str, Any], common: set[str] | None = None) -> str:
+    # [FUNCTION DOC]
+    # Builds the task page header: breadcrumbs, category/difficulty chips and up to four
+    # distinguishing keywords (excluding tags common to the dataset), title, and facts (file
+    # count, agent timeout, image name truncated to 60 chars, copy-link button).
     """Above the task page: where it is, what it is called, and the few facts that decide a run.
 
     `common` are the tags every task of the dataset carries, which say nothing about this one.
@@ -219,6 +256,8 @@ def task_head_html(detail: dict[str, Any], common: set[str] | None = None) -> st
 
 
 def _panel(sec: str, ic: str, title: str, aside: str, body: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: wraps body HTML in a titled task-page section panel with an aside.
     return (
         f'<section class="tp-sec hb-panel" data-sec="{sec}"><div class="hb-panel-h"><h2>{icon(ic, 15)}{_e(title)}</h2>'
         f'<span class="aside">{aside}</span></div><div class="hb-panel-b">{body}</div></section>'
@@ -226,6 +265,8 @@ def _panel(sec: str, ic: str, title: str, aside: str, body: str) -> str:
 
 
 def _run_rows(runs: list[dict[str, Any]]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders up to 20 run buttons with status, reward, harness/sandbox/model and age.
     return "".join(
         f'<button type="button" class="tp-run" data-run="{_e(r.get("id"))}">{status_badge(r.get("status"))}{reward_badge(r.get("reward"))}'
         f'<span class="m"><code>{_e(r.get("harness"))}</code> on {_e(r.get("sandbox"))} · {_e(r.get("model"))}</span>'
@@ -235,6 +276,11 @@ def _run_rows(runs: list[dict[str, Any]]) -> str:
 
 
 def task_html(detail: dict[str, Any], runs: list[dict[str, Any]] | None = None) -> str:
+    # [FUNCTION DOC]
+    # Builds the task page body: table of contents; the instruction as markdown with metadata
+    # (description, extra metadata, withheld answer-bearing keys); a file tree sorted by folder
+    # (root files first) with a viewer preselecting instruction.md or the first file; the
+    # environment groups from task.toml; and the task's runs.
     """The task page: what the agent is asked, what the task holds, what it runs with, and its runs."""
     runs = runs or []
     files = detail.get("files") or []
@@ -372,6 +418,8 @@ def task_html(detail: dict[str, Any], runs: list[dict[str, Any]] | None = None) 
 
 
 def task_error_head(spec: str, index: int) -> str:
+    # [FUNCTION DOC]
+    # Returns a minimal header with a back link for a task that failed to open.
     """A head with just the way back, for a task that would not open."""
     return (
         f'<div class="tp-head"><nav class="hb-crumbs"><button type="button" class="back" data-back>{icon("arrowLeft", 14)}Tasks</button>{icon("chevronRight", 13)}'
@@ -383,6 +431,8 @@ def task_error_head(spec: str, index: int) -> str:
 
 
 def _kind(status: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: maps a status to the run-list filter group: live, failed or done.
     return (
         "live" if status in ui_runs.LIVE else "failed" if status == "failed" else "done"
     )
@@ -396,6 +446,11 @@ def runs_html(
     history: bool = True,
     own: bool = False,
 ) -> str:
+    # [FUNCTION DOC]
+    # Builds the run list: heading with scope text (own vs all, history note), stats (total,
+    # running, solved/graded), and for non-empty lists filter buttons with counts, a search
+    # box, a compare button and a table of up to 500 runs (checkbox preselected for compare,
+    # status, task, agent, model, reward for finished runs, duration, age), marking the selected run.
     """Every run this visitor may see, newest first, as a filterable table."""
     compare = compare or []
     live = sum(1 for r in runs if r.get("status") in ui_runs.LIVE)
@@ -461,6 +516,9 @@ def runs_html(
 
 
 def _stepper(rec: dict[str, Any], live: Any, turns: int) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders the three-step progress (Setup, Agent, Result) for a live run (by model
+    # call count), a finished run (ok/bad by calls and grading outcome) or a run without result.
     result = rec.get("result") or {}
     if live is not None:
         states = (
@@ -513,6 +571,11 @@ def _stepper(rec: dict[str, Any], live: Any, turns: int) -> str:
 
 
 def _run_head(rec: dict[str, Any], token: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a run page header: breadcrumbs, status and elapsed time, title, facts
+    # (model/endpoint, harness, sandbox, dataset/task) and action buttons: view task, result
+    # JSON (when a result exists), and capture audit / training trace downloads only for
+    # non-eval results with completion tokens and no FATAL findings, all carrying the grant token.
     started = float(rec.get("created") or time.time())
     elapsed = rec.get("wall_s") if rec.get("finished") else time.time() - started
     result = rec.get("result") or {}
@@ -553,6 +616,9 @@ def _run_head(rec: dict[str, Any], token: str) -> str:
 
 
 def _details_html(rec: dict[str, Any]) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders the run details panel (agent, sandbox, model, endpoint, capture level and
+    # train/eval, dataset, task, run id).
     result = rec.get("result") or {}
     level = result.get("capture_level")
     rows = [
@@ -586,6 +652,9 @@ def _details_html(rec: dict[str, Any]) -> str:
 
 
 def _timeline(body: str, n_calls: int, actions: int | None, live: bool) -> str:
+    # [FUNCTION DOC]
+    # HELPER: wraps a timeline body with a header showing model call and action counts
+    # ("so far" when live) and an expand-all button.
     counts = _plural(n_calls, "model call") + (
         f" · {_plural(actions, 'action')}" if actions is not None else ""
     )
@@ -596,6 +665,10 @@ def _timeline(body: str, n_calls: int, actions: int | None, live: bool) -> str:
 
 
 def live_view(live: Any, service: Any) -> tuple[str, str, int]:
+    # [FUNCTION DOC]
+    # Returns (timeline HTML, side panel HTML, model calls so far) for a live run: looks up
+    # its capture session in the service registry; when found shows model calls,
+    # conversations, sampled tokens, discarded calls and idle time, and the live transcript.
     """A rollout in flight, as (timeline, side panel, model calls so far)."""
     turns, transcript, rows = 0, "", []
     session = (
@@ -642,6 +715,11 @@ def live_view(live: Any, service: Any) -> tuple[str, str, int]:
 
 
 def run_html(rec: dict[str, Any] | None, live: Any = None, service: Any = None) -> str:
+    # [FUNCTION DOC]
+    # Builds a run page: "not found" state for a missing record; otherwise issues a download
+    # grant, and renders the live view, or for a finished result the conversation timeline,
+    # an optional per-call token table and result/check panels, or an error panel when the run
+    # has no result; always adds the details panel, header and stepper.
     """A run: its trajectory on the left; its result, checks and details on the right."""
     if not rec:
         return f'<div class="rp">{_back("Runs")}<div class="hb-panel">{empty("search", "Run not found", "It may be from before the server restarted with history off, or started from another browser.")}</div></div>'
@@ -672,6 +750,9 @@ def run_html(rec: dict[str, Any] | None, live: Any = None, service: Any = None) 
 
 
 def unreadable(label: str, exc: Exception, *, run: bool = False) -> str:
+    # [FUNCTION DOC]
+    # Returns a page explaining a record could not be rendered (exception type and truncated
+    # message), with a back link when it is a run page.
     """A page for a record this version cannot draw, with the way back."""
     body = empty(
         "alert",
@@ -682,6 +763,8 @@ def unreadable(label: str, exc: Exception, *, run: bool = False) -> str:
 
 
 def _back(label: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: header containing only a back button with the given label.
     return f'<div class="rp-head"><nav class="hb-crumbs"><button type="button" class="back" data-back>{icon("arrowLeft", 14)}{_e(label)}</button></nav></div>'
 
 
@@ -689,6 +772,12 @@ def _back(label: str) -> str:
 
 
 def compare_html(records: list[dict[str, Any] | None]) -> str:
+    # [FUNCTION DOC]
+    # Builds a side-by-side comparison of 2-4 run records (else an instruction empty state):
+    # rows for reward, status, agent, model, sandbox, endpoint, capture, model calls, actions,
+    # generated tokens, trace check, duration and findings; best values highlighted (max
+    # reward, min calls and duration) and identical rows faded; a tools-used table (calls per
+    # tool, or terminal keystrokes for typing agents, top 30); and a warning when tasks differ.
     """Two to four rollouts side by side: outcome, cost in calls and time, and what each agent did."""
     recs = [r for r in records if r]
     if len(recs) < 2:
@@ -697,6 +786,8 @@ def compare_html(records: list[dict[str, Any] | None]) -> str:
     res = [r.get("result") or {} for r in recs]
 
     def tools(r: dict[str, Any]) -> dict[str, int]:
+        # [FUNCTION DOC]
+        # HELPER: counts tool calls by name across a result's turns, falling back to {"terminal": action count}.
         out: dict[str, int] = {}
         for t in r.get("turns") or []:
             for c in t.get("tool_calls") or []:
@@ -709,6 +800,9 @@ def compare_html(records: list[dict[str, Any] | None]) -> str:
         return out
 
     def best(values: list[Any], pick: str) -> list[bool]:
+        # [FUNCTION DOC]
+        # HELPER: marks values equal to the max/min among numeric values; none marked if fewer than
+        # two numbers or all equal.
         nums = [v for v in values if isinstance(v, (int, float))]
         if len(nums) < 2 or len(set(nums)) == 1:
             return [False] * len(values)
@@ -803,6 +897,8 @@ def compare_html(records: list[dict[str, Any] | None]) -> str:
 
 
 def _on(value: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: renders a setting value: "not set", an on/off status for booleans, else bold escaped text.
     if value is None or value == "":
         return '<span class="faint">not set</span>'
     if isinstance(value, bool):
@@ -811,11 +907,15 @@ def _on(value: Any) -> str:
 
 
 def _ticks(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: escapes text and renders `backticked` spans as code.
     """Escape, then show `backticked` words as code."""
     return re.sub(r"`([^`]+)`", r"<code>\1</code>", _e(text))
 
 
 def _ready(ok: bool) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns a ready/unavailable status badge.
     return (
         '<span class="hb-status ok">ready</span>'
         if ok
@@ -826,6 +926,12 @@ def _ready(ok: bool) -> str:
 def setup_html(
     caps: Any, datasets: list[str], settings: ui_settings.UISettings | None = None
 ) -> str:
+    # [FUNCTION DOC]
+    # Builds the Setup view: server endpoint panel (model, endpoint host, capture level, proxy
+    # URL and whether visitors may use it) or a "none" note; datasets with task counts and
+    # errors; sandbox readiness; deployment settings table from ui_settings.ROWS with current
+    # values, env var/flag and help (run history shows the directory); and agents sorted
+    # validated first with dialect, where they run and status.
     from .serving import HarborService
 
     settings = settings or ui_settings.load()
@@ -889,6 +995,8 @@ def setup_html(
         wide: bool = False,
         table: bool = False,
     ) -> str:
+        # [FUNCTION DOC]
+        # HELPER: wraps body in a titled panel (optionally wide; table bodies not padded).
         inner = body if table else f'<div class="hb-panel-b">{body}</div>'
         return (
             f'<section class="hb-panel{" wide" if wide else ""}"><div class="hb-panel-h"><h3>{icon(ic, 15)}{_e(title)}</h3>'

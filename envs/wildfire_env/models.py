@@ -1,3 +1,6 @@
+# [MODULE DOC]
+# Pydantic models for the wildfire environment. Grid cells are ints: 0 ash, 1 fuel, 2 burning,
+# 3 firebreak, 4 watered/damp.
 from typing import List, Optional
 
 from openenv.core.env_server.interfaces import Action, Observation, State
@@ -9,6 +12,9 @@ from pydantic import Field
 
 
 class WildfireAction(Action):
+    # [CLASS DOC]
+    # Action with a name ("break" to build a firebreak, "water" to drop water, "wait") and optional x/y target
+    # coordinates (required by water/break).
     """Action for wildfire environment.
 
     action: "break" (build firebreak), "water" (drop water), "wait"
@@ -21,6 +27,11 @@ class WildfireAction(Action):
 
 
 class WildfireObservation(Observation):
+    # [CLASS DOC]
+    # Observation with the flattened grid, width, height, step, wind direction (8 compass points or CALM),
+    # humidity in [0, 1], burning cell count, ash cell count, a reward hint and remaining water/firebreaks.
+    # KNOWN ISSUE: burned_count is commented as cumulative, but the server reports the current number of ash
+    # cells (equal in practice, since ash never changes back).
     """Observation from wildfire environment."""
 
     grid: List[int]  # flattened grid H*W, ints in {0..4}
@@ -37,6 +48,9 @@ class WildfireObservation(Observation):
 
 
 class WildfireState(State):
+    # [CLASS DOC]
+    # State with episode id, step count, total burned and extinguished cells, last action, grid size, wind,
+    # humidity, remaining resources, the full grid and per-cell burn/damp timers.
     """State for wildfire environment."""
 
     episode_id: str = ""

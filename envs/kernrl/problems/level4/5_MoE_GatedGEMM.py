@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# kernrl problem (level 4): Mixtral-style MoE SwiGLU expert computation given
+# precomputed routing (8 experts, top-2, hidden 4096, intermediate 14336, batch
+# 4 x 2048 tokens). The reference sorts token-expert pairs by expert and loops
+# over experts.
 import math
 
 import torch
@@ -21,6 +26,9 @@ import torch.nn.functional as F
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference MoE expert layer with stacked per-expert gate, up and down weight
+    # tensors (random normal * 0.02).
     """
     MoE Expert with Gated GEMM (SiLU-gated FFN).
 
@@ -46,6 +54,8 @@ class Model(nn.Module):
         intermediate_size: int,
         num_experts: int,
     ):
+        # [FUNCTION DOC]
+        # Stores sizes and creates the stacked expert weight parameters.
         super().__init__()
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
@@ -69,6 +79,12 @@ class Model(nn.Module):
         expert_indices: torch.Tensor,  # (batch, seq_len, top_k) - selected expert indices
         expert_weights: torch.Tensor,  # (batch, seq_len, top_k) - routing weights
     ) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Flattens tokens and their (expert index, weight) slots, sorts slots by expert,
+        # gathers the corresponding token rows, and for each expert with assigned slots
+        # computes down(silu(gate(x)) * up(x)) on its contiguous block. Multiplies each
+        # slot output by its routing weight and scatter-adds back to token positions.
+        # Returns (batch, seq_len, hidden_size).
         """
         MoE forward with gated dual GEMM.
 
@@ -147,6 +163,10 @@ top_k = 2  # Each token routed to 2 experts
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns random x (batch, seq, hidden), expert indices choosing top_k distinct
+    # experts per token via random permutations, and softmax-normalized random
+    # routing weights (batch, seq, top_k).
     x = torch.randn(batch_size, seq_len, hidden_size)
 
     # Random expert selection (in real MoE, this comes from gating network)
@@ -161,4 +181,6 @@ def get_inputs():
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [hidden_size, intermediate_size, num_experts].
     return [hidden_size, intermediate_size, num_experts]

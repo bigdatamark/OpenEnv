@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Trainer-side whole-rollout API: data types for tool results, verification, events,
+# traces and limits; protocols for model steps and loop-owning/trainable sessions; the
+# TraceEntry schema; abstract ResourceSession, session factory and HarnessAdapter;
+# concrete adapters (StepEnvSessionAdapter wrapping a reset/step client, an in-process
+# MCP JSON-RPC bridge, a white-box MCP tool loop, a black-box CLI runner wrapper); reward
+# resolution that forbids synthesizing rewards outside the environment; and a TRL-style
+# rollout function builder. RESERVED_TOOL_NAMES are reset/step/state/close.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Trainer-side rollout helpers for driving environments with a harness loop.
@@ -37,6 +45,8 @@ RESERVED_TOOL_NAMES = frozenset({"reset", "step", "state", "close"})
 
 @dataclass
 class ToolResult:
+    # [CLASS DOC]
+    # Normalized tool invocation result: data, done flag, metadata dict, optional error string.
     """Normalized result from a resource session tool invocation."""
 
     data: Any = None
@@ -47,6 +57,9 @@ class ToolResult:
 
 @dataclass
 class VerifyResult:
+    # [CLASS DOC]
+    # Post-rollout verification output: env_reward (forwarded from the environment, may be
+    # None), done, metrics and artifacts.
     """Final rollout data produced after a rollout completes.
 
     ``env_reward`` must forward reward already produced inside the environment.
@@ -61,6 +74,8 @@ class VerifyResult:
 
 @dataclass
 class RolloutEvent:
+    # [CLASS DOC]
+    # Rollout event with a type string and payload dict.
     """Event emitted while a harness drives a rollout."""
 
     type: str
@@ -69,6 +84,8 @@ class RolloutEvent:
 
 @dataclass
 class ToolTraceEntry:
+    # [CLASS DOC]
+    # Record of one harness tool call: tool name, arguments and ToolResult.
     """Record of a tool call issued by the harness."""
 
     tool_name: str
@@ -78,6 +95,9 @@ class ToolTraceEntry:
 
 @dataclass
 class ModelStepResult:
+    # [CLASS DOC]
+    # Output of one model step: the LLMResponse plus optional prompt ids, completion ids and
+    # logprobs (empty lists by default).
     """Structured output from one white-box model sampling step."""
 
     response: LLMResponse
@@ -88,6 +108,9 @@ class ModelStepResult:
 
 @dataclass
 class HarnessRolloutResult:
+    # [CLASS DOC]
+    # Full rollout result: messages, tool trace, events, done, metrics, and concatenated
+    # prompt ids, completion ids and logprobs across all model steps.
     """Complete result of a harness-driven rollout."""
 
     messages: list[Message] = field(default_factory=list)
@@ -102,6 +125,9 @@ class HarnessRolloutResult:
 
 @dataclass
 class HarnessRunLimits:
+    # [CLASS DOC]
+    # Rollout limits: max_turns (default 10), optional per-turn and total tool-call caps, and
+    # sampling params passed to each model step.
     """Execution limits for harness-driven rollouts."""
 
     max_turns: int = 10
@@ -111,6 +137,9 @@ class HarnessRunLimits:
 
 
 class ModelStep(Protocol):
+    # [CLASS DOC]
+    # Protocol for a callable that, given messages, tools and sampling params, returns a
+    # ModelStepResult.
     """Callable used by white-box harnesses to sample the next model turn."""
 
     def __call__(
@@ -122,6 +151,11 @@ class ModelStep(Protocol):
 
 
 class TraceEntry(TypedDict, total=False):
+    # [CLASS DOC]
+    # TypedDict (all keys optional) describing one captured model call of a loop-owning
+    # rollout: request, response, prompt_token_ids (engine tokenization), completion_token_ids,
+    # completion_tokens (string fallback), per_token_logps, loss_mask over prompt+completion,
+    # reward (mirror of verify(); None means unscored) and metadata. Type definition only.
     """One captured model call from a loop-owning rollout: the request, the reply, and the tokens.
 
     Defined HERE, not in the trainer. A loop-owning harness (the agent runs its own tool loop and
@@ -187,6 +221,9 @@ class TraceEntry(TypedDict, total=False):
 
 @runtime_checkable
 class LoopOwningSession(Protocol):
+    # [CLASS DOC]
+    # Runtime-checkable protocol for sessions whose external agent runs its own loop: must
+    # provide wait_for_completion and fetch_proxy_trace (only method presence is checked).
     """What a session must offer BEYOND `ResourceSession` when the agent owns its own loop.
 
     In the loop-owning path nothing calls `step()` per turn -- an external agent (opencode, codex,
@@ -213,6 +250,9 @@ class LoopOwningSession(Protocol):
 
 @runtime_checkable
 class TrainableSession(Protocol):
+    # [CLASS DOC]
+    # Runtime-checkable protocol for loop-owning sessions that provide validated
+    # TrainingTrace captures (wait_for_completion and fetch_training_trace).
     """A loop-owning session that supplies validated, masked engine captures."""
 
     def wait_for_completion(self, timeout_s: float | None = ...) -> int: ...
@@ -221,18 +261,27 @@ class TrainableSession(Protocol):
 
 
 class ResourceSession(ABC):
+    # [CLASS DOC]
+    # Abstract per-rollout session exposed to harnesses: initial messages, tool manifest,
+    # tool calls, verification and close.
     """Per-rollout environment/resource session exposed to harnesses."""
 
     @abstractmethod
     def initial_messages(self) -> list[Message]:
+        # [FUNCTION DOC]
+        # Abstract. Must return the initial prompt messages.
         """Return initial prompt messages for the harness."""
 
     @abstractmethod
     def list_tools(self) -> list[Tool]:
+        # [FUNCTION DOC]
+        # Abstract. Must return the MCP-style tool list.
         """Return the MCP-style tool manifest exposed by the session."""
 
     @abstractmethod
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        # [FUNCTION DOC]
+        # Abstract. Must invoke the named tool with arguments and return a ToolResult.
         """Invoke a session tool."""
 
     @abstractmethod
@@ -241,6 +290,9 @@ class ResourceSession(ABC):
         transcript: list[Message],
         final_state: Any | None = None,
     ) -> VerifyResult:
+        # [FUNCTION DOC]
+        # Abstract. Must finalize the rollout given the transcript and optional final state and
+        # return a VerifyResult (forwarding, never synthesizing, the environment reward).
         """Finalize a rollout after the harness has stopped.
 
         This hook may add metrics or artifacts and may forward the final reward
@@ -249,6 +301,8 @@ class ResourceSession(ABC):
 
     @abstractmethod
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Abstract. Must release session resources.
         """Release session resources."""
 
 
@@ -256,6 +310,8 @@ SessionT = TypeVar("SessionT", bound=ResourceSession)
 
 
 class ResourceSessionFactory(ABC, Generic[SessionT]):
+    # [CLASS DOC]
+    # Abstract generic factory creating isolated sessions of type SessionT.
     """Factory for producing isolated per-rollout sessions.
 
     Generic over the concrete session type it creates, so a subclass such as
@@ -271,10 +327,15 @@ class ResourceSessionFactory(ABC, Generic[SessionT]):
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> SessionT:
+        # [FUNCTION DOC]
+        # Abstract. Must create one session for task, with optional seed and episode id.
         """Create one isolated resource session for a rollout."""
 
 
 class HarnessAdapter(ABC):
+    # [CLASS DOC]
+    # Abstract harness driver interface with white-box (trainer samples) and black-box
+    # (opaque harness) rollout methods.
     """Interface implemented by harness drivers."""
 
     @abstractmethod
@@ -284,6 +345,8 @@ class HarnessAdapter(ABC):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # Abstract. Must run a rollout using model_step for sampling and return the result.
         """Run a rollout while the trainer owns model sampling."""
 
     @abstractmethod
@@ -292,10 +355,15 @@ class HarnessAdapter(ABC):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # Abstract. Must run an opaque (evaluation-only) rollout and return the result.
         """Run a rollout with an opaque harness (evaluation-only path)."""
 
 
 def _serialize_for_message(value: Any) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns "" for None, the string itself for strings, otherwise JSON with sorted
+    # keys (str() fallback for non-serializable values).
     """Convert structured tool data to a stable text payload."""
 
     if value is None:
@@ -306,6 +374,8 @@ def _serialize_for_message(value: Any) -> str:
 
 
 def _state_to_data(state: Any) -> Any:
+    # [FUNCTION DOC]
+    # HELPER: Returns None for None, state.model_dump() if available, else the state unchanged.
     """Convert state objects to plain data for metrics and artifacts."""
 
     if state is None:
@@ -316,6 +386,9 @@ def _state_to_data(state: Any) -> Any:
 
 
 def _tool_result_reward(tool_result: ToolResult) -> float | None:
+    # [FUNCTION DOC]
+    # HELPER: Returns float(metadata["reward"]), else float(data["reward"]) when data is a
+    # dict, else None.
     """Extract the environment reward already emitted by a tool result."""
 
     reward = tool_result.metadata.get("reward")
@@ -330,6 +403,10 @@ def _resolve_env_reward(
     rollout: HarnessRolloutResult,
     verify: VerifyResult,
 ) -> float:
+    # [FUNCTION DOC]
+    # HELPER: Determines the episode reward: the last non-None reward in the tool trace,
+    # else verify.env_reward.
+    # Raises: ValueError if both exist and differ (beyond rel 1e-9 / abs 1e-6), or neither exists.
     """Resolve the final environment reward without allowing external synthesis."""
 
     trace_reward: float | None = None
@@ -361,6 +438,11 @@ def _resolve_env_reward(
 
 
 class StepEnvSessionAdapter(ResourceSession):
+    # [CLASS DOC]
+    # ResourceSession wrapping an existing reset/step/state client (using client.sync() when
+    # available). Tools are given explicitly; each call becomes one client step built by
+    # action_builder; tool results, initial messages and verification are built by callbacks
+    # (with defaults for results and verification).
     """Expose an existing step/reset/state client as a resource session."""
 
     def __init__(
@@ -385,6 +467,11 @@ class StepEnvSessionAdapter(ResourceSession):
         | None = None,
         reset_kwargs: dict[str, Any] | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores builders and tool specs, rejects reserved tool names (ValueError), builds reset
+        # kwargs (seed and episode_id added unless already present), calls client.reset and reads
+        # state. If reset or state reading fails, closes the session and re-raises.
+        # Side effects: resets the remote environment.
         if hasattr(client, "sync") and callable(client.sync):
             self._client = client.sync()
         else:
@@ -421,6 +508,8 @@ class StepEnvSessionAdapter(ResourceSession):
             raise
 
     def _read_state(self) -> Any:
+        # [FUNCTION DOC]
+        # HELPER: Returns client.state() if the client has a callable state, else None.
         if hasattr(self._client, "state") and callable(self._client.state):
             return self._client.state()
         return None
@@ -432,6 +521,9 @@ class StepEnvSessionAdapter(ResourceSession):
         result: StepResult[Any],
         state: Any,
     ) -> ToolResult:
+        # [FUNCTION DOC]
+        # HELPER: Default tool result: data with tool name, arguments, observation, reward and
+        # done; done flag; metadata with reward and plain-data state.
         return ToolResult(
             data={
                 "tool_name": tool_name,
@@ -454,6 +546,10 @@ class StepEnvSessionAdapter(ResourceSession):
         last_result: StepResult[Any] | None,
         state: Any,
     ) -> VerifyResult:
+        # [FUNCTION DOC]
+        # HELPER: Default verification: env_reward and done from the last step result (None /
+        # False if no step), step_count metric from a State or dict, artifacts final_state and
+        # transcript_length.
         reward = None if last_result is None else last_result.reward
         done = False if last_result is None else bool(last_result.done)
         metrics = {}
@@ -473,12 +569,20 @@ class StepEnvSessionAdapter(ResourceSession):
         )
 
     def initial_messages(self) -> list[Message]:
+        # [FUNCTION DOC]
+        # Returns the initial messages built from the reset result and task (as a new list).
         return list(self._initial_messages_builder(self._initial_result, self._task))
 
     def list_tools(self) -> list[Tool]:
+        # [FUNCTION DOC]
+        # Returns a copy of the tool specs.
         return list(self._tool_specs)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        # [FUNCTION DOC]
+        # Builds an action, steps the client, reads state, records last result/state, and returns
+        # the built ToolResult.
+        # Raises: KeyError for reserved or unknown tool names; client errors propagate.
         if name in RESERVED_TOOL_NAMES:
             raise KeyError(f"Reserved orchestration tool: {name}")
         if name not in self._tools_by_name:
@@ -496,6 +600,9 @@ class StepEnvSessionAdapter(ResourceSession):
         transcript: list[Message],
         final_state: Any | None = None,
     ) -> VerifyResult:
+        # [FUNCTION DOC]
+        # Returns the verify builder's result for the transcript, final state, last step result
+        # and last state.
         return self._verify_builder(
             list(transcript),
             final_state,
@@ -504,6 +611,8 @@ class StepEnvSessionAdapter(ResourceSession):
         )
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the client once (if it has a callable close); later calls are no-ops.
         if self._closed:
             return
         self._closed = True
@@ -512,12 +621,23 @@ class StepEnvSessionAdapter(ResourceSession):
 
 
 class SessionMCPBridge:
+    # [CLASS DOC]
+    # In-process MCP JSON-RPC 2.0 bridge over a ResourceSession (tools/list and tools/call).
     """Expose a resource session through an in-process MCP JSON-RPC bridge."""
 
     def __init__(self, session: ResourceSession):
+        # [FUNCTION DOC]
+        # Stores the session.
         self.session = session
 
     def handle_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC]
+        # Handles one JSON-RPC request dict and returns a response dict.
+        # Non-"2.0" jsonrpc -> INVALID_REQUEST. tools/list -> list of {name, description,
+        # inputSchema}. tools/call -> INVALID_PARAMS if name missing or reserved; calls the
+        # session tool and returns {data, done, metadata, error}; KeyError -> METHOD_NOT_FOUND,
+        # ValueError -> INVALID_PARAMS, other exceptions -> INTERNAL_ERROR. Other methods ->
+        # METHOD_NOT_FOUND. Never raises for tool errors.
         request_id = request.get("id")
         method = request.get("method")
         params = request.get("params", {}) or {}
@@ -600,6 +720,8 @@ class SessionMCPBridge:
 
 
 class MCPHarnessAdapter(HarnessAdapter):
+    # [CLASS DOC]
+    # White-box harness implementing a simple MCP tool-calling loop.
     """White-box harness that follows an MCP tool-calling loop."""
 
     def run_white_box(
@@ -608,6 +730,18 @@ class MCPHarnessAdapter(HarnessAdapter):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # Runs up to max_turns: calls model_step with messages, tools and sampling; appends the
+        # assistant message and token data; records a model_response event. No tool calls ends
+        # the rollout (done). Otherwise executes tool calls (optionally truncated per turn),
+        # appending ToolTraceEntry, a tool_call event and a tool message (serialized data) for
+        # each; a done tool result ends the rollout. When the total tool-call cap is reached,
+        # sets metrics["truncated"] and returns immediately.
+        # Returns: HarnessRolloutResult with messages and default metrics turns and tool_calls.
+        # KNOWN ISSUE: when tool calls are truncated (per-turn cap, total cap, or an early done
+        # result), the assistant message still lists all tool calls but some never receive tool
+        # messages, leaving an inconsistent transcript; the early total-cap return also skips the
+        # turns/tool_calls metrics.
         run_limits = limits or HarnessRunLimits()
         messages = list(session.initial_messages())
         tools = session.list_tools()
@@ -706,6 +840,8 @@ class MCPHarnessAdapter(HarnessAdapter):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # Always raises NotImplementedError (white-box only).
         raise NotImplementedError(
             "MCPHarnessAdapter is a white-box harness. "
             "Use CLIHarnessAdapter for opaque evaluation harnesses."
@@ -713,6 +849,9 @@ class MCPHarnessAdapter(HarnessAdapter):
 
 
 class CLIHarnessAdapter(HarnessAdapter):
+    # [CLASS DOC]
+    # Black-box adapter delegating to a runner callable that receives a SessionMCPBridge, the
+    # session and limits.
     """Thin black-box adapter for opaque CLI-style harnesses."""
 
     def __init__(
@@ -722,6 +861,8 @@ class CLIHarnessAdapter(HarnessAdapter):
             HarnessRolloutResult,
         ],
     ):
+        # [FUNCTION DOC]
+        # Stores the runner callable.
         self._runner = runner
 
     def run_white_box(
@@ -730,6 +871,8 @@ class CLIHarnessAdapter(HarnessAdapter):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # Always raises NotImplementedError (black-box only).
         raise NotImplementedError(
             "CLIHarnessAdapter only supports black-box evaluation rollouts."
         )
@@ -739,6 +882,8 @@ class CLIHarnessAdapter(HarnessAdapter):
         session: ResourceSession,
         limits: HarnessRunLimits | None = None,
     ) -> HarnessRolloutResult:
+        # [FUNCTION DOC]
+        # Builds a SessionMCPBridge and returns runner(bridge, session, limits or defaults).
         run_limits = limits or HarnessRunLimits()
         bridge = SessionMCPBridge(session)
         return self._runner(bridge, session, run_limits)
@@ -752,9 +897,19 @@ def build_harness_rollout_func(
     limits: HarnessRunLimits | None = None,
     reward_key: str = "env_reward",
 ) -> Callable[[list[Any], Any], dict[str, list[Any]]]:
+    # [FUNCTION DOC]
+    # Builds a TRL-style rollout function using the session factory, harness adapter, a
+    # model-step builder, optional limits and the reward column name (default "env_reward").
     """Build a TRL-compatible rollout function from sessions and harnesses."""
 
     def rollout_func(prompts: list[Any], trainer: Any) -> dict[str, list[Any]]:
+        # [FUNCTION DOC]
+        # For each prompt: creates a session (task=prompt), builds a model step, runs a white-box
+        # rollout, verifies with a final_state of done/metrics/events/tool trace, collects prompt
+        # ids, completion ids, logprobs, resolved reward and verify metrics; always closes the
+        # session.
+        # Returns: dict with prompt_ids, completion_ids, logprobs, <reward_key> and verify_metrics lists.
+        # Raises: propagates rollout, verification and reward-resolution errors.
         all_prompt_ids: list[list[int]] = []
         all_completion_ids: list[list[int]] = []
         all_logprobs: list[list[float]] = []

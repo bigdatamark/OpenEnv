@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 4): Grouped Query Attention with RoPE and a causal
+# mask (32 query heads sharing 8 KV heads, head dim 128, hidden 4096, batch 4,
+# sequence 2048). The naive reference explicitly repeats KV heads.
 import math
 
 import torch
@@ -22,6 +26,8 @@ import torch.nn.functional as F
 
 
 def rotate_half(x):
+    # [FUNCTION DOC]
+    # HELPER: Returns x with last-dim halves swapped and the new first half negated.
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
@@ -29,6 +35,9 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb(q, k, cos, sin):
+    # [FUNCTION DOC]
+    # HELPER: Applies rotary embedding to q and k with precomputed cos/sin
+    # (already broadcastable). Returns (q_embed, k_embed).
     """Apply rotary positional embeddings."""
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
@@ -36,7 +45,11 @@ def apply_rotary_pos_emb(q, k, cos, sin):
 
 
 class RotaryEmbedding(nn.Module):
+    # [CLASS DOC]
+    # HELPER: Rotary embedding generator with inverse frequency buffer.
     def __init__(self, dim, max_position_embeddings=4096, base=10000.0):
+        # [FUNCTION DOC]
+        # Stores dim, max positions and base and registers the inverse frequencies.
         super().__init__()
         self.dim = dim
         self.max_position_embeddings = max_position_embeddings
@@ -48,6 +61,9 @@ class RotaryEmbedding(nn.Module):
 
     @torch.no_grad()
     def forward(self, x, seq_len=None):
+        # [FUNCTION DOC]
+        # Without gradients, returns (cos, sin) for positions 0..seq_len-1 (default
+        # x.shape[-2]) with shape (1, 1, seq_len, dim).
         if seq_len is None:
             seq_len = x.shape[-2]
         t = torch.arange(seq_len, device=x.device, dtype=torch.float32)
@@ -57,6 +73,9 @@ class RotaryEmbedding(nn.Module):
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference GQA layer with bias-free Q/K/V/O projections, RoPE, and softmax
+    # scale head_dim^-0.5.
     """
     Grouped Query Attention (GQA)
 
@@ -83,6 +102,9 @@ class Model(nn.Module):
         rope_theta: float = 10000.0,
         attention_dropout: float = 0.0,
     ):
+        # [FUNCTION DOC]
+        # Stores dimensions, the query-per-KV group size, dropout and scale, and creates
+        # projections and the rotary embedding.
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_attention_heads
@@ -106,6 +128,10 @@ class Model(nn.Module):
         )
 
     def repeat_kv(self, hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # HELPER: Repeats each KV head n_rep times along the head dimension:
+        # (batch, kv_heads, seq, dim) -> (batch, kv_heads * n_rep, seq, dim). Returns the
+        # input unchanged when n_rep is 1.
         """
         Expand KV heads to match query heads.
         This is the INEFFICIENT operation that should be avoided in fused kernel.
@@ -122,6 +148,11 @@ class Model(nn.Module):
         return hidden_states.reshape(batch, num_kv_heads * n_rep, seq_len, head_dim)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Projects to per-head Q and KV, applies RoPE, repeats KV heads to match
+        # queries, computes scaled scores with a causal mask, float32 softmax, dropout
+        # (training only), weighted values, merges heads and applies the output
+        # projection. Returns (batch, seq_len, hidden_size).
         bsz, q_len, _ = hidden_states.size()
 
         # Project Q, K, V
@@ -194,10 +225,15 @@ max_position_embeddings = 4096
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, seq_len, hidden_size).
     return [torch.randn(batch_size, seq_len, hidden_size)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [hidden_size, num_attention_heads, num_key_value_heads, head_dim,
+    # max_position_embeddings].
     return [
         hidden_size,
         num_attention_heads,

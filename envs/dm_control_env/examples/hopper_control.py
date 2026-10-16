@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script driving the hopper domain through a dm_control server at http://localhost:8000: headless
+# periodic random force bursts, SPACE-triggered random forces with a pygame status window, or a visual mode with
+# rendered frames. Side effects at import: prepends the env directory to sys.path.
 """Interactive hopper control via OpenEnv.
 
 This example demonstrates using the dm_control OpenEnv client with
@@ -33,6 +37,8 @@ from models import DMControlAction
 
 
 def get_action_dim(env: DMControlEnv) -> int:
+    # [FUNCTION DOC]
+    # Returns the first entry of state.action_spec["shape"] when present, else 4.
     """Get the action dimension from the environment state."""
     state = env.state()
     action_spec = state.action_spec
@@ -45,17 +51,24 @@ def get_action_dim(env: DMControlEnv) -> int:
 
 
 def generate_random_action(action_dim: int, magnitude: float = 1.0) -> DMControlAction:
+    # [FUNCTION DOC]
+    # Returns a DMControlAction with action_dim uniform values in [-magnitude, magnitude].
     """Generate a random action with values in [-magnitude, magnitude]."""
     values = [random.uniform(-magnitude, magnitude) for _ in range(action_dim)]
     return DMControlAction(values=values)
 
 
 def generate_zero_action(action_dim: int) -> DMControlAction:
+    # [FUNCTION DOC]
+    # Returns a DMControlAction of action_dim zeros.
     """Generate a zero action (no force applied)."""
     return DMControlAction(values=[0.0] * action_dim)
 
 
 def run_headless(env: DMControlEnv, task: str = "hop", max_steps: int = 1000):
+    # [FUNCTION DOC]
+    # Resets hopper/<task>; for up to max_steps (1000) or until done applies random actions (magnitude 0.8) for the
+    # first 5 of every 30 steps and zeros otherwise; prints progress every 100 steps.
     """Run hopper control in headless mode."""
     print("\n=== Headless Mode (OpenEnv Step/Observation Pattern) ===")
     print("This mode demonstrates the OpenEnv API with the hopper.\n")
@@ -108,6 +121,9 @@ def run_headless(env: DMControlEnv, task: str = "hop", max_steps: int = 1000):
 
 
 def run_interactive(env: DMControlEnv, task: str = "hop"):
+    # [FUNCTION DOC]
+    # pygame loop at 30 FPS: random actions (magnitude 2.0) while SPACE is held, else zeros; R resets, ESC/Q quits,
+    # auto-reset when done.
     """Run interactive control with keyboard input via pygame."""
     import pygame
 
@@ -206,6 +222,9 @@ def run_interactive(env: DMControlEnv, task: str = "hop"):
 
 
 def run_visual(env: DMControlEnv, task: str = "hop"):
+    # [FUNCTION DOC]
+    # Same control as run_interactive with render=True, displaying decoded PNG frames.
+    # Side effects: exits with status 1 if no pixels are returned.
     """Run with pygame visualization showing rendered frames."""
     import base64
     import io
@@ -313,6 +332,9 @@ def run_visual(env: DMControlEnv, task: str = "hop"):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --visual, --headless, --max-steps, --task (stand, hop), connects, prints state and runs the selected mode;
+    # exits with status 1 on ConnectionError.
     parser = argparse.ArgumentParser(
         description="Interactive hopper control via OpenEnv"
     )

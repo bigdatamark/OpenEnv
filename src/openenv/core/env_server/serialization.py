@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# Conversion helpers between JSON dicts and Action/Observation pydantic models
+# used by the HTTP server, WebSocket handler and web interface. MCP action
+# payloads ("list_tools", "call_tool") are mapped to their MCP action classes
+# when the environment's action class is the generic Action or an MCP action.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -29,6 +34,10 @@ def _deserialize_mcp_action(
 ) -> Action | None:
     # Only intercept when action_cls is the generic Action base or itself an
     # MCP type. This keeps env-specific action validation authoritative.
+    # [FUNCTION DOC]
+    # HELPER: If action_data's "type" is "list_tools" or "call_tool" and action_cls
+    # is Action or one of the MCP action classes, returns the validated MCP action
+    # (ValidationError on invalid data); otherwise None.
     action_type = action_data.get("type")
     if action_type not in _MCP_ACTION_TYPES:
         return None
@@ -41,6 +50,12 @@ def _deserialize_mcp_action(
 
 
 def deserialize_action(action_data: Dict[str, Any], action_cls: Type[Action]) -> Action:
+    # [FUNCTION DOC]
+    # Returns the MCP action from _deserialize_mcp_action if applicable, else
+    # action_cls.model_validate(action_data). Raises ValidationError.
+    # KNOWN ISSUE: the docstring says MCP types are recognized regardless of
+    # action_cls, but the code only does so when action_cls is the base Action or an
+    # MCP action class.
     """
     Convert JSON dict to Action instance using Pydantic validation.
 
@@ -74,6 +89,13 @@ def deserialize_action(action_data: Dict[str, Any], action_cls: Type[Action]) ->
 def deserialize_action_with_preprocessing(
     action_data: Dict[str, Any], action_cls: Type[Action]
 ) -> Action:
+    # [FUNCTION DOC]
+    # Like deserialize_action, with web-form fixes: for call_tool payloads a string
+    # "arguments" is parsed as JSON (left as-is if invalid) before the MCP check.
+    # For other payloads, "tokens" given as a list or JSON string (invalid JSON
+    # becomes an empty list) is converted to a torch long tensor when torch is
+    # installed (else kept as a list), and a string "action_id" is converted to int
+    # when possible. Then validates with action_cls. Raises ValidationError.
     """
     Convert JSON dict to Action instance with preprocessing for special types.
 
@@ -145,6 +167,10 @@ def deserialize_action_with_preprocessing(
 
 
 def serialize_observation(observation: Observation) -> Dict[str, Any]:
+    # [FUNCTION DOC]
+    # Returns {"observation": model_dump of the observation excluding reward and
+    # done (metadata stays inside), "reward", "done"}, plus a top-level "metadata"
+    # when the observation's metadata is non-empty.
     """
     Convert Observation instance to JSON-compatible dict using Pydantic.
 

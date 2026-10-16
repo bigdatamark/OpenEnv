@@ -1,3 +1,5 @@
+# [PACKAGE DOC]
+# Wildfire server subpackage. Re-exports WildfireEnvironment.
 # Copyright (c) Arizona State University and contributors.
 # All rights reserved.
 #

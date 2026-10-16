@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# kernrl problem (level 4): weight-only INT4 GEMM with GPTQ-style symmetric
+# group quantization (packed two nibbles per byte, per-group fp16 scales,
+# implicit zero point 8), x (4, 2048, 4096) fp16 against N = 11008 outputs,
+# group size 128. The reference dequantizes the full weight before matmul.
 import torch
 import torch.nn as nn
 
@@ -25,6 +30,9 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference INT4 linear layer holding random packed weights (N, K/2) uint8 and
+    # random positive per-group scales (N, K/group_size) fp16 as buffers.
     """
     INT4 Weight-Only Quantized Linear Layer with Symmetric Quantization.
 
@@ -47,6 +55,10 @@ class Model(nn.Module):
     """
 
     def __init__(self, K: int, N: int, group_size: int = 128):
+        # [FUNCTION DOC]
+        # Stores K, N, group size and group count, asserts K is divisible by the group
+        # size and even, and registers random packed weights and scales.
+        # Raises: AssertionError on invalid sizes.
         super().__init__()
         self.K = K
         self.N = N
@@ -70,6 +82,9 @@ class Model(nn.Module):
         )
 
     def unpack_int4(self, packed: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Unpacks (N, K/2) uint8 into (N, K) int32 values 0..15, low nibble first then
+        # high nibble for each byte.
         """
         Unpack INT4 weights from packed uint8 format.
 
@@ -89,6 +104,9 @@ class Model(nn.Module):
         return unpacked
 
     def dequantize_weights(self) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the (N, K) fp16 dequantized weights: per-group scale (repeated across
+        # each group's columns) times (unpacked value - 8).
         """
         Dequantize INT4 weights to FP16 using symmetric quantization.
 
@@ -111,6 +129,9 @@ class Model(nn.Module):
         return w_dequant
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Dequantizes the weights, flattens x to (batch*seq, K), multiplies by the
+        # transposed weights and returns (batch, seq_len, N).
         """
         INT4 quantized linear: Y = X @ W_dequant.T
 
@@ -149,8 +170,12 @@ group_size = 128  # Standard group size for GPTQ
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random fp16 of shape (batch_size, seq_len, K).
     return [torch.randn(batch_size, seq_len, K, dtype=torch.float16)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [K, N, group_size].
     return [K, N, group_size]

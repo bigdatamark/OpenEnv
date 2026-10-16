@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# kernrl problem (level 4): dynamically quantized FP8 GEMM using
+# torch._scaled_mm (per-tensor scales, E4M3 by default), x (8, 2048, 4096) fp16
+# times a 4096 x 4096 weight. Requires a GPU and PyTorch with FP8 support.
 import torch
 import torch.nn as nn
 
@@ -21,6 +25,12 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference FP8 linear layer: holds a (K, N) weight (random normal * 0.02) and
+    # the chosen FP8 dtype with its maximum representable magnitude (448 for E4M3,
+    # 57344 for E5M2).
+    # KNOWN ISSUE: comments say the weight is stored in FP16, but it is created in
+    # float32 (the default dtype).
     """
     FP8 Matrix Multiplication using torch._scaled_mm for tensor core acceleration.
 
@@ -47,6 +57,9 @@ class Model(nn.Module):
     """
 
     def __init__(self, M: int, K: int, N: int, use_e4m3: bool = True):
+        # [FUNCTION DOC]
+        # Stores M, K, N (M is unused), the format choice, FP8 dtype and max, and
+        # creates the weight parameter.
         super().__init__()
         self.M = M
         self.K = K
@@ -66,18 +79,28 @@ class Model(nn.Module):
         self.weight = nn.Parameter(torch.randn(K, N) * 0.02)
 
     def compute_scale(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns the per-tensor quantization scale fp8_max / max(abs(x)) (amax clamped
+        # to at least 1e-12).
         """Compute per-tensor scale for FP8 quantization."""
         amax = x.abs().max()
         scale = self.fp8_max / amax.clamp(min=1e-12)
         return scale
 
     def quantize_to_fp8(self, x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Returns x * scale clamped to +/- fp8_max and cast to the FP8 dtype.
         """Quantize FP16/BF16 tensor to FP8."""
         x_scaled = x * scale
         x_clamped = x_scaled.clamp(-self.fp8_max, self.fp8_max)
         return x_clamped.to(self.fp8_dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Flattens x to (batch*seq, K), computes dynamic scales for x and the weight,
+        # quantizes x and the transposed weight to FP8, and calls torch._scaled_mm with
+        # the inverse scales and the input dtype as output dtype. Returns
+        # (batch, seq_len, N).
         """
         FP8 matmul using tensor cores: x @ weight
 
@@ -137,8 +160,12 @@ use_e4m3 = True  # E4M3 is more common for weights/activations
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random fp16 of shape (batch_size, seq_len, K).
     return [torch.randn(batch_size, seq_len, K, dtype=torch.float16)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [M, K, N, use_e4m3].
     return [M, K, N, use_e4m3]

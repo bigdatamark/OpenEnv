@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Tests for repl_env: the sandboxed PythonExecutor, recursive controller, REPLEnvironment (reset,
+# step, FINAL/FINAL_VAR/answer-dict termination, iteration limits, rubrics, injected LLM helpers,
+# HF-backed recursion), models, the LocalREPLEnv helper, LocalRLMRunner recursion limits/timeouts/
+# callbacks with scripted chat functions, and the REPLEnv client with a stubbed transport. Skipped
+# without smolagents.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Tests for the REPL Environment."""
@@ -23,9 +29,13 @@ from repl_env.server.repl_environment import REPLEnvironment
 
 
 class TestPythonExecutor:
+    # [CLASS DOC]
+    # PythonExecutor behaviour.
     """Tests for the PythonExecutor class."""
 
     def test_basic_execution(self):
+        # [FUNCTION DOC]
+        # Assignments succeed and are readable via get_variable.
         """Test basic code execution."""
         executor = PythonExecutor()
         result = executor.execute("x = 1 + 1")
@@ -33,6 +43,8 @@ class TestPythonExecutor:
         assert executor.get_variable("x") == 2
 
     def test_stdout_capture(self):
+        # [FUNCTION DOC]
+        # print output is captured in stdout.
         """Test stdout is captured correctly."""
         executor = PythonExecutor()
         result = executor.execute("print('hello world')")
@@ -40,6 +52,9 @@ class TestPythonExecutor:
         assert "hello world" in result["stdout"]
 
     def test_server_package_import_from_env_root(self, monkeypatch):
+        # [FUNCTION DOC]
+        # With the env root on sys.path (and cached server modules removed), server.repl_environment imports
+        # and exposes REPLEnvironment. Mutates sys.modules.
         """Importing `server.repl_environment` from env root should work."""
         env_root = Path(__file__).resolve().parents[2] / "envs" / "repl_env"
         monkeypatch.syspath_prepend(str(env_root))
@@ -55,6 +70,10 @@ class TestPythonExecutor:
         assert hasattr(module, "REPLEnvironment")
 
     def test_server_app_imports_from_env_root_without_path_rewrite(self):
+        # [FUNCTION DOC]
+        # Runs "uv run --project . python -c import server.app" in envs/repl_env without PYTHONPATH and
+        # expects "ok". Side effects: subprocess, may install dependencies; raises CalledProcessError on
+        # failure.
         """Importing server.app from env root should work without bundled-src hacks."""
         env_root = Path(__file__).resolve().parents[2] / "envs" / "repl_env"
         env = os.environ.copy()
@@ -84,6 +103,8 @@ class TestPythonExecutor:
         assert result.stdout.strip().splitlines()[-1] == "ok"
 
     def test_stderr_capture(self):
+        # [FUNCTION DOC]
+        # A raised exception's message appears in stderr or exception.
         """Test stderr is captured correctly via exception handling.
 
         Note: smolagents.LocalPythonExecutor blocks direct sys.stderr access,
@@ -99,6 +120,8 @@ class TestPythonExecutor:
         )
 
     def test_exception_handling(self):
+        # [FUNCTION DOC]
+        # Exceptions report failure with type and message.
         """Test exception handling."""
         executor = PythonExecutor()
         result = executor.execute("raise ValueError('test error')")
@@ -108,6 +131,8 @@ class TestPythonExecutor:
         assert "test error" in result["exception"]
 
     def test_persistent_namespace(self):
+        # [FUNCTION DOC]
+        # Variables persist across executions.
         """Test that namespace persists across executions."""
         executor = PythonExecutor()
         executor.execute("x = 10")
@@ -116,12 +141,16 @@ class TestPythonExecutor:
         assert executor.get_variable("y") == 20
 
     def test_context_loading(self):
+        # [FUNCTION DOC]
+        # set_context exposes a "context" variable.
         """Test context loading."""
         executor = PythonExecutor()
         executor.set_context("Hello World")
         assert executor.get_variable("context") == "Hello World"
 
     def test_list_variables(self):
+        # [FUNCTION DOC]
+        # list_variables includes defined names.
         """Test listing variables."""
         executor = PythonExecutor()
         executor.execute("a = 1")
@@ -131,16 +160,22 @@ class TestPythonExecutor:
         assert "b" in variables
 
     def test_output_truncation(self):
+        # [FUNCTION DOC]
+        # Output longer than max_output_length is truncated.
         """Test output truncation."""
         executor = PythonExecutor(max_output_length=100)
         result = executor.execute("print('x' * 500)")
         assert len(result["stdout"]) < 200  # Should be truncated
 
     def test_inject_function(self):
+        # [FUNCTION DOC]
+        # An injected function is callable from executed code.
         """Test function injection."""
         executor = PythonExecutor()
 
         def custom_func(x):
+            # [FUNCTION DOC]
+            # HELPER: Doubles its argument.
             return x * 2
 
         executor.inject_function("double", custom_func)
@@ -149,6 +184,8 @@ class TestPythonExecutor:
         assert executor.get_variable("result") == 10
 
     def test_reset(self):
+        # [FUNCTION DOC]
+        # reset clears the namespace.
         """Test namespace reset."""
         executor = PythonExecutor()
         executor.execute("x = 10")
@@ -157,9 +194,13 @@ class TestPythonExecutor:
 
 
 class TestRecursiveController:
+    # [CLASS DOC]
+    # create_server_recursive_controller composition.
     """Tests for the recursive controller composition."""
 
     def test_direct_controller(self):
+        # [FUNCTION DOC]
+        # With max_depth 1, llm_query_fn calls the chat function and rlm_query_fn is None; closes after.
         controller = create_server_recursive_controller(
             lambda messages, model=None: "ok",
             max_depth=1,
@@ -173,9 +214,13 @@ class TestRecursiveController:
 
 
 class TestREPLEnvironment:
+    # [CLASS DOC]
+    # REPLEnvironment behaviour.
     """Tests for the REPLEnvironment class."""
 
     def test_reset_without_context(self):
+        # [FUNCTION DOC]
+        # reset without context: iteration 0, context length 0, "answer" variable available.
         """Test reset without context."""
         env = REPLEnvironment()
         obs = env.reset()
@@ -185,6 +230,8 @@ class TestREPLEnvironment:
         assert "answer" in obs.available_variables
 
     def test_reset_with_context(self):
+        # [FUNCTION DOC]
+        # reset with context exposes it with length and preview.
         """Test reset with context."""
         env = REPLEnvironment(context="Hello World")
         obs = env.reset()
@@ -194,12 +241,16 @@ class TestREPLEnvironment:
         assert obs.context_preview == "Hello World"
 
     def test_reset_with_task_prompt(self):
+        # [FUNCTION DOC]
+        # The task prompt appears in metadata.
         """Test reset with task prompt."""
         env = REPLEnvironment(task_prompt="Count the chars")
         obs = env.reset()
         assert obs.metadata["task_prompt"] == "Count the chars"
 
     def test_step_basic(self):
+        # [FUNCTION DOC]
+        # A step runs code, exposes new variables and increments iteration.
         """Test basic step execution."""
         env = REPLEnvironment(context="test context")
         env.reset()
@@ -209,6 +260,8 @@ class TestREPLEnvironment:
         assert obs.iteration == 1
 
     def test_step_with_error(self):
+        # [FUNCTION DOC]
+        # A failing step reports the exception and does not end the episode.
         """Test step with code error."""
         env = REPLEnvironment()
         env.reset()
@@ -218,6 +271,8 @@ class TestREPLEnvironment:
         assert not obs.done
 
     def test_final_pattern_basic(self):
+        # [FUNCTION DOC]
+        # Printing FINAL(42) ends the episode with final_answer "42".
         """Test FINAL() pattern."""
         env = REPLEnvironment()
         env.reset()
@@ -244,6 +299,8 @@ class TestREPLEnvironment:
         ],
     )
     def test_final_pattern_nested_parentheses(self, code, expected):
+        # [FUNCTION DOC]
+        # Parametrized: FINAL extraction balances nested parentheses and ignores trailing output.
         """FINAL(...) extraction must handle nested parentheses (rlm #75)."""
         env = REPLEnvironment()
         env.reset()
@@ -252,6 +309,8 @@ class TestREPLEnvironment:
         assert obs.metadata["final_answer"] == expected
 
     def test_final_var_pattern(self):
+        # [FUNCTION DOC]
+        # FINAL_VAR(name) returns the variable's value.
         """Test FINAL_VAR() pattern."""
         env = REPLEnvironment()
         env.reset()
@@ -261,6 +320,8 @@ class TestREPLEnvironment:
         assert obs.metadata["final_answer"] == "the answer is 42"
 
     def test_answer_dict_pattern(self):
+        # [FUNCTION DOC]
+        # Setting answer content then ready True ends with that content.
         """Test Prime Intellect style answer dict."""
         env = REPLEnvironment()
         env.reset()
@@ -270,6 +331,8 @@ class TestREPLEnvironment:
         assert obs.metadata["final_answer"] == "my answer"
 
     def test_explicit_final(self):
+        # [FUNCTION DOC]
+        # An action with is_final ends the episode and sets state.final_answer.
         """Test explicit is_final=True."""
         env = REPLEnvironment()
         env.reset()
@@ -280,6 +343,8 @@ class TestREPLEnvironment:
         assert env.state.final_answer == "explicit answer"
 
     def test_max_iterations(self):
+        # [FUNCTION DOC]
+        # Reaching max_iterations ends the episode with a "Maximum iterations" message.
         """Test max iterations limit."""
         env = REPLEnvironment(max_iterations=2)
         env.reset()
@@ -289,6 +354,8 @@ class TestREPLEnvironment:
         assert "Maximum iterations" in obs.result.stdout
 
     def test_state_property(self):
+        # [FUNCTION DOC]
+        # state exposes context and iteration.
         """Test state property."""
         env = REPLEnvironment(context="test")
         env.reset()
@@ -297,12 +364,16 @@ class TestREPLEnvironment:
         assert state.iteration == 0
 
     def test_state_not_initialized(self):
+        # [FUNCTION DOC]
+        # Accessing state before reset raises RuntimeError.
         """Test state raises error when not initialized."""
         env = REPLEnvironment()
         with pytest.raises(RuntimeError):
             _ = env.state
 
     def test_rubric_reward_on_success(self):
+        # [FUNCTION DOC]
+        # ExactMatchRubric gives 1.0 for a matching final answer.
         """Test rubric reward when final answer matches expected."""
 
         rubric = REPLRubric(outcome=ExactMatchRubric())
@@ -313,6 +384,8 @@ class TestREPLEnvironment:
         assert obs.reward == 1.0
 
     def test_rubric_reward_on_wrong_answer(self):
+        # [FUNCTION DOC]
+        # ExactMatchRubric gives 0.0 for a wrong answer.
         """Test rubric reward when final answer does not match expected."""
 
         rubric = REPLRubric(outcome=ExactMatchRubric())
@@ -323,6 +396,8 @@ class TestREPLEnvironment:
         assert obs.reward == 0.0
 
     def test_rubric_reward_on_error(self):
+        # [FUNCTION DOC]
+        # A code error gives the default -0.05 process penalty.
         """Test rubric process reward on code error."""
         env = REPLEnvironment()
         env.reset()
@@ -330,6 +405,8 @@ class TestREPLEnvironment:
         assert obs.reward == -0.05  # default CodeExecutionRubric error_penalty
 
     def test_close(self):
+        # [FUNCTION DOC]
+        # close clears state and executor.
         """Test close cleans up resources."""
         env = REPLEnvironment()
         env.reset()
@@ -338,6 +415,8 @@ class TestREPLEnvironment:
         assert env._executor is None
 
     def test_get_metadata(self):
+        # [FUNCTION DOC]
+        # Metadata name repl_env and version 0.1.0.
         """Test get_metadata returns correct info."""
         env = REPLEnvironment(max_iterations=50)
         metadata = env.get_metadata()
@@ -345,12 +424,18 @@ class TestREPLEnvironment:
         assert metadata.version == "0.1.0"
 
     def test_llm_functions_injected(self):
+        # [FUNCTION DOC]
+        # Injected llm_query/llm_batch and aliases rlm_query, rlm_query_batched and SHOW_VARS work in code.
         """Test LLM functions are injected when provided."""
 
         def mock_query(prompt):
+            # [FUNCTION DOC]
+            # HELPER: Returns "Response to: <prompt>".
             return f"Response to: {prompt}"
 
         def mock_batch(prompts):
+            # [FUNCTION DOC]
+            # HELPER: Maps mock responses over prompts.
             return [f"Response to: {p}" for p in prompts]
 
         env = REPLEnvironment(llm_query_fn=mock_query, llm_batch_fn=mock_batch)
@@ -377,10 +462,17 @@ class TestREPLEnvironment:
         assert "deep" in obs.result.stdout
 
     def test_server_backed_recursive_runtime(self, monkeypatch):
+        # [FUNCTION DOC]
+        # With _build_hf_chat_fn patched, reset with an HF token installs rlm_query, which runs a child that
+        # returns "child".
         """Test HF-backed runtime installs a real recursive subcall function."""
 
         def fake_build_hf_chat_fn(hf_token, llm_model=None):
+            # [FUNCTION DOC]
+            # HELPER: Returns fake_chat regardless of token/model.
             def fake_chat(messages, model=None):
+                # [FUNCTION DOC]
+                # HELPER: Returns a repl block finalising "child" when asked for the child value, else "unreachable".
                 joined = "\n".join(message["content"] for message in messages)
                 if "Return child value" in joined:
                     return "```repl\nvalue = 'child'\nprint(FINAL(value))\n```"
@@ -405,9 +497,13 @@ class TestREPLEnvironment:
 
 
 class TestModels:
+    # [CLASS DOC]
+    # Model defaults.
     """Tests for the data models."""
 
     def test_repl_action_defaults(self):
+        # [FUNCTION DOC]
+        # REPLAction defaults: not final, no final answer.
         """Test REPLAction default values."""
         action = REPLAction(code="x = 1")
         assert action.code == "x = 1"
@@ -415,12 +511,16 @@ class TestModels:
         assert action.final_answer is None
 
     def test_repl_action_final(self):
+        # [FUNCTION DOC]
+        # REPLAction with final flag and answer.
         """Test REPLAction with final flag."""
         action = REPLAction(code="", is_final=True, final_answer="42")
         assert action.is_final is True
         assert action.final_answer == "42"
 
     def test_code_block_result(self):
+        # [FUNCTION DOC]
+        # CodeBlockResult stores fields.
         """Test CodeBlockResult model."""
         result = CodeBlockResult(
             stdout="output",
@@ -433,6 +533,8 @@ class TestModels:
         assert result.success is True
 
     def test_repl_observation(self):
+        # [FUNCTION DOC]
+        # REPLObservation stores fields.
         """Test REPLObservation model."""
         obs = REPLObservation(
             result=CodeBlockResult(
@@ -454,6 +556,8 @@ class TestModels:
         assert obs.iteration == 5
 
     def test_repl_state(self):
+        # [FUNCTION DOC]
+        # REPLState stores fields.
         """Test REPLState model."""
         state = REPLState(
             episode_id="test-123",
@@ -468,9 +572,13 @@ class TestModels:
 
 
 class TestLocalREPLEnv:
+    # [CLASS DOC]
+    # LocalREPLEnv context-manager helper.
     """Tests for the explicit local REPL helper."""
 
     def test_local_mode_basic(self):
+        # [FUNCTION DOC]
+        # reset, execute and FINAL work and state shows the final answer.
         """Test basic local mode execution."""
 
         with LocalREPLEnv() as env:
@@ -486,6 +594,8 @@ class TestLocalREPLEnv:
             assert env.state().final_answer == "42"
 
     def test_local_mode_with_context(self):
+        # [FUNCTION DOC]
+        # Context is exposed and usable.
         """Test local mode with context."""
 
         with LocalREPLEnv() as env:
@@ -497,12 +607,18 @@ class TestLocalREPLEnv:
             assert result.observation.result.success
 
     def test_local_mode_with_llm_functions(self):
+        # [FUNCTION DOC]
+        # LLM helpers and SHOW_VARS are exposed and callable.
         """Test local mode with LLM functions."""
 
         def mock_query(prompt):
+            # [FUNCTION DOC]
+            # HELPER: Returns "Response: " plus the first 20 prompt characters.
             return f"Response: {prompt[:20]}"
 
         def mock_batch(prompts):
+            # [FUNCTION DOC]
+            # HELPER: Maps mock_query over prompts.
             return [mock_query(p) for p in prompts]
 
         with LocalREPLEnv(llm_query_fn=mock_query, llm_batch_fn=mock_batch) as env:
@@ -527,6 +643,8 @@ class TestLocalREPLEnv:
             assert "r2" in result.observation.result.stdout
 
     def test_submit_final_answer(self):
+        # [FUNCTION DOC]
+        # submit_final_answer ends the episode with the answer.
         """Test submit_final_answer() method."""
 
         with LocalREPLEnv() as env:
@@ -536,6 +654,8 @@ class TestLocalREPLEnv:
             assert env.state().final_answer == "my answer"
 
     def test_state_method(self):
+        # [FUNCTION DOC]
+        # state() exposes context and task prompt.
         """Test state() method."""
 
         with LocalREPLEnv() as env:
@@ -545,6 +665,8 @@ class TestLocalREPLEnv:
             assert state.task_prompt == "do something"
 
     def test_list_variables(self):
+        # [FUNCTION DOC]
+        # list_variables includes defined names.
         """Test list_variables() method."""
 
         with LocalREPLEnv() as env:
@@ -554,6 +676,8 @@ class TestLocalREPLEnv:
             assert "my_var" in variables
 
     def test_context_manager(self):
+        # [FUNCTION DOC]
+        # After the with block exits, state() raises RuntimeError.
         """Test context manager properly closes."""
 
         env = LocalREPLEnv()
@@ -565,12 +689,18 @@ class TestLocalREPLEnv:
 
 
 class TestLocalRLMRunner:
+    # [CLASS DOC]
+    # LocalRLMRunner recursion with scripted chat functions.
     """Tests for the local recursive runner."""
 
     def test_recursive_subcall(self):
+        # [FUNCTION DOC]
+        # rlm_query spawns a child whose final answer "42" becomes the root answer.
         """Test rlm_query spawns a child runner and returns its final answer."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Child prompt returns a repl block finalising "42"; root prompt calls rlm_query and finalises.
             joined = "\n".join(message["content"] for message in messages)
             if "Return the answer 42" in joined:
                 return "```repl\nchild_answer = '42'\nprint(FINAL(child_answer))\n```"
@@ -587,9 +717,13 @@ class TestLocalRLMRunner:
         assert result.final_answer == "42"
 
     def test_recursive_batched_subcall(self):
+        # [FUNCTION DOC]
+        # rlm_query_batched runs two children and joins "AB".
         """Test rlm_query_batched spawns multiple child runners."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Children return A or B; root batches them and finalises the join.
             joined = "\n".join(message["content"] for message in messages)
             if "Return A" in joined:
                 return "```repl\nvalue = 'A'\nprint(FINAL(value))\n```"
@@ -608,6 +742,8 @@ class TestLocalRLMRunner:
         assert result.final_answer == "AB"
 
     def test_multiple_code_blocks_all_executed(self):
+        # [FUNCTION DOC]
+        # All repl blocks of one reply run in one namespace before FINAL is checked (answer "30").
         """Test that all code blocks in a single response are executed before checking FINAL.
 
         Matches official RLM behavior: the model writes exploration code first
@@ -615,6 +751,8 @@ class TestLocalRLMRunner:
         """
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: First reply has three blocks ending in FINAL(total); later replies finalise total.
             joined = "\n".join(message["content"] for message in messages)
             if "REPL output" in joined:
                 return "```repl\nprint(FINAL(total))\n```"
@@ -630,9 +768,13 @@ class TestLocalRLMRunner:
         assert result.final_answer == "30"
 
     def test_max_children_total_limit(self):
+        # [FUNCTION DOC]
+        # Exceeding max_children_total yields a "max_children_total exceeded" answer.
         """Test recursive child spawning respects max_children_total."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Children finalise one/two; root spawns two children sequentially.
             joined = "\n".join(message["content"] for message in messages)
             if "Child prompt 1" in joined:
                 return "```repl\nprint(FINAL('one'))\n```"
@@ -656,9 +798,13 @@ class TestLocalRLMRunner:
         assert "max_children_total exceeded" in (result.final_answer or "")
 
     def test_max_children_per_batch_limit(self):
+        # [FUNCTION DOC]
+        # A batch of three is capped to two children ("AB").
         """Test batched recursive child spawning is capped."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Children finalise A/B/C; root batches all three.
             joined = "\n".join(message["content"] for message in messages)
             if "Return A" in joined:
                 return "```repl\nprint(FINAL('A'))\n```"
@@ -683,9 +829,13 @@ class TestLocalRLMRunner:
         assert result.final_answer == "AB"
 
     def test_result_truncation_limit(self):
+        # [FUNCTION DOC]
+        # Child results are truncated to result_truncation_limit characters.
         """Test recursive child results are truncated when configured."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Child finalises the alphabet; root finalises the child result.
             joined = "\n".join(message["content"] for message in messages)
             if "Long child" in joined:
                 return "```repl\nprint(FINAL('abcdefghijklmnopqrstuvwxyz'))\n```"
@@ -703,9 +853,13 @@ class TestLocalRLMRunner:
         assert result.final_answer == "abcde"
 
     def test_child_trace_metadata(self):
+        # [FUNCTION DOC]
+        # One child trace is recorded with depth 1, prompt preview and no error.
         """Test child trace metadata is recorded on the run result."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Child finalises "child-result"; root forwards it.
             joined = "\n".join(message["content"] for message in messages)
             if "Return traced child" in joined:
                 return "```repl\nprint(FINAL('child-result'))\n```"
@@ -726,6 +880,8 @@ class TestLocalRLMRunner:
         assert trace.error is None
 
     def test_per_child_timeout(self):
+        # [FUNCTION DOC]
+        # A child that never finishes hits per_child_timeout_s and yields "child timeout".
         """Test child recursion returns a timeout error when time is exceeded.
 
         Uses cooperative timeout: checked between iterations, so the child
@@ -733,6 +889,8 @@ class TestLocalRLMRunner:
         """
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Child sleeps 20ms and returns a non-final block; root forwards the child result.
             joined = "\n".join(message["content"] for message in messages)
             if "Slow child" in joined:
                 time.sleep(0.02)
@@ -752,12 +910,16 @@ class TestLocalRLMRunner:
         assert "child timeout" in (result.final_answer or "")
 
     def test_subcall_callbacks(self):
+        # [FUNCTION DOC]
+        # on_subcall_start and on_subcall_complete fire once with depth 1, the prompt and no error.
         """Test official-style subcall lifecycle callbacks fire for real child runs."""
 
         starts = []
         completes = []
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Child finalises "callback-child"; root forwards it.
             joined = "\n".join(message["content"] for message in messages)
             if "Child callback task" in joined:
                 return "```repl\nprint(FINAL('callback-child'))\n```"
@@ -790,9 +952,13 @@ class TestLocalRLMRunner:
         assert completes[0][3] is None
 
     def test_default_answer_on_max_iterations(self):
+        # [FUNCTION DOC]
+        # When iterations run out, a final LLM call provides the fallback answer; iterations is 2.
         """Test that the runner makes a final LLM call when iterations are exhausted."""
 
         def mock_chat(messages, model=None):
+            # [FUNCTION DOC]
+            # HELPER: Returns FINAL(fallback-answer) for the out-of-iterations prompt, else a non-final block.
             joined = "\n".join(message["content"] for message in messages)
             # On the final "run out of REPL iterations" call, provide an answer
             if "run out of REPL iterations" in joined:
@@ -807,14 +973,21 @@ class TestLocalRLMRunner:
 
 
 class TestREPLEnvRemoteClient:
+    # [CLASS DOC]
+    # REPLEnv client with stubbed transport.
     """Tests for the async OpenEnv REPL client."""
 
     @pytest.mark.asyncio
     async def test_async_execute_and_state(self, monkeypatch):
 
+        # [FUNCTION DOC]
+        # Async reset/execute/state parse the stubbed server replies.
         env = REPLEnv(base_url="http://localhost:8000")
 
         async def fake_send_and_receive(message):
+            # [FUNCTION DOC]
+            # HELPER: Returns canned reset/step/state/close replies by message type; asserts the step code;
+            # raises AssertionError for other types.
             if message["type"] == "reset":
                 return {
                     "data": {
@@ -894,12 +1067,18 @@ class TestREPLEnvRemoteClient:
 
     def test_sync_wrapper(self, monkeypatch):
 
+        # [FUNCTION DOC]
+        # The sync wrapper's reset/execute/state work with patched connect and transport.
         env = REPLEnv(base_url="http://localhost:8000").sync()
 
         async def fake_connect():
+            # [FUNCTION DOC]
+            # HELPER: Returns the wrapped async client without connecting.
             return env.async_client
 
         async def fake_send_and_receive(message):
+            # [FUNCTION DOC]
+            # HELPER: Returns canned reset/step/state/close replies; raises AssertionError for other types.
             if message["type"] == "reset":
                 return {
                     "data": {

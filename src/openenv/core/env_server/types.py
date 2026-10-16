@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Pydantic wire and domain types shared by OpenEnv servers and clients: enums
+# (server mode, health status, WebSocket error codes), the base Action,
+# Observation and State models, HTTP reset/step request and response models,
+# WebSocket message and response envelopes, metadata, schema, health and
+# Task API request models, concurrency configuration, capacity status and
+# session info. Most models forbid unknown fields; reset/step requests and
+# State allow extra fields.
 # SPDX-License-Identifier: BSD-3-Clause
 
 from enum import Enum
@@ -16,6 +24,9 @@ Scalar = Union[int, float, bool]
 
 
 class ServerMode(str, Enum):
+    # [CLASS DOC]
+    # String enum: "simulation" (Gym-style control endpoints) or "production"
+    # (agent-safe endpoints only).
     """Server operation mode."""
 
     SIMULATION = "simulation"
@@ -23,6 +34,8 @@ class ServerMode(str, Enum):
 
 
 class HealthStatus(str, Enum):
+    # [CLASS DOC]
+    # String enum: healthy, unhealthy, degraded.
     """Server health status values."""
 
     HEALTHY = "healthy"
@@ -31,6 +44,10 @@ class HealthStatus(str, Enum):
 
 
 class WSErrorCode(str, Enum):
+    # [CLASS DOC]
+    # String enum of WebSocket error codes: INVALID_JSON, UNKNOWN_TYPE,
+    # VALIDATION_ERROR, EXECUTION_ERROR, CAPACITY_REACHED, FACTORY_ERROR,
+    # SESSION_ERROR.
     """WebSocket error codes for structured error handling."""
 
     INVALID_JSON = "INVALID_JSON"
@@ -48,6 +65,9 @@ class WSErrorCode(str, Enum):
 
 
 class Action(BaseModel):
+    # [CLASS DOC]
+    # Base action model: forbids unknown fields, validates on assignment, allows
+    # arbitrary types; has a metadata dict (default empty).
     """Base class for all environment actions.
 
     All action subclasses should inherit from this base class.
@@ -66,6 +86,9 @@ class Action(BaseModel):
 
 
 class Observation(BaseModel):
+    # [CLASS DOC]
+    # Base observation model (same config as Action) with done (default False),
+    # reward (bool, int, float or None) and metadata dict.
     """Base class for all environment observations.
 
     All observation subclasses should inherit from this base class.
@@ -88,6 +111,9 @@ class Observation(BaseModel):
 
 
 class ResetRequest(BaseModel):
+    # [CLASS DOC]
+    # HTTP reset body: optional non-negative seed, optional episode id (max 255
+    # chars), and any extra fields as custom reset parameters.
     """Request model for environment reset."""
 
     model_config = ConfigDict(
@@ -104,6 +130,9 @@ class ResetRequest(BaseModel):
 
 
 class ResetResponse(BaseModel):
+    # [CLASS DOC]
+    # HTTP reset response: observation dict, optional float reward, done flag and
+    # optional metadata.
     """Response model for environment reset."""
 
     model_config = ConfigDict(extra="forbid")
@@ -123,6 +152,9 @@ class ResetResponse(BaseModel):
 
 
 class StepRequest(BaseModel):
+    # [CLASS DOC]
+    # HTTP step body: required action dict, optional positive timeout_s, optional
+    # request_id (max 255 chars), and extra fields passed to step when accepted.
     """Request model for environment step."""
 
     model_config = ConfigDict(
@@ -152,6 +184,9 @@ class StepRequest(BaseModel):
 
 
 class StepResponse(BaseModel):
+    # [CLASS DOC]
+    # HTTP step response: observation dict, optional float reward, done flag and
+    # optional metadata.
     """Response model for environment step."""
 
     model_config = ConfigDict(extra="forbid")
@@ -169,6 +204,9 @@ class StepResponse(BaseModel):
 
 
 class BaseMessage(BaseModel):
+    # [CLASS DOC]
+    # Base for strict message models (extra fields forbidden, assignment
+    # validated).
     """Base class for WebSocket messages with shared configuration."""
 
     model_config = ConfigDict(
@@ -178,6 +216,9 @@ class BaseMessage(BaseModel):
 
 
 class State(BaseModel):
+    # [CLASS DOC]
+    # Base environment state: optional episode id, non-negative step count; extra
+    # fields allowed.
     """Base class for environment state.
 
     Represents internal environment state, separate from observations.
@@ -200,6 +241,8 @@ class State(BaseModel):
 
 
 class CodeExecResult(BaseMessage):
+    # [CLASS DOC]
+    # Code execution result: stdout, stderr and exit code.
     """Result of code execution containing stdout, stderr, and exit code."""
 
     stdout: str = Field(description="Standard output from code execution")
@@ -208,6 +251,9 @@ class CodeExecResult(BaseMessage):
 
 
 class EnvironmentMetadata(BaseMessage):
+    # [CLASS DOC]
+    # Environment description for docs/UI: name, description, optional README
+    # content, version, author and documentation URL.
     """Metadata about an environment for documentation and UI purposes."""
 
     name: str = Field(description="Name of the environment")
@@ -225,6 +271,9 @@ class EnvironmentMetadata(BaseMessage):
 
 
 class SchemaResponse(BaseMessage):
+    # [CLASS DOC]
+    # Combined /schema response: action, observation and state JSON schemas plus an
+    # optional reset observation schema, omitted from serialized output when None.
     """Response model for the combined schema endpoint."""
 
     action: Dict[str, Any] = Field(
@@ -242,6 +291,9 @@ class SchemaResponse(BaseMessage):
 
     @model_serializer(mode="wrap")
     def _omit_undeclared_reset_schema(self, handler):
+        # [FUNCTION DOC]
+        # HELPER: Wrap serializer that drops the "reset_observation" key when it is
+        # None.
         data = handler(self)
         if self.reset_observation is None:
             data.pop("reset_observation", None)
@@ -249,6 +301,8 @@ class SchemaResponse(BaseMessage):
 
 
 class HealthResponse(BaseMessage):
+    # [CLASS DOC]
+    # Health check response with a status (default healthy).
     """Response model for health check endpoint."""
 
     status: HealthStatus = Field(
@@ -258,18 +312,24 @@ class HealthResponse(BaseMessage):
 
 
 class ListTasksRequest(BaseMessage):
+    # [CLASS DOC]
+    # Task API request with a split name.
     """Request model for ORS-compatible task listing."""
 
     split: str = Field(description="Task split name")
 
 
 class NumTasksRequest(BaseMessage):
+    # [CLASS DOC]
+    # Task API request with a split name.
     """Request model for ORS-compatible task counts."""
 
     split: str = Field(description="Task split name")
 
 
 class GetTaskRequest(BaseMessage):
+    # [CLASS DOC]
+    # Task API request with a split name and integer index.
     """Request model for ORS-compatible task lookup."""
 
     split: str = Field(description="Task split name")
@@ -277,6 +337,9 @@ class GetTaskRequest(BaseMessage):
 
 
 class GetTaskRangeRequest(BaseMessage):
+    # [CLASS DOC]
+    # Task API request with a split name and optional start (inclusive) / stop
+    # (exclusive).
     """Request model for ORS-compatible task range lookup."""
 
     split: str = Field(description="Task split name")
@@ -285,6 +348,8 @@ class GetTaskRangeRequest(BaseMessage):
 
 
 class WSResetMessage(BaseMessage):
+    # [CLASS DOC]
+    # WebSocket "reset" message with an optional data dict of reset parameters.
     """WebSocket message to reset the environment."""
 
     type: Literal["reset"] = Field(default="reset", description="Message type")
@@ -295,6 +360,8 @@ class WSResetMessage(BaseMessage):
 
 
 class WSStepMessage(BaseMessage):
+    # [CLASS DOC]
+    # WebSocket "step" message with required action data.
     """WebSocket message to execute a step."""
 
     type: Literal["step"] = Field(default="step", description="Message type")
@@ -304,12 +371,16 @@ class WSStepMessage(BaseMessage):
 
 
 class WSStateMessage(BaseMessage):
+    # [CLASS DOC]
+    # WebSocket "state" request message.
     """WebSocket message to request current state."""
 
     type: Literal["state"] = Field(default="state", description="Message type")
 
 
 class WSCloseMessage(BaseMessage):
+    # [CLASS DOC]
+    # WebSocket "close" message ending the session.
     """WebSocket message to close the session."""
 
     type: Literal["close"] = Field(default="close", description="Message type")
@@ -325,6 +396,8 @@ WSIncomingMessage = Annotated[
 
 
 class WSObservationResponse(BaseModel):
+    # [CLASS DOC]
+    # WebSocket "observation" response wrapping serialized observation data.
     """WebSocket response containing an observation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -336,6 +409,8 @@ class WSObservationResponse(BaseModel):
 
 
 class WSStateResponse(BaseModel):
+    # [CLASS DOC]
+    # WebSocket "state" response wrapping state data.
     """WebSocket response containing environment state."""
 
     model_config = ConfigDict(extra="forbid")
@@ -345,6 +420,9 @@ class WSStateResponse(BaseModel):
 
 
 class WSErrorResponse(BaseModel):
+    # [CLASS DOC]
+    # WebSocket "error" response with a data dict containing message, code and
+    # optional details.
     """WebSocket response for errors."""
 
     model_config = ConfigDict(extra="forbid")
@@ -354,6 +432,9 @@ class WSErrorResponse(BaseModel):
 
 
 class ConcurrencyConfig(BaseMessage):
+    # [CLASS DOC]
+    # Server concurrency settings: max_concurrent_envs (>= 1, default 1) and
+    # optional positive idle session timeout in seconds.
     """Configuration for concurrent environment sessions."""
 
     max_concurrent_envs: int = Field(
@@ -369,6 +450,8 @@ class ConcurrencyConfig(BaseMessage):
 
 
 class ServerCapacityStatus(BaseMessage):
+    # [CLASS DOC]
+    # Capacity snapshot: active sessions (>= 0) and max sessions (>= 1).
     """Status of server capacity for concurrent sessions."""
 
     active_sessions: int = Field(
@@ -382,6 +465,9 @@ class ServerCapacityStatus(BaseMessage):
 
     @model_validator(mode="after")
     def check_capacity_bounds(self) -> "ServerCapacityStatus":
+        # [FUNCTION DOC]
+        # Post-validation: raises ValueError (surfaced as ValidationError) if active
+        # exceeds max; returns self.
         if self.active_sessions > self.max_sessions:
             raise ValueError(
                 f"active_sessions ({self.active_sessions}) cannot exceed "
@@ -391,16 +477,22 @@ class ServerCapacityStatus(BaseMessage):
 
     @property
     def available_slots(self) -> int:
+        # [FUNCTION DOC]
+        # Returns max minus active sessions.
         """Number of available session slots."""
         return self.max_sessions - self.active_sessions
 
     @property
     def is_at_capacity(self) -> bool:
+        # [FUNCTION DOC]
+        # True when no slots are available.
         """Whether the server has reached maximum capacity."""
         return self.available_slots == 0
 
     @classmethod
     def from_counts(cls, active: int, max_sessions: int) -> "ServerCapacityStatus":
+        # [FUNCTION DOC]
+        # Classmethod building a status from active and max counts.
         """Create status from active and max session counts."""
         return cls(
             active_sessions=active,
@@ -409,6 +501,9 @@ class ServerCapacityStatus(BaseMessage):
 
 
 class SessionInfo(BaseMessage):
+    # [CLASS DOC]
+    # Per-session bookkeeping: id, creation and last-activity Unix timestamps,
+    # step count and environment class name.
     """Information about an active session."""
 
     session_id: str = Field(description="Unique identifier for the session")

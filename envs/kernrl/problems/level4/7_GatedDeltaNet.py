@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# kernrl problem (level 4): Gated DeltaNet linear-attention layer (gated delta
+# rule recurrence) whose baseline uses flash-linear-attention's chunked Triton
+# kernel (chunk_gated_delta_rule). Importing requires the fla package.
+# Config: batch 4, sequence 2048, hidden 2048, 16 heads, head dims 128.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,6 +35,14 @@ def gated_delta_attention(
     beta: torch.Tensor,  # (batch, heads, seq) - update gate (0-1)
     scale: float,
 ) -> torch.Tensor:
+    # [FUNCTION DOC]
+    # HELPER: Converts the decay gate alpha to log space (clamped at 1e-6) and
+    # calls fla's chunk_gated_delta_rule with q, k, v, log-gate, beta and scale,
+    # returning only the output (final state discarded). Inputs are passed in
+    # (batch, heads, seq, dim) layout.
+    # KNOWN ISSUE: recent fla versions expect (batch, seq, heads, dim) inputs by
+    # default; passing head-first tensors may be misinterpreted depending on the
+    # installed version.
     """
     Gated delta rule attention using flash-linear-attention's optimized kernel.
 
@@ -46,6 +59,11 @@ def gated_delta_attention(
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference Gated DeltaNet layer: Q/K/V projections with optional causal
+    # depthwise short convolutions and SiLU, per-head sigmoid alpha/beta gates,
+    # the chunked delta-rule attention, per-head LayerNorm, a sigmoid output gate
+    # and an output projection. Scale is head_dim_qk^-0.5.
     """
     Gated DeltaNet: Linear Attention with Gated Delta Rule
 
@@ -63,6 +81,10 @@ class Model(nn.Module):
         use_short_conv: bool = True,
         conv_kernel_size: int = 4,
     ):
+        # [FUNCTION DOC]
+        # Stores sizes and creates projections, the gate projections (with bias), the
+        # optional depthwise Conv1d layers (padding kernel_size - 1, truncated later to
+        # stay causal), the output-gate projection and the LayerNorm.
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -107,6 +129,12 @@ class Model(nn.Module):
         self.scale = head_dim_qk**-0.5
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Projects x to q, k, v; if enabled applies the causal short convs and SiLU;
+        # reshapes to (B, H, T, D); computes alpha and beta via sigmoid; runs the
+        # gated delta attention; transposes back to (B, T, H, D); applies LayerNorm,
+        # multiplies by sigmoid(g_proj(x)) per head, merges heads and projects to
+        # hidden size. Returns (batch, seq_len, hidden_size).
         batch_size, seq_len, _ = x.shape
 
         q = self.q_proj(x)
@@ -160,8 +188,12 @@ head_dim_v = 128
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, seq_len, hidden_size).
     return [torch.randn(batch_size, seq_len, hidden_size)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns [hidden_size, num_heads, head_dim_qk, head_dim_v].
     return [hidden_size, num_heads, head_dim_qk, head_dim_v]

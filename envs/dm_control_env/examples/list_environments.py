@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Utility script printing all dm_control.suite benchmarking (domain, task) pairs grouped by domain, with each
+# task's action dimension and observation keys.
 """List all available dm_control.suite environments.
 
 This utility prints all available domain/task combinations from dm_control.suite.
@@ -8,6 +11,9 @@ from dm_control import suite
 
 
 def main():
+    # [FUNCTION DOC]
+    # Loads every benchmarking environment to read its specs (errors printed per task), closes it, and prints the
+    # grouped listing and total count. Side effects: stdout, loads MuJoCo models.
     print("Available dm_control.suite environments:")
     print("=" * 50)
 

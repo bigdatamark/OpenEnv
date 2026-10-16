@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Evaluation script scoring models on the pelican SVG environment: fetches the task prompt, generates samples per model
+# (open models via Hugging Face Inference Providers, streamed by default; listed closed models via the Anthropic or
+# OpenAI APIs without temperature), then sends each reply to the environment, which computes all rewards. Prints
+# per-sample and per-model summaries, optionally saves extracted SVGs, and writes all rows as JSON.
+# Side effects: sys.path changes, LLM API calls, env WebSocket calls, file writes, stdout.
+# KNOWN ISSUE: imports the SVG extractor from the environment's server package, crossing the client/server separation.
 """Score frontier models on the pelican SVG environment via HF Inference Providers.
 
 Each model is asked for the drawing, the reply goes straight to the environment,
@@ -69,6 +76,9 @@ DEFAULT_TASK = "pelican_bicycle"
 
 
 def parse_args() -> argparse.Namespace:
+    # [FUNCTION DOC]
+    # Defines and parses CLI options (env URL, models, task, samples, temperature, max tokens, concurrency, no-stream,
+    # output JSON path, SVG save directory). Returns the argparse namespace.
     parser = argparse.ArgumentParser(
         description="Score models on the pelican SVG environment.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -122,6 +132,9 @@ def parse_args() -> argparse.Namespace:
 
 
 async def _stream(client, model, prompt, seed, args) -> tuple[str, str]:
+    # [FUNCTION DOC]
+    # HELPER: Requests a streamed chat completion and concatenates content deltas as the answer and reasoning_content /
+    # reasoning deltas as thinking. Returns a tuple of (answer, thinking).
     """Collect a streamed completion, keeping the answer and the thinking apart.
 
     Reasoning models put their chain of thought in `delta.reasoning_content` and
@@ -152,6 +165,9 @@ async def _stream(client, model, prompt, seed, args) -> tuple[str, str]:
 
 
 async def _generate_anthropic(model, prompt, args) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Calls the Anthropic Messages API (streamed, no temperature) using the key in PELICAN_ANTHROPIC_API_KEY
+    # (KeyError if unset). Returns a dict with reply text, reasoning character count and input/output token usage.
     """Anthropic Messages API. No temperature: the Claude 5 family rejects it."""
     import anthropic
 
@@ -178,6 +194,9 @@ async def _generate_anthropic(model, prompt, args) -> dict:
 
 
 async def _generate_openai(model, prompt, args) -> dict:
+    # [FUNCTION DOC]
+    # HELPER: Calls OpenAI chat completions with max_completion_tokens and no temperature using OPENAI_API_KEY (KeyError if
+    # unset). Returns a dict with reply, zero reasoning chars, reasoning token count and prompt/completion tokens.
     """OpenAI chat completions. `max_completion_tokens`, and no temperature."""
     from openai import AsyncOpenAI
 
@@ -202,6 +221,12 @@ async def _generate_openai(model, prompt, args) -> dict:
 
 
 async def generate(client, semaphore, model, prompt, seed, args):
+    # [FUNCTION DOC]
+    # Under the concurrency semaphore, makes up to 3 attempts (sleeping 4 s then 8 s between failures) to generate one
+    # reply: closed models via their vendor helper, others via the router (non-streamed with usage, or streamed with zero
+    # token counts). Marks an error when only reasoning was produced. Returns a dict with reply, reasoning/answer character
+    # counts, token counts, latency and error (None on success); after 3 failures returns an empty reply with the last
+    # exception summarised as the error.
     """Ask one model for one drawing, returning the reply and its token usage."""
     async with semaphore:
         for attempt in range(3):
@@ -271,12 +296,19 @@ async def generate(client, semaphore, model, prompt, seed, args):
 
 
 def fetch_prompt(env_url: str, task: str) -> str:
+    # [FUNCTION DOC]
+    # Opens a short-lived env connection, resets to the task and returns the prompt text.
     """Open a short-lived connection just to read the prompt."""
     with PelicanSvgEnv(base_url=env_url) as env:
         return env.reset(task_id=task).observation.prompt
 
 
 async def run(args: argparse.Namespace) -> list[dict]:
+    # [FUNCTION DOC]
+    # Fetches the prompt, generates all (model, sample) jobs concurrently with seeds 1000 + sample index, then opens one env
+    # connection and for each successful generation resets, steps with the reply, records reward, gate result, violations,
+    # structure/semantic scores, judge info and optional saved SVG (or raw reply when no SVG is extractable). Failed
+    # generations get reward None. Returns the list of row dicts.
     client = AsyncInferenceClient(api_key=get_token(), timeout=600)
     semaphore = asyncio.Semaphore(args.concurrency)
     rows: list[dict] = []
@@ -348,6 +380,9 @@ async def run(args: argparse.Namespace) -> list[dict]:
 
 
 def summarise(rows: list[dict], models: list[str]) -> None:
+    # [FUNCTION DOC]
+    # Prints a per-model table (count, mean, population SD and best reward, mean structure/semantic scores, mean answer
+    # characters, rejected count) over rows with a reward, plus output-volume totals, perfect-score count and rejections.
     scored = [r for r in rows if r.get("reward") is not None]
     judges = {r.get("judge_model") for r in scored if r.get("judge_model")}
     print("\n" + "=" * 96)
@@ -401,6 +436,8 @@ def summarise(rows: list[dict], models: list[str]) -> None:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # Entry point: parses args, runs the evaluation, prints the summary and writes the rows to the output JSON.
     args = parse_args()
     rows = asyncio.run(run(args))
     summarise(rows, args.models)

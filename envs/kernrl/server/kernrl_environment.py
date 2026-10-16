@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Server-side GPU kernel optimisation environment. Loads reference PyTorch problems from level
+# directories, presents one per episode, and evaluates submitted Triton/CUDA code with a local GPU
+# evaluator (compilation, correctness against the reference, benchmark speedup, optional profiling).
+# Rewards favour correct, faster kernels; episodes end when solved (correct with speedup above 1.05)
+# or after max_turns.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -36,11 +42,15 @@ except ImportError:
 
 
 class Problem:
+    # [CLASS DOC]
+    # Plain record of a problem: id ("L<level>_<file stem>"), level, name, agent-facing description and reference code.
     """A kernel optimization problem."""
 
     def __init__(
         self, id: str, level: int, name: str, description: str, reference_code: str
     ):
+        # [FUNCTION DOC]
+        # Stores the five fields.
         self.id = id
         self.level = level
         self.name = name
@@ -49,6 +59,9 @@ class Problem:
 
 
 class KernelOptEnvironment(Environment):
+    # [CLASS DOC]
+    # Kernel optimisation environment holding the problems directory, turn limit, GPU device, levels,
+    # evaluator, loaded problems, KernelState, the current problem and per-episode feedback history.
     """
     GPU Kernel Optimization Environment.
 
@@ -84,6 +97,10 @@ class KernelOptEnvironment(Environment):
         enable_ncu: bool = False,
         timeout: int = 60,
     ):
+        # [FUNCTION DOC]
+        # Resolves the problems directory (argument or default lookup, which may raise FileNotFoundError),
+        # creates the LocalGPUEvaluator with tolerance, benchmark, profiling and timeout settings, loads
+        # problems for the given levels (default 1 to 10) and initialises empty episode state.
         """
         Initialize the kernel optimization environment.
 
@@ -129,6 +146,9 @@ class KernelOptEnvironment(Environment):
         self._reset_count = 0
 
     def _default_problems_dir(self) -> Path:
+        # [FUNCTION DOC]
+        # HELPER: Returns KERNRL_PROBLEMS_DIR if it names an existing path, else the package's "problems"
+        # directory if present. Raises FileNotFoundError otherwise.
         """Default to problems directory relative to package."""
         env_dir = os.environ.get("KERNRL_PROBLEMS_DIR")
         if env_dir:
@@ -147,6 +167,9 @@ class KernelOptEnvironment(Environment):
         )
 
     def _load_problems(self) -> list[Problem]:
+        # [FUNCTION DOC]
+        # HELPER: Reads every non-underscore .py file in each existing level<N> directory (sorted) and returns
+        # Problem objects with generated descriptions. Missing level directories are skipped. Reads files.
         """Load all problems from the problems directory."""
         problems = []
 
@@ -175,6 +198,9 @@ class KernelOptEnvironment(Environment):
         return problems
 
     def _make_description(self, code: str, level: int) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns the Markdown task description embedding the reference code, tolerances, output
+        # format requirements and target device.
         """Create the problem description shown to the agent."""
         return f"""# GPU Kernel Optimization Task
 
@@ -203,6 +229,9 @@ Device: {self.gpu}
 """
 
     def _get_gpu_info(self) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "<GPU name> (<memory> GB)" for the configured CUDA device via torch when available,
+        # else "GPU: <device>". All errors are swallowed.
         """Get GPU info string."""
         try:
             import torch
@@ -217,6 +246,12 @@ Device: {self.gpu}
         return f"GPU: {self.gpu}"
 
     def reset(self, problem_id: Optional[str] = None) -> KernelObservation:
+        # [FUNCTION DOC]
+        # Starts an episode on problem_id (exact id match first, then the first id containing it as a
+        # substring) or a random problem from the global random module. Creates a fresh KernelState, clears
+        # feedback and returns the initial observation with description, reference code, GPU info, turn 0 and
+        # reward 0.0. Raises ValueError for an unknown id; IndexError if no problems are loaded and none is given.
+        # KNOWN ISSUE: the substring fallback can pick an unintended problem (for example "L1_1" also matches "L1_10_...").
         """
         Reset environment and start a new episode.
 
@@ -266,6 +301,12 @@ Device: {self.gpu}
         )
 
     def step(self, action: KernelAction) -> KernelObservation:  # type: ignore[override]
+        # [FUNCTION DOC]
+        # Evaluates action.code against the current problem: increments turn and step_count, records feedback,
+        # updates best speedup, marks solved when correct and speedup exceeds 1.05, computes the reward and
+        # returns an observation with compilation, correctness, max difference, speedup, feedback, done and
+        # metadata (step, solved). Raises ValueError for a non-KernelAction and RuntimeError before reset.
+        # Side effects: compiles and runs code on the GPU via the evaluator. Steps after done are still evaluated.
         """
         Execute kernel code and return evaluation results.
 
@@ -340,6 +381,11 @@ Device: {self.gpu}
         )
 
     def _calculate_reward(self, eval_result) -> float:
+        # [FUNCTION DOC]
+        # HELPER: Reward: -0.5 if compilation failed; -0.25 if correctness was checked and failed; with a
+        # non-zero speedup, speedup - 1 capped at 2.0 when faster, else half of (speedup - 1); otherwise 0.0.
+        # KNOWN ISSUE: if no correctness result exists but a benchmark does, speedup is rewarded without
+        # verifying correctness.
         """Calculate reward based on evaluation results."""
         if not eval_result.compilation.success:
             return -0.5  # Penalty for compilation failure
@@ -359,24 +405,34 @@ Device: {self.gpu}
 
     @property
     def state(self) -> KernelState:
+        # [FUNCTION DOC]
+        # Property: current KernelState.
         """Get current environment state."""
         return self._state
 
     @property
     def done(self) -> bool:
+        # [FUNCTION DOC]
+        # Property: True when the turn limit is reached or the problem is solved.
         """Check if episode is done."""
         return self._state.turn >= self.max_turns or self._state.solved
 
     @property
     def reward(self) -> float:
+        # [FUNCTION DOC]
+        # Property: always 0.0 (the real reward is returned by step).
         """Get reward for current state."""
         return 0.0  # Actual reward is returned in step()
 
     def list_problems(self) -> list[str]:
+        # [FUNCTION DOC]
+        # Returns the list of loaded problem ids.
         """List all available problem IDs."""
         return [p.id for p in self.problems]
 
     @property
     def num_problems(self) -> int:
+        # [FUNCTION DOC]
+        # Property: number of loaded problems.
         """Get number of available problems."""
         return len(self.problems)

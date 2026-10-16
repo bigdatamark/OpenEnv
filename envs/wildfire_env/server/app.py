@@ -1,3 +1,8 @@
+# [MODULE DOC]
+# FastAPI app for the wildfire environment. Grid size from WILDFIRE_WIDTH / WILDFIRE_HEIGHT (default 16),
+# max sessions from MAX_CONCURRENT_ENVS (default 8). When ENABLE_WEB_INTERFACE is truthy, removes the
+# default GET /web route and registers a custom wildfire HTML page (metadata loaded from a throwaway
+# environment instance at import).
 # server/app.py
 import os
 
@@ -15,6 +20,8 @@ H = int(os.getenv("WILDFIRE_HEIGHT", "16"))
 
 # Factory function to create WildfireEnvironment instances
 def create_wildfire_environment():
+    # [FUNCTION DOC]
+    # Factory returning a WildfireEnvironment with the configured width and height.
     """Factory function that creates WildfireEnvironment with config."""
     return WildfireEnvironment(width=W, height=H)
 
@@ -59,11 +66,15 @@ if enable_web:
     # Add our custom wildfire interface route (overrides default /web)
     @app.get("/web", response_class=HTMLResponse)
     async def wildfire_web_interface():
+        # [FUNCTION DOC]
+        # GET /web handler (registered only when the web interface is enabled): returns the custom wildfire HTML.
         """Custom wildfire-specific web interface."""
         return get_wildfire_web_interface_html(metadata)
 
 
 def main():
+    # [FUNCTION DOC]
+    # Serves the app with uvicorn on 0.0.0.0 at PORT (default 8000); blocks.
     """Main entry point for running the server."""
     import uvicorn
 

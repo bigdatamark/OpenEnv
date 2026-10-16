@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Training script (uv inline metadata) that runs TRL GRPO on the single-step pelican SVG environment, booted from its
+# Space repo with UVProvider. Rewards come from the environment (judge disabled by default, so only the deterministic
+# structural layer scores). Optionally probes held-out samples with the vision judge before and after training to detect
+# reward hacking of the structural proxy, saves probe drawings, prints a summary, and can push model and probes to the Hub.
+# Side effects: local server subprocesses, model downloads, GPU training, file writes, Hub uploads, trackio logging.
 # SPDX-License-Identifier: BSD-3-Clause
 
 # /// script
@@ -62,6 +68,9 @@ TASK_ID = "pelican_bicycle"
 
 
 def _completion_text(completion) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the text of a TRL completion: the content of the last message dict for chat lists, or the string itself.
+    # Raises ValueError for empty lists, non-dict last items or other types.
     """TRL hands over either a list of chat messages or a raw string."""
     if isinstance(completion, list):
         if not completion or not isinstance(completion[-1], dict):
@@ -73,6 +82,9 @@ def _completion_text(completion) -> str:
 
 
 def start_env(disable_judge: bool) -> tuple[str, UVProvider]:
+    # [FUNCTION DOC]
+    # Starts the environment server from the Space git repo with UVProvider (setting PELICAN_SVG_DISABLE_JUDGE when requested,
+    # 180 s context timeout), waits until ready, and returns a tuple of (base URL, provider). Side effects: subprocess.
     """Boot the environment from its Space repo and return its base URL."""
     env_vars = {"PELICAN_SVG_DISABLE_JUDGE": "1"} if disable_judge else {}
     provider = UVProvider(
@@ -89,6 +101,9 @@ def start_env(disable_judge: bool) -> tuple[str, UVProvider]:
 def build_dataset(
     prompt: str, n_episodes: int, model: str, enable_thinking: bool
 ) -> Dataset:
+    # [FUNCTION DOC]
+    # Loads the model's tokenizer, renders the single-turn prompt with the chat template (generation prompt, enable_thinking
+    # as given), and returns a Dataset of n_episodes identical rows with a "prompt" column.
     """One row per episode, all on the same pinned task.
 
     The prompt is identical every row, which is what we want: the variation
@@ -114,6 +129,8 @@ def build_dataset(
 
 
 def fetch_prompt(base_url: str) -> str:
+    # [FUNCTION DOC]
+    # Opens a short-lived synchronous generic client, resets to the pinned task and returns the observation's "prompt" field.
     """Read the task prompt over a short-lived connection.
 
     Deliberately not reusing a long-lived client. An idle WebSocket held across
@@ -126,9 +143,14 @@ def fetch_prompt(base_url: str) -> str:
 
 
 def make_reward_func(client):
+    # [FUNCTION DOC]
+    # Returns a TRL reward function closed over the given client: for each completion it resets the task, steps with the
+    # completion text as the response, and collects the reward as float (0.0 if None). Side effects: env calls per completion.
     """Score each completion through the environment, never in the trainer."""
 
     def reward_func(completions, **kwargs) -> list[float]:
+        # [FUNCTION DOC]
+        # HELPER: The reward function described above; ignores extra keyword arguments.
         rewards = []
         for completion in completions:
             client.reset(task_id=TASK_ID)
@@ -140,6 +162,10 @@ def make_reward_func(client):
 
 
 def judged_probe(base_url: str, texts, save_to: pathlib.Path | None = None) -> dict:
+    # [FUNCTION DOC]
+    # Scores each text with the judge-enabled environment over one connection, recording reward, structure and semantic
+    # scores, gate pass, violations and judge caption; optionally writes each extracted SVG (or raw text) plus a samples.json.
+    # Returns a summary dict with count, mean reward/structure/semantic (rounded to 4 decimals) and gate failure count.
     """Re-score finished completions with the judge switched on.
 
     Run before and after training. Structure rising while this stays flat is the
@@ -181,6 +207,8 @@ def judged_probe(base_url: str, texts, save_to: pathlib.Path | None = None) -> d
             samples.append(record)
 
     def mean(key):
+        # [FUNCTION DOC]
+        # HELPER: Returns the rounded mean of a sample field, or 0.0 if there are no samples.
         values = [s[key] for s in samples]
         return round(statistics.mean(values), 4) if values else 0.0
 
@@ -199,6 +227,8 @@ def judged_probe(base_url: str, texts, save_to: pathlib.Path | None = None) -> d
 
 
 def _extract_svg(text: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: Returns the last complete svg element found in the text (case-insensitive), stripped, or an empty string.
     """Pull the last complete SVG document out of a completion, if there is one."""
     matches = re.findall(r"<svg\b.*?</svg\s*>", text or "", re.IGNORECASE | re.DOTALL)
     return matches[-1].strip() if matches else ""
@@ -211,6 +241,10 @@ def sample_completions(
     max_new_tokens: int,
     enable_thinking: bool = False,
 ):
+    # [FUNCTION DOC]
+    # Loads the checkpoint (bfloat16, automatic device map), renders the prompt with the chat template, samples count
+    # completions in one batch with temperature 0.7 up to max_new_tokens, and returns the decoded continuations.
+    # KNOWN ISSUE: the docstring says "greedy-ish", but sampling uses temperature 0.7.
     """Greedy-ish samples from a checkpoint, for the before and after probe.
 
     Applies the chat template with the same `enable_thinking` the training
@@ -247,6 +281,10 @@ def sample_completions(
 
 
 def report_proxy_gap(before: dict, after: dict) -> None:
+    # [FUNCTION DOC]
+    # Prints before/after structure, semantic and gate-failure changes. If the structure gain is at most 0.05 reports no
+    # learning; otherwise warns of reward hacking when the final semantic score is below 0.1 and the structure gain exceeds 3x
+    # the semantic gain, else reports that both layers moved together.
     """Say plainly whether the policy learned the task or just the proxy.
 
     Compares how much each layer gained rather than testing either against a
@@ -282,6 +320,13 @@ def report_proxy_gap(before: dict, after: dict) -> None:
 
 
 def main() -> None:
+    # [FUNCTION DOC]
+    # CLI entry: parses options and validates that batch x accumulation is divisible by num_generations. Starts the training
+    # env (judge per flag); fetches the prompt and builds the dataset; optionally starts a judge env and runs the before probe;
+    # trains with GRPOTrainer using env rewards, saves the model and prints first-vs-last-fifth logged rewards; runs the after
+    # probe and proxy-gap report; prints a JSON summary; optionally pushes the model and probe folder to the Hub. Always stops
+    # the started providers.
+    # KNOWN ISSUE: the summary references the reward list defined only inside the training block, so an earlier failure there would surface as NameError (masked by the original exception only if it propagates first).
     ap = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ap.add_argument(
         "--model",

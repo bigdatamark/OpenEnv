@@ -1,3 +1,10 @@
+# [MODULE DOC]
+# Pydantic models and enums for MCP over OpenEnv (RFC 003): JSON-RPC 2.0
+# request/response/error types and error codes, supported MCP method names,
+# the Tool specification and tool error types, the ListToolsAction /
+# CallToolAction actions and their observations, WebSocket MCP message
+# envelopes, and the frozen set of reserved tool names (reset, step, state,
+# close). Models forbid extra fields unless inherited otherwise.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -27,6 +34,10 @@ from .types import Action, BaseMessage, Observation
 
 
 class JsonRpcErrorCode(int, Enum):
+    # [CLASS DOC]
+    # Integer enum of JSON-RPC error codes: parse (-32700), invalid request
+    # (-32600), method not found (-32601), invalid params (-32602), internal
+    # (-32603) and generic server error (-32000).
     """
     Standard JSON-RPC 2.0 error codes.
 
@@ -45,6 +56,8 @@ class JsonRpcErrorCode(int, Enum):
 
 
 class McpMethod(str, Enum):
+    # [CLASS DOC]
+    # String enum of supported MCP methods: "tools/list" and "tools/call".
     """Supported MCP method names."""
 
     TOOLS_LIST = "tools/list"
@@ -52,6 +65,8 @@ class McpMethod(str, Enum):
 
 
 class JsonRpcError(BaseModel):
+    # [CLASS DOC]
+    # JSON-RPC error object with integer code, message and optional data.
     """
     JSON-RPC 2.0 error object.
 
@@ -70,6 +85,9 @@ class JsonRpcError(BaseModel):
     def from_code(
         cls, code: JsonRpcErrorCode, message: Optional[str] = None, data: Any = None
     ) -> "JsonRpcError":
+        # [FUNCTION DOC]
+        # Classmethod: builds an error from an enum code, using message or the code's
+        # standard default text ("Unknown error" if unmapped), with optional data.
         """Create an error from a standard error code."""
         default_messages = {
             JsonRpcErrorCode.PARSE_ERROR: "Parse error",
@@ -87,6 +105,10 @@ class JsonRpcError(BaseModel):
 
 
 class JsonRpcRequest(BaseModel):
+    # [CLASS DOC]
+    # JSON-RPC request: jsonrpc must be "2.0"; method name; params as an object
+    # (default empty); optional string or integer id. Construction raises
+    # ValidationError for invalid input (including array params or extra keys).
     """
     JSON-RPC 2.0 request object.
 
@@ -106,6 +128,9 @@ class JsonRpcRequest(BaseModel):
 
 
 class JsonRpcResponse(BaseModel):
+    # [CLASS DOC]
+    # JSON-RPC response with jsonrpc "2.0", optional result, optional error and
+    # id. Serialization emits either error or result, never both.
     """
     JSON-RPC 2.0 response object.
 
@@ -129,6 +154,9 @@ class JsonRpcResponse(BaseModel):
     )
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
+        # [FUNCTION DOC]
+        # Returns {"jsonrpc", "id"} plus "error" (dumped) when an error is set, else
+        # "result" (possibly None). Ignores all keyword arguments.
         """Serialize to dict, excluding result or error when None (JSON-RPC compliance)."""
         # Always include jsonrpc and id, but only include result OR error
         data: Dict[str, Any] = {"jsonrpc": self.jsonrpc, "id": self.id}
@@ -144,6 +172,10 @@ class JsonRpcResponse(BaseModel):
         return data
 
     def model_dump_json(self, **kwargs) -> str:
+        # [FUNCTION DOC]
+        # Returns the JSON string of model_dump(); keyword arguments are ignored. The
+        # result must be JSON-serializable by the standard json module (TypeError
+        # otherwise).
         """Serialize to JSON string, excluding result or error when None (JSON-RPC compliance)."""
         import json
 
@@ -153,6 +185,8 @@ class JsonRpcResponse(BaseModel):
     def success(
         cls, result: Any, request_id: Optional[Union[str, int]] = None
     ) -> "JsonRpcResponse":
+        # [FUNCTION DOC]
+        # Classmethod: response with result and id.
         """Create a success response."""
         return cls(result=result, id=request_id)
 
@@ -164,6 +198,8 @@ class JsonRpcResponse(BaseModel):
         data: Any = None,
         request_id: Optional[Union[str, int]] = None,
     ) -> "JsonRpcResponse":
+        # [FUNCTION DOC]
+        # Classmethod: response with an error built by JsonRpcError.from_code and id.
         """Create an error response from a standard error code."""
         return cls(
             error=JsonRpcError.from_code(code, message, data),
@@ -177,6 +213,8 @@ class JsonRpcResponse(BaseModel):
 
 
 class Tool(BaseModel):
+    # [CLASS DOC]
+    # MCP tool spec: name, description and JSON input schema (all required).
     """
     Strongly typed MCP tool specification.
 
@@ -196,6 +234,9 @@ class Tool(BaseModel):
 
 
 class ToolErrorType(str, Enum):
+    # [CLASS DOC]
+    # String enum of tool failure categories: execution_error, invalid_args,
+    # transport_error, tool_not_found, timeout.
     """Types of errors that can occur during tool execution."""
 
     EXECUTION_ERROR = "execution_error"  # Tool ran but failed
@@ -206,6 +247,9 @@ class ToolErrorType(str, Enum):
 
 
 class ToolError(BaseModel):
+    # [CLASS DOC]
+    # Framework-level tool error: category and message (tool-reported errors go in
+    # the result instead).
     """
     Structured error for tool execution failures.
 
@@ -223,6 +267,9 @@ class ToolError(BaseModel):
 
 
 class ListToolsAction(Action):
+    # [CLASS DOC]
+    # Action with type "list_tools" requesting the available tools (no reset
+    # needed).
     """
     Request list of available tools from the environment.
 
@@ -237,6 +284,9 @@ class ListToolsAction(Action):
 
 
 class CallToolAction(Action):
+    # [CLASS DOC]
+    # Action with type "call_tool", a tool name and an arguments object (default
+    # empty).
     """
     Call a specific tool via MCP.
 
@@ -257,6 +307,8 @@ class CallToolAction(Action):
 
 
 class ListToolsObservation(Observation):
+    # [CLASS DOC]
+    # Observation carrying the list of Tool specs.
     """
     Response containing available tools.
 
@@ -267,6 +319,9 @@ class ListToolsObservation(Observation):
 
 
 class CallToolObservation(Observation):
+    # [CLASS DOC]
+    # Observation carrying the called tool name, its raw result (any type) and an
+    # optional framework ToolError.
     """
     Response from tool execution.
 
@@ -288,6 +343,9 @@ class CallToolObservation(Observation):
 
 
 class WSMCPMessage(BaseMessage):
+    # [CLASS DOC]
+    # WebSocket client message of type "mcp" whose data is a JSON-RPC request
+    # payload.
     """
     WebSocket message for MCP JSON-RPC requests.
 
@@ -300,6 +358,9 @@ class WSMCPMessage(BaseMessage):
 
 
 class WSMCPResponse(BaseModel):
+    # [CLASS DOC]
+    # WebSocket server response of type "mcp" whose data is a JSON-RPC response
+    # dict.
     """
     WebSocket response for MCP JSON-RPC.
 

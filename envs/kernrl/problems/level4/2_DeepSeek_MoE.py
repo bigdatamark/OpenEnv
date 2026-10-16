@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# kernrl problem (level 4): DeepSeek-V3 style Mixture-of-Experts layer with
+# sigmoid gating, bias-corrected grouped top-k routing, SwiGLU experts stored
+# as stacked weight tensors, and always-on shared experts (64 routed experts,
+# top-8, 8 groups choose 4, 2 shared experts, batch 4 x 2048 tokens, hidden
+# 2048).
 import math
 
 import torch
@@ -18,6 +24,9 @@ import torch.nn.functional as F
 
 
 class MoEGate(nn.Module):
+    # [CLASS DOC]
+    # Gating network: a weight matrix (experts x hidden, Kaiming-uniform init) and a
+    # zero load-balancing bias buffer added to scores only for expert choice.
     """
     DeepSeek-V3 MoE gating with grouped expert selection.
 
@@ -36,6 +45,9 @@ class MoEGate(nn.Module):
         routed_scaling_factor: float = 1.0,
         norm_topk_prob: bool = True,
     ):
+        # [FUNCTION DOC]
+        # Stores routing hyperparameters, creates the gate weight and the correction
+        # bias buffer, and initializes the weight.
         super().__init__()
         self.top_k = num_experts_per_tok
         self.n_routed_experts = n_routed_experts
@@ -51,6 +63,13 @@ class MoEGate(nn.Module):
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, hidden_states: torch.Tensor):
+        # [FUNCTION DOC]
+        # Computes sigmoid scores of the flattened tokens in float32; for selection adds
+        # the correction bias, scores each group by the sum of its top-2 experts, keeps
+        # the top topk_group groups, masks other experts to 0, and takes the top_k
+        # experts. Gathers the unbiased scores of the chosen experts, normalizes them to
+        # sum to 1 when top_k > 1 and norm_topk_prob, and multiplies by
+        # routed_scaling_factor. Returns (topk_idx, topk_weight), each (tokens, top_k).
         bsz, seq_len, h = hidden_states.shape
         hidden_states = hidden_states.view(-1, h)
 
@@ -93,6 +112,9 @@ class MoEGate(nn.Module):
 
 
 class Model(nn.Module):
+    # [CLASS DOC]
+    # Reference MoE layer: stacked expert gate/up/down weights (random normal *
+    # 0.02), a MoEGate, and optional shared-expert SwiGLU Linear layers.
     """
     DeepSeek-V3 Mixture of Experts Layer
 
@@ -117,6 +139,10 @@ class Model(nn.Module):
         n_shared_experts: int = 0,
         routed_scaling_factor: float = 1.0,
     ):
+        # [FUNCTION DOC]
+        # Stores sizes, creates stacked expert weight parameters, the gate, and shared
+        # expert projections sized intermediate_size * n_shared_experts (or marks them
+        # absent when n_shared_experts is 0).
         super().__init__()
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
@@ -162,6 +188,15 @@ class Model(nn.Module):
             self.shared_gate_proj = None
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC]
+        # Inference only (asserts not training). Routes tokens, duplicates each token
+        # top_k times, gathers each pair's expert weight matrices, computes
+        # down(silu(gate(x)) * up(x)) with batched matrix-vector products, combines the
+        # top_k outputs with routing weights, reshapes to the input shape, and adds the
+        # shared-expert SwiGLU output when present. Returns (batch, seq_len, hidden).
+        # KNOWN ISSUE: gathering full expert weight matrices per token-expert pair
+        # materializes tokens * top_k copies of the weights, which needs far more
+        # memory than any single GPU has at the configured sizes.
         assert not self.training, "DeepSeek MoE grouped selection is inference-only"
 
         identity = hidden_states
@@ -259,10 +294,15 @@ routed_scaling_factor = 2.5
 
 
 def get_inputs():
+    # [FUNCTION DOC]
+    # Returns [x] with x random of shape (batch_size, seq_len, hidden_size).
     return [torch.randn(batch_size, seq_len, hidden_size)]
 
 
 def get_init_inputs():
+    # [FUNCTION DOC]
+    # Returns the eight constructor arguments (hidden, intermediate, routed experts,
+    # experts per token, groups, groups chosen, shared experts, scaling factor).
     return [
         hidden_size,
         intermediate_size,

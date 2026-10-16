@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script driving the cartpole domain through a dm_control server at http://localhost:8000: headless
+# random actions, keyboard control with a small pygame status window, or a visual mode showing rendered frames.
+# Side effects at import: prepends the env directory to sys.path and imports client/models as top-level modules.
 """Interactive cartpole control via OpenEnv.
 
 This example demonstrates using the dm_control OpenEnv client with
@@ -33,6 +37,9 @@ from models import DMControlAction
 
 
 def run_headless(env: DMControlEnv, task: str = "balance", max_steps: int = 500):
+    # [FUNCTION DOC]
+    # Resets cartpole/<task>, then steps with uniform random actions in [-1, 1] until done or max_steps (500),
+    # printing observations every 50 steps and the total reward at the end.
     """Run cartpole control in headless mode."""
     print("\n=== Headless Mode (OpenEnv Step/Observation Pattern) ===")
     print("This mode demonstrates the OpenEnv API with the cartpole.\n")
@@ -74,6 +81,9 @@ def run_headless(env: DMControlEnv, task: str = "balance", max_steps: int = 500)
 
 
 def run_interactive(env: DMControlEnv, task: str = "balance"):
+    # [FUNCTION DOC]
+    # Opens a 400x100 pygame window; each frame (30 FPS) steps with -1/+1/0 for held LEFT/RIGHT/none, R resets,
+    # ESC/Q quits, and the episode auto-resets when done. Prints progress every 200 steps.
     """Run interactive control with keyboard input via pygame."""
     import pygame
 
@@ -169,6 +179,10 @@ def run_interactive(env: DMControlEnv, task: str = "balance"):
 
 
 def run_visual(env: DMControlEnv, task: str = "balance"):
+    # [FUNCTION DOC]
+    # Like run_interactive but resets/steps with render=True and blits the decoded base64 PNG frames in a window
+    # sized to the first frame.
+    # Side effects: exits the process with status 1 if the server returns no pixels.
     """Run with pygame visualization showing rendered frames."""
     import base64
     import io
@@ -272,6 +286,10 @@ def run_visual(env: DMControlEnv, task: str = "balance"):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --visual, --headless, --max-steps and --task (balance, balance_sparse, swingup, swingup_sparse),
+    # connects, prints the server state, and runs the selected mode. On ConnectionError prints server start
+    # instructions and exits with status 1.
     parser = argparse.ArgumentParser(
         description="Interactive cartpole control via OpenEnv"
     )

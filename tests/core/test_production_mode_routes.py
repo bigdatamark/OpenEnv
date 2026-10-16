@@ -1,3 +1,12 @@
+# [MODULE DOC]
+# Tests for production-mode routing of HTTPEnvServer: production hides /reset, /step and /state but
+# keeps /health, /schema, /metadata and /ws; simulation (default) exposes everything; mode
+# validation. Also tests direct MCP access: HTTP POST /mcp JSON-RPC (tools/list, tools/call,
+# errors), MCP session lifecycle methods (openenv/session/create and close) and their interaction
+# with WebSocket sessions, MCP transport/state persistence per session, resource cleanup on
+# failures, the idle-session reaper, WebSocket "mcp" messages, reserved tool names, client
+# integration and error responses. Adds src and envs to sys.path at import time (side effect).
+
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -49,12 +58,16 @@ from openenv.core.env_server.types import Action, Observation, State
 
 
 class MinimalAction(Action):
+    # [CLASS DOC]
+    # HELPER: Action with a required string message.
     """Minimal action for testing."""
 
     message: str
 
 
 class MinimalObservation(Observation):
+    # [CLASS DOC]
+    # HELPER: Observation with a string response, optional reward and done flag.
     """Minimal observation for testing."""
 
     response: str
@@ -63,21 +76,30 @@ class MinimalObservation(Observation):
 
 
 class MinimalState(State):
+    # [CLASS DOC]
+    # HELPER: State with step_count defaulting to 0.
     """Minimal state for testing."""
 
     step_count: int = 0
 
 
 class MinimalEnvironment(Environment):
+    # [CLASS DOC]
+    # HELPER: Concurrent-safe environment: reset returns response "reset"; step echoes the message with
+    # reward 1.0; state has step_count 0; close does nothing.
     """Minimal environment implementation for testing server modes."""
 
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def reset(self, **kwargs) -> MinimalObservation:
+        # [FUNCTION DOC]
+        # HELPER: Returns an observation with response "reset".
         """Reset the environment."""
         return MinimalObservation(response="reset", reward=None, done=False)
 
     def step(self, action: MinimalAction) -> MinimalObservation:
+        # [FUNCTION DOC]
+        # HELPER: Returns "echo: <message>" with reward 1.0.
         """Execute an action."""
         return MinimalObservation(
             response=f"echo: {action.message}", reward=1.0, done=False
@@ -85,16 +107,22 @@ class MinimalEnvironment(Environment):
 
     @property
     def state(self) -> MinimalState:
+        # [FUNCTION DOC]
+        # HELPER: Returns MinimalState with step_count 0.
         """Return current state."""
         return MinimalState(step_count=0)
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # HELPER: No-op.
         """Cleanup resources."""
         pass
 
 
 @pytest.fixture
 def production_mode_app() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture creating an app for MinimalEnvironment with routes registered in production mode.
     """
     Create a FastAPI app with production mode enabled.
 
@@ -114,6 +142,8 @@ def production_mode_app() -> FastAPI:
 
 @pytest.fixture
 def simulation_mode_app() -> FastAPI:
+    # [FUNCTION DOC]
+    # Fixture creating the same app with default (simulation) mode.
     """
     Create a FastAPI app with simulation mode (default).
 
@@ -136,9 +166,13 @@ def simulation_mode_app() -> FastAPI:
 
 
 class TestProductionModeRouteRestrictions:
+    # [CLASS DOC]
+    # Tests that production hides simulation controls.
     """Test that production mode hides simulation control endpoints."""
 
     def test_production_mode_blocks_reset_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # POST /reset returns 404 or 405.
         """Test that /reset returns 404 or 405 in production mode."""
         client = TestClient(production_mode_app)
 
@@ -151,6 +185,8 @@ class TestProductionModeRouteRestrictions:
         )
 
     def test_production_mode_blocks_step_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # POST /step returns 404 or 405.
         """Test that /step returns 404 or 405 in production mode."""
         client = TestClient(production_mode_app)
 
@@ -163,6 +199,8 @@ class TestProductionModeRouteRestrictions:
         )
 
     def test_production_mode_blocks_state_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # GET /state returns 404 or 405.
         """Test that /state returns 404 or 405 in production mode."""
         client = TestClient(production_mode_app)
 
@@ -181,9 +219,13 @@ class TestProductionModeRouteRestrictions:
 
 
 class TestProductionModeAllowsSafeEndpoints:
+    # [CLASS DOC]
+    # Tests that production keeps safe endpoints.
     """Test that production mode still exposes safe, non-simulation endpoints."""
 
     def test_production_mode_allows_health_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # /health returns status healthy.
         """Test that /health is still available in production mode."""
         client = TestClient(production_mode_app)
 
@@ -195,6 +237,8 @@ class TestProductionModeAllowsSafeEndpoints:
         assert response.json()["status"] == "healthy"
 
     def test_production_mode_allows_schema_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # /schema returns action, observation and state schemas.
         """Test that /schema is still available in production mode."""
         client = TestClient(production_mode_app)
 
@@ -210,6 +254,8 @@ class TestProductionModeAllowsSafeEndpoints:
         assert "state" in data
 
     def test_production_mode_allows_metadata_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # /metadata returns 200.
         """Test that /metadata is still available in production mode."""
         client = TestClient(production_mode_app)
 
@@ -220,6 +266,8 @@ class TestProductionModeAllowsSafeEndpoints:
         )
 
     def test_production_mode_allows_websocket_endpoint(self, production_mode_app):
+        # [FUNCTION DOC]
+        # /ws accepts connections.
         """Test that /ws WebSocket is still available in production mode."""
         client = TestClient(production_mode_app)
 
@@ -244,9 +292,13 @@ class TestProductionModeAllowsSafeEndpoints:
 
 
 class TestSimulationModeAllowsAllEndpoints:
+    # [CLASS DOC]
+    # Tests that simulation exposes all endpoints.
     """Test that simulation mode (default) allows all endpoints."""
 
     def test_simulation_mode_allows_reset_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # /reset returns the reset observation.
         """Test that /reset works in simulation mode (default behavior)."""
         client = TestClient(simulation_mode_app)
 
@@ -260,6 +312,8 @@ class TestSimulationModeAllowsAllEndpoints:
         assert data["observation"]["response"] == "reset"
 
     def test_simulation_mode_allows_step_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # /step returns the echoed observation.
         """Test that /step works in simulation mode (default behavior)."""
         client = TestClient(simulation_mode_app)
 
@@ -273,6 +327,8 @@ class TestSimulationModeAllowsAllEndpoints:
         assert "echo: hello" in data["observation"]["response"]
 
     def test_simulation_mode_allows_state_endpoint(self, simulation_mode_app):
+        # [FUNCTION DOC]
+        # /state returns step_count 0.
         """Test that /state works in simulation mode (default behavior)."""
         client = TestClient(simulation_mode_app)
 
@@ -292,9 +348,13 @@ class TestSimulationModeAllowsAllEndpoints:
 
 
 class TestModeConfiguration:
+    # [CLASS DOC]
+    # Tests the mode parameter of register_routes.
     """Test that mode can be configured via parameter."""
 
     def test_explicit_production_mode_parameter(self):
+        # [FUNCTION DOC]
+        # mode="production" is accepted.
         """Test that mode='production' can be passed to register_routes."""
         app = FastAPI()
         server = HTTPEnvServer(
@@ -311,6 +371,8 @@ class TestModeConfiguration:
             pytest.fail(f"register_routes should accept mode parameter: {e}")
 
     def test_explicit_simulation_mode_parameter(self):
+        # [FUNCTION DOC]
+        # mode="simulation" is accepted.
         """Test that mode='simulation' can be passed to register_routes."""
         app = FastAPI()
         server = HTTPEnvServer(
@@ -326,6 +388,8 @@ class TestModeConfiguration:
             pytest.fail(f"register_routes should accept mode parameter: {e}")
 
     def test_default_mode_is_simulation(self):
+        # [FUNCTION DOC]
+        # Without mode, /reset, /step and /state are available.
         """Test that default mode is 'simulation' for backwards compatibility."""
         app = FastAPI()
         server = HTTPEnvServer(
@@ -346,6 +410,8 @@ class TestModeConfiguration:
         assert state_response.status_code == 200, "Default mode should allow /state"
 
     def test_invalid_mode_raises_error(self):
+        # [FUNCTION DOC]
+        # An invalid mode raises ValueError listing valid modes.
         """Test that invalid mode value raises ValueError."""
         app = FastAPI()
         server = HTTPEnvServer(
@@ -368,6 +434,8 @@ class TestModeConfiguration:
 
 
 class TestProductionModeSecurityBoundary:
+    # [CLASS DOC]
+    # Tests the production security boundary.
     """
     Test that production mode enforces the security boundary.
 
@@ -375,6 +443,8 @@ class TestProductionModeSecurityBoundary:
     """
 
     def test_production_mode_prevents_reset_manipulation(self, production_mode_app):
+        # [FUNCTION DOC]
+        # Seeded reset is not reachable in production.
         """
         Test that production mode prevents environment reset.
 
@@ -390,6 +460,8 @@ class TestProductionModeSecurityBoundary:
         )
 
     def test_production_mode_prevents_state_inspection(self, production_mode_app):
+        # [FUNCTION DOC]
+        # /state is not reachable in production.
         """
         Test that production mode prevents arbitrary state inspection.
 
@@ -404,6 +476,8 @@ class TestProductionModeSecurityBoundary:
         )
 
     def test_production_mode_prevents_direct_step(self, production_mode_app):
+        # [FUNCTION DOC]
+        # /step is not reachable in production.
         """
         Test that production mode prevents direct step calls.
 
@@ -430,6 +504,8 @@ class TestProductionModeSecurityBoundary:
 
 @pytest.fixture
 def mock_fastmcp_server():
+    # [FUNCTION DOC]
+    # Fixture building a FastMCP server with add and greet tools.
     """Create a mock FastMCP server for testing."""
     from fastmcp import FastMCP
 
@@ -437,11 +513,15 @@ def mock_fastmcp_server():
 
     @mcp.tool
     def add(a: int, b: int) -> int:
+        # [FUNCTION DOC]
+        # HELPER: Returns a+b.
         """Add two numbers."""
         return a + b
 
     @mcp.tool
     def greet(name: str) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns "Hello, <name>!".
         """Greet a person."""
         return f"Hello, {name}!"
 
@@ -450,26 +530,38 @@ def mock_fastmcp_server():
 
 @pytest.fixture
 def app(mock_fastmcp_server):
+    # [FUNCTION DOC]
+    # Fixture creating a FastAPI app (default mode) for an MCPEnvironment wrapping mock_fastmcp_server.
     """Create FastAPI app with MCP endpoints."""
     # This creates and returns a FastAPI app with MCP endpoints
     from openenv.core.env_server.http_server import create_fastapi_app
     from openenv.core.env_server.mcp_environment import MCPEnvironment
 
     class TestMCPEnv(MCPEnvironment):
+        # [CLASS DOC]
+        # HELPER: MCPEnvironment over the fixture server tracking a step counter in a dict.
         def __init__(self):
+            # [FUNCTION DOC]
+            # HELPER: Wraps the server and zeroes the counter.
             super().__init__(mock_fastmcp_server)
             self._state = {"step_count": 0}
 
         def reset(self, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Zeroes the counter and returns an empty observation.
             self._state = {"step_count": 0}
             return Observation(done=False, reward=0.0)
 
         def _step_impl(self, action, **kwargs):
+            # [FUNCTION DOC]
+            # HELPER: Increments the counter and returns an empty observation.
             self._state["step_count"] += 1
             return Observation(done=False, reward=0.0)
 
         @property
         def state(self):
+            # [FUNCTION DOC]
+            # HELPER: Returns a State with the counter as step_count.
             from openenv.core.env_server.types import State
 
             return State(step_count=self._state["step_count"])
@@ -487,9 +579,13 @@ def app(mock_fastmcp_server):
 
 
 class TestHTTPMCPEndpoint:
+    # [CLASS DOC]
+    # Tests HTTP POST /mcp.
     """Tests for HTTP POST /mcp endpoint (JSON-RPC)."""
 
     def test_mcp_endpoint_exists(self, app):
+        # [FUNCTION DOC]
+        # /mcp responds 200 to tools/list.
         """Test /mcp endpoint is exposed."""
         from starlette.testclient import TestClient
 
@@ -501,6 +597,8 @@ class TestHTTPMCPEndpoint:
         assert response.status_code == 200
 
     def test_mcp_tools_list_via_http(self, app):
+        # [FUNCTION DOC]
+        # tools/list returns a JSON-RPC result with tools.
         """Test tools/list via HTTP /mcp endpoint."""
         from starlette.testclient import TestClient
 
@@ -519,6 +617,8 @@ class TestHTTPMCPEndpoint:
         assert len(data["result"]["tools"]) > 0
 
     def test_mcp_tools_call_via_http(self, app):
+        # [FUNCTION DOC]
+        # tools/call add returns a result containing 8.
         """Test tools/call via HTTP /mcp endpoint."""
         from starlette.testclient import TestClient
 
@@ -543,6 +643,8 @@ class TestHTTPMCPEndpoint:
         assert "8" in str(data["result"]) or data["result"] == 8
 
     def test_mcp_http_bypasses_step_overhead(self, app):
+        # [FUNCTION DOC]
+        # tools/call via /mcp does not call MCPEnvironment.step.
         """Test direct MCP access doesn't call step() or compute rewards."""
         from starlette.testclient import TestClient
 
@@ -566,6 +668,8 @@ class TestHTTPMCPEndpoint:
             assert response.status_code == 200
 
     def test_mcp_http_invalid_method_returns_error(self, app):
+        # [FUNCTION DOC]
+        # An unknown method returns error -32601.
         """Test invalid MCP method returns proper JSON-RPC error."""
         from starlette.testclient import TestClient
 
@@ -583,6 +687,8 @@ class TestHTTPMCPEndpoint:
         assert data["error"]["code"] == -32601  # Method not found
 
     def test_mcp_http_missing_jsonrpc_version(self, app):
+        # [FUNCTION DOC]
+        # A request without jsonrpc returns 400 or an error body.
         """Test request without jsonrpc version returns error."""
         from starlette.testclient import TestClient
 
@@ -595,6 +701,8 @@ class TestHTTPMCPEndpoint:
             assert "error" in data
 
     def test_mcp_http_no_reset_required(self, app):
+        # [FUNCTION DOC]
+        # tools/list works without reset.
         """Test MCP endpoints work without calling reset() first."""
         from starlette.testclient import TestClient
 

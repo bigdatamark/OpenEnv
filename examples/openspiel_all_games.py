@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example running random-policy episodes of six OpenSpiel games (catch, tic-tac-toe, Kuhn poker, cliff walking, 2048,
+# blackjack) against an OpenSpiel environment server and printing per-episode outcomes and stats. A single server is
+# used per game (the server's game is configured at launch; with --use-docker the user is asked to start it manually).
+# Side effects: network I/O, stdin prompt, stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -30,6 +35,8 @@ from openspiel_env import OpenSpielEnv, OpenSpielAction
 
 
 def run_catch_game(env: OpenSpielEnv, num_episodes: int = 3):
+    # [FUNCTION DOC]
+    # Plays num_episodes catch episodes with random legal actions (max 20 steps), printing steps, total reward and caught/missed.
     """Run Catch game episodes."""
     print("\n" + "=" * 60)
     print("🎯 CATCH - Catch the falling ball!")
@@ -57,6 +64,9 @@ def run_catch_game(env: OpenSpielEnv, num_episodes: int = 3):
 
 
 def run_tictactoe_game(env: OpenSpielEnv, num_episodes: int = 3):
+    # [FUNCTION DOC]
+    # Plays num_episodes tic-tac-toe games with random legal actions until done and tallies wins/losses/draws by final reward sign.
+    # KNOWN ISSUE: the outcome comparisons fail with TypeError if the final reward is None.
     """Run Tic-Tac-Toe game episodes."""
     print("\n" + "=" * 60)
     print("❌⭕ TIC-TAC-TOE - Beat the random bot!")
@@ -95,6 +105,9 @@ def run_tictactoe_game(env: OpenSpielEnv, num_episodes: int = 3):
 
 
 def run_kuhn_poker_game(env: OpenSpielEnv, num_episodes: int = 5):
+    # [FUNCTION DOC]
+    # Plays num_episodes Kuhn poker hands with random actions, recording action names and summing final rewards; prints chips won.
+    # KNOWN ISSUE: the per-hand print formats the reward as a float, which fails if it is None.
     """Run Kuhn Poker game episodes."""
     print("\n" + "=" * 60)
     print("🃏 KUHN POKER - Imperfect information poker!")
@@ -125,6 +138,10 @@ def run_kuhn_poker_game(env: OpenSpielEnv, num_episodes: int = 5):
 
 
 def run_cliff_walking_game(env: OpenSpielEnv, num_episodes: int = 3):
+    # [FUNCTION DOC]
+    # Plays num_episodes cliff-walking episodes with random actions (max 100 steps), flagging a fall when a step reward is
+    # below -50; prints total reward and fell/goal/timeout.
+    # KNOWN ISSUE: a step-limit timeout is reported as reaching the goal only when done is set; but a fall that ends the episode is still classified first, so "REACHED GOAL" also prints when the episode ends for any other reason.
     """Run Cliff Walking game episodes."""
     print("\n" + "=" * 60)
     print("🏔️  CLIFF WALKING - Don't fall off!")
@@ -154,6 +171,8 @@ def run_cliff_walking_game(env: OpenSpielEnv, num_episodes: int = 3):
 
 
 def run_2048_game(env: OpenSpielEnv, num_episodes: int = 2):
+    # [FUNCTION DOC]
+    # Plays num_episodes 2048 games with random legal moves (max 500 steps, stops if no legal moves), printing steps and summed reward.
     """Run 2048 game episodes."""
     print("\n" + "=" * 60)
     print("🔢 2048 - Merge tiles to create 2048!")
@@ -183,6 +202,9 @@ def run_2048_game(env: OpenSpielEnv, num_episodes: int = 2):
 
 
 def run_blackjack_game(env: OpenSpielEnv, num_episodes: int = 5):
+    # [FUNCTION DOC]
+    # Plays num_episodes blackjack hands choosing randomly among legal actions while HIT (0) is legal, and tallies
+    # wins/losses/pushes by final reward sign (None or 0 counted as push).
     """Run Blackjack game episodes."""
     print("\n" + "=" * 60)
     print("🂡 BLACKJACK - Beat the dealer!")
@@ -237,6 +259,9 @@ GAME_RUNNERS = {
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses game (or all), --use-docker and base url; for each selected game optionally waits for the user to start a
+    # container, connects a client, runs the game's runner and closes. Errors per game are printed and do not stop the loop.
     parser = argparse.ArgumentParser(description="Run OpenSpiel games with OpenEnv")
     parser.add_argument(
         "--game",

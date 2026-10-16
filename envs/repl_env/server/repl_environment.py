@@ -1,3 +1,11 @@
+# [MODULE DOC]
+# Server-side REPL environment for RLM-style tasks. Each episode loads a context string into a fresh
+# sandboxed Python namespace, injects helper functions (llm_query, llm_query_batched, llm_batch,
+# rlm_query, rlm_query_batched, FINAL, FINAL_VAR, SHOW_VARS) and an answer mapping, executes agent code
+# per step, and ends when a final answer is detected (FINAL(...) or FINAL_VAR(...) in output, an answer
+# mapping marked ready, or an explicit final action) or the iteration limit is reached. LLM helpers use
+# caller-supplied callables or a Hugging Face Inference chat function built at reset. Rewards come from
+# a REPLRubric.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -59,6 +67,10 @@ except ImportError:
 
 
 class REPLEnvironment(Environment):
+    # [CLASS DOC]
+    # REPL environment supporting concurrent sessions. Holds initial context/task, iteration and output
+    # limits, rubric, LLM/sub-call callables, recursion limits, and per-episode state, executor and runtime
+    # controller.
     """
     A REPL environment for training language models to use code execution.
 
@@ -106,6 +118,11 @@ class REPLEnvironment(Environment):
         rlm_max_depth: int = 1,
         rlm_max_iterations: int | None = None,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration. context and task_prompt fall back to the REPL_CONTEXT and REPL_TASK_PROMPT
+        # environment variables; max_iterations is overridden by REPL_MAX_ITERATIONS if set (ValueError if not
+        # an integer). Rubric defaults to REPLRubric; child iteration limit defaults to max_iterations.
+        # State and executor are created on reset.
         """Initialize the REPL environment.
 
         Args:
@@ -148,6 +165,8 @@ class REPLEnvironment(Environment):
 
     @staticmethod
     def _resolve_model(llm_model: Optional[str]) -> str:
+        # [FUNCTION DOC]
+        # HELPER: Returns llm_model, else the LLM_MODEL environment variable, else "Qwen/Qwen3.5-9B".
         """Resolve the effective model name: explicit arg > env var > hard default."""
         return llm_model or os.environ.get("LLM_MODEL", "Qwen/Qwen3.5-9B")
 
@@ -156,6 +175,9 @@ class REPLEnvironment(Environment):
         hf_token: Optional[str] = None,
         llm_model: Optional[str] = None,
     ) -> Callable[..., str]:
+        # [FUNCTION DOC]
+        # HELPER: Builds a chat function backed by huggingface_hub InferenceClient (300 s timeout) for the
+        # resolved model. Raises RuntimeError if huggingface_hub is missing.
         try:
             from huggingface_hub import InferenceClient, InferenceTimeoutError
         except ImportError:
@@ -165,6 +187,10 @@ class REPLEnvironment(Environment):
         client = InferenceClient(model=default_model, token=hf_token, timeout=300)
 
         def chat_fn(messages: list[dict[str, str]], model: str | None = None) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Sends messages to chat completions (model override or default; 2048 max tokens, Qwen
+            # non-thinking sampling settings) and returns the reply text. Errors are returned as strings beginning
+            # with "Error:" rather than raised. Side effect: network request.
             try:
                 response = client.chat.completions.create(
                     model=model or default_model,
@@ -194,6 +220,10 @@ class REPLEnvironment(Environment):
         hf_token: Optional[str],
         llm_model: Optional[str] = None,
     ) -> None:
+        # [FUNCTION DOC]
+        # HELPER: Builds the HF chat function and a recursive controller with the current depth and iteration
+        # limits, and replaces the four LLM/sub-call callables with the controller's. Silently returns if
+        # huggingface_hub is unavailable.
         """Create LLM/subcall functions dynamically using client-provided token."""
         try:
             chat_fn = self._build_hf_chat_fn(hf_token, llm_model)
@@ -221,6 +251,14 @@ class REPLEnvironment(Environment):
         llm_model: Optional[str] = None,
         **kwargs: Any,
     ) -> REPLObservation:
+        # [FUNCTION DOC]
+        # Starts an episode. Resets the rubric and sets expected_answer if given; applies rlm_max_depth and
+        # rlm_max_iterations overrides from kwargs. Rebuilds LLM functions when none exist, the resolved model
+        # changed, or hf_token is given (token from argument, else HF_TOKEN); otherwise rebuilds only the
+        # controller when recursion limits changed. Creates a new REPLState, a new executor with the answer
+        # mapping and context, and injects the helper functions (LLM helpers only when configured). Returns an
+        # observation with a ready message, context preview/length, variables, iteration 0 and the task prompt
+        # in metadata. seed is unused. Raises ValueError for non-integer recursion overrides.
         """Reset the environment with optional new context.
 
         Args:
@@ -322,6 +360,9 @@ class REPLEnvironment(Environment):
             self._executor.set_context(effective_context)
 
         def _call_single_query(prompt: str, model: str | None = None) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Calls the configured llm_query function with (prompt, model), retrying with just the prompt
+            # on TypeError. Raises RuntimeError if none is configured.
             if not self.llm_query_fn:
                 raise RuntimeError("llm_query is not configured")
             try:
@@ -332,6 +373,9 @@ class REPLEnvironment(Environment):
         def _call_batched_query(
             prompts: List[str], model: str | None = None
         ) -> List[str]:
+            # [FUNCTION DOC]
+            # HELPER: Calls the configured batch function with (prompts, model), retrying without model on
+            # TypeError. Raises RuntimeError if none is configured.
             if not self.llm_batch_fn:
                 raise RuntimeError("llm_query_batched is not configured")
             try:
@@ -340,6 +384,8 @@ class REPLEnvironment(Environment):
                 return self.llm_batch_fn(prompts)  # type: ignore[misc]
 
         def _call_recursive_query(prompt: str, model: str | None = None) -> str:
+            # [FUNCTION DOC]
+            # HELPER: Uses the recursive sub-call function when configured, else falls back to a single query.
             if self.subcall_fn is None:
                 return _call_single_query(prompt, model)
             return self.subcall_fn(prompt, model)
@@ -347,6 +393,8 @@ class REPLEnvironment(Environment):
         def _call_recursive_batched(
             prompts: List[str], model: str | None = None
         ) -> List[str]:
+            # [FUNCTION DOC]
+            # HELPER: Returns [] for no prompts; uses the recursive batch function when configured, else the plain batch query.
             if not prompts:
                 return []
             if self.subcall_batch_fn is not None:
@@ -370,6 +418,8 @@ class REPLEnvironment(Environment):
         # Inject FINAL helper function so both FINAL(x) and print(f'FINAL({x})') work
         # Returns the FINAL pattern as a string so it appears in stdout for detection
         def final_helper(value):
+            # [FUNCTION DOC]
+            # HELPER: Returns the string "FINAL(<value>)" so printing it signals completion.
             """Helper that returns FINAL(value) string for detection."""
             return f"FINAL({value})"
 
@@ -380,6 +430,9 @@ class REPLEnvironment(Environment):
         executor = self._executor  # Capture for closure
 
         def final_var_helper(var_name: str):
+            # [FUNCTION DOC]
+            # HELPER: Strips quotes from var_name, looks the variable up in the namespace and returns
+            # "FINAL(<value>)", or "FINAL_VAR(<name>)" when the variable is missing or None.
             """Look up variable by name and return FINAL(value) for detection."""
             # Strip quotes if present (handles both FINAL_VAR("x") and FINAL_VAR(x))
             var_name_clean = str(var_name).strip().strip("\"'")
@@ -392,6 +445,8 @@ class REPLEnvironment(Environment):
         self._executor.inject_function("FINAL_VAR", final_var_helper)
 
         def show_vars_helper():
+            # [FUNCTION DOC]
+            # HELPER: Returns the sorted list of namespace variable names.
             """Return the current non-private variables in the namespace."""
             return sorted(executor.list_variables())
 
@@ -443,6 +498,15 @@ class REPLEnvironment(Environment):
         timeout_s: Optional[float] = None,
         **kwargs: Any,
     ) -> REPLObservation:
+        # [FUNCTION DOC]
+        # Executes one action. Raises RuntimeError before reset. Increments step_count and iteration. An
+        # explicit final action records final_answer (empty if None) and returns a done observation. When the
+        # iteration count reaches max_iterations, the code is not executed: a non-empty answer mapping content
+        # is recorded as the final answer and a done, unsuccessful observation is returned. Otherwise executes
+        # the code, updates execution time and namespace keys, detects a final answer in stdout or the
+        # namespace, and returns the observation (done when an answer is found). Every observation's reward is
+        # set by the rubric. timeout_s is unused.
+        # KNOWN ISSUE: because the limit check precedes execution, only max_iterations - 1 code blocks are ever executed.
         """Execute code and return observation.
 
         Args:
@@ -523,6 +587,10 @@ class REPLEnvironment(Environment):
         return obs
 
     def _extract_final_answer(self, stdout: str) -> Optional[str]:
+        # [FUNCTION DOC]
+        # HELPER: Detects a final answer: the content of the first balanced FINAL(...) in stdout; else the value
+        # of the variable named in FINAL_VAR(name) if it exists and is not None; else the answer mapping's
+        # content when its "ready" flag is true. Returns None when nothing is found.
         """Extract final answer from output.
 
         Supports multiple patterns:
@@ -567,6 +635,9 @@ class REPLEnvironment(Environment):
         return None
 
     def _create_final_observation(self, success: bool, message: str) -> REPLObservation:
+        # [FUNCTION DOC]
+        # HELPER: Builds a done observation with the message as stdout, the success flag, empty context fields
+        # and metadata holding the final answer, total execution time and total iterations.
         """Create observation for episode termination.
 
         Args:
@@ -602,6 +673,8 @@ class REPLEnvironment(Environment):
 
     @property
     def state(self) -> REPLState:
+        # [FUNCTION DOC]
+        # Property: returns the current REPLState. Raises RuntimeError before reset or after close.
         """Get the current environment state.
 
         Returns:
@@ -615,6 +688,8 @@ class REPLEnvironment(Environment):
         return self._state
 
     def close(self) -> None:
+        # [FUNCTION DOC]
+        # Closes the runtime controller (if any) and drops the executor and state.
         """Cleanup resources."""
         if self._runtime_controller is not None:
             self._runtime_controller.close()
@@ -623,6 +698,8 @@ class REPLEnvironment(Environment):
         self._state = None
 
     def get_metadata(self) -> EnvironmentMetadata:
+        # [FUNCTION DOC]
+        # Returns EnvironmentMetadata with name "repl_env", a description and version "0.1.0".
         """Get environment metadata.
 
         Returns:

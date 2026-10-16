@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Simple OpenSpiel catch example: connects to a server at localhost:8000, resets, always plays the first legal action
+# for up to 20 steps printing rewards, then prints totals and the environment state. Side effects: network I/O, stdout.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -19,6 +22,8 @@ from openspiel_env import OpenSpielEnv, OpenSpielAction
 
 
 def main():
+    # [FUNCTION DOC]
+    # Runs the episode described in the module doc. Any exception is printed with setup hints (not re-raised); the client is always closed.
     print("🎯 Simple OpenSpiel Example - Catch Game")
     print("=" * 60)
 

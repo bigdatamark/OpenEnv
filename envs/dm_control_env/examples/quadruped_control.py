@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script driving the quadruped domain through a dm_control server at http://localhost:8000 in headless,
+# interactive (SPACE random forces) or visual mode. Side effects at import: prepends the env directory to sys.path.
 """Interactive quadruped control via OpenEnv.
 
 This example demonstrates using the dm_control OpenEnv client with
@@ -33,6 +36,8 @@ from models import DMControlAction
 
 
 def get_action_dim(env: DMControlEnv) -> int:
+    # [FUNCTION DOC]
+    # Returns the first entry of state.action_spec["shape"] when present, else 12.
     """Get the action dimension from the environment state."""
     state = env.state()
     action_spec = state.action_spec
@@ -45,17 +50,24 @@ def get_action_dim(env: DMControlEnv) -> int:
 
 
 def generate_random_action(action_dim: int, magnitude: float = 1.0) -> DMControlAction:
+    # [FUNCTION DOC]
+    # Returns a DMControlAction with action_dim uniform values in [-magnitude, magnitude].
     """Generate a random action with values in [-magnitude, magnitude]."""
     values = [random.uniform(-magnitude, magnitude) for _ in range(action_dim)]
     return DMControlAction(values=values)
 
 
 def generate_zero_action(action_dim: int) -> DMControlAction:
+    # [FUNCTION DOC]
+    # Returns a DMControlAction of action_dim zeros.
     """Generate a zero action (no force applied)."""
     return DMControlAction(values=[0.0] * action_dim)
 
 
 def run_headless(env: DMControlEnv, max_steps: int = 1000):
+    # [FUNCTION DOC]
+    # Resets quadruped/walk; for up to max_steps (1000) or until done applies random actions (magnitude 0.5) for the
+    # first 10 of every 50 steps and zeros otherwise; prints egocentric_state samples every 100 steps.
     """Run quadruped control in headless mode."""
     print("\n=== Headless Mode (OpenEnv Step/Observation Pattern) ===")
     print("This mode demonstrates the OpenEnv API with the quadruped.\n")
@@ -107,6 +119,9 @@ def run_headless(env: DMControlEnv, max_steps: int = 1000):
 
 
 def run_interactive(env: DMControlEnv):
+    # [FUNCTION DOC]
+    # pygame loop at 30 FPS on quadruped/walk: random actions (magnitude 2.0) while SPACE is held; R resets, ESC/Q
+    # quits, auto-reset when done.
     """Run interactive control with keyboard input via pygame."""
     import pygame
 
@@ -205,6 +220,9 @@ def run_interactive(env: DMControlEnv):
 
 
 def run_visual(env: DMControlEnv):
+    # [FUNCTION DOC]
+    # Same as run_interactive with render=True and rendered frames shown.
+    # Side effects: exits with status 1 if no pixels are returned.
     """Run with pygame visualization showing rendered frames."""
     import base64
     import io
@@ -312,6 +330,10 @@ def run_visual(env: DMControlEnv):
 
 
 def main():
+    # [FUNCTION DOC]
+    # Parses --visual, --headless, --max-steps and --task, connects, prints state, and runs the selected mode; exits
+    # with status 1 on ConnectionError.
+    # KNOWN ISSUE: --task is parsed but never used; all modes always run the walk task.
     parser = argparse.ArgumentParser(
         description="Interactive quadruped control via OpenEnv"
     )

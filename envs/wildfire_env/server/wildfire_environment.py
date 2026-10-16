@@ -1,3 +1,9 @@
+# [MODULE DOC]
+# Server-side wildfire simulation on a grid: the agent places water or firebreaks while fire spreads
+# stochastically to 8 neighbours each step, biased by wind and suppressed by humidity. Burning cells burn for
+# 3 ticks then become ash; watered cells are immune for 6 ticks then revert to fuel. Rewards shape toward
+# containment. Also renders an HTML board for the web UI. Defines wind direction vectors, cell styles and
+# wind arrows.
 import os
 import random
 import uuid
@@ -43,18 +49,26 @@ WIND_ARROWS = {
 
 
 def idx(x: int, y: int, w: int) -> int:
+    # [FUNCTION DOC]
+    # HELPER: returns the flat index y * w + x (arguments coerced to int).
     # Defensive type conversion to ensure all parameters are integers
     x, y, w = int(x), int(y), int(w)
     return y * w + x
 
 
 def in_bounds(x: int, y: int, w: int, h: int) -> bool:
+    # [FUNCTION DOC]
+    # HELPER: True if 0 <= x < w and 0 <= y < h (arguments coerced to int).
     # Defensive type conversion to ensure all parameters are integers
     x, y, w, h = int(x), int(y), int(w), int(h)
     return 0 <= x < w and 0 <= y < h
 
 
 class WildfireEnvironment(Environment):
+    # [CLASS DOC]
+    # OpenEnv Environment holding configuration (size, base ignition probability, humidity, initial fire
+    # count, seeded RNG, max steps, water and firebreak capacity, optional forced wind) and the WildfireState
+    # (None until reset). Supports concurrent sessions.
     """
     Weather-aware wildfire simulation.
 
@@ -87,6 +101,9 @@ class WildfireEnvironment(Environment):
         water_capacity: int = 8,  # ↓ encourage strategic water use
         break_capacity: int = 50,
     ):
+        # [FUNCTION DOC]
+        # Stores configuration; WILDFIRE_WIDTH, WILDFIRE_HEIGHT, WILDFIRE_HUMIDITY and WILDFIRE_WIND env vars
+        # override arguments. wind_bias and diag_factor are stored but unused. Uses a fixed RNG seed (default 3407).
         super().__init__()
 
         # --- Env-var overrides (optional) ---
@@ -120,6 +137,10 @@ class WildfireEnvironment(Environment):
     # --- Core API ---
 
     def reset(self) -> WildfireObservation:
+        # [FUNCTION DOC]
+        # Creates an all-fuel grid, picks wind (forced if valid, else random among 9 options), humidity jittered by
+        # up to +/-0.05 and clamped, ignites init_sources random cells, and builds a new state (unvalidated) with
+        # full resources and zero timers. Returns the initial observation with reward hint 0.
         # Ensure w and h are integers (defensive type conversion)
         w, h = int(self.w), int(self.h)
 
@@ -170,6 +191,14 @@ class WildfireEnvironment(Environment):
         return obs
 
     def step(self, action: WildfireAction) -> WildfireObservation:
+        # [FUNCTION DOC]
+        # Applies the action: water/break with remaining resources and coordinates add their own reward; "wait" does
+        # nothing; anything else (unknown action, missing coordinates, exhausted resource) costs 0.05. Then spreads
+        # fire, updates total burned, step count and last action. Reward shaping: -0.15 per newly burning cell net
+        # increase or +0.10 per net decrease, -0.05 per new ash cell, -0.01 per step. Done when no cell burns or max
+        # steps reached; at the end adds 0.5 + 0.5 * saved fraction if the fire is out, plus 0.2 * unburned
+        # fraction. Returns the observation with done and reward set.
+        # Raises AttributeError if called before reset.
         st = self._state
         reward = 0.0
 
@@ -243,6 +272,9 @@ class WildfireEnvironment(Environment):
         return obs
 
     def render_web(self, observation: Dict[str, Any]) -> Optional[str]:
+        # [FUNCTION DOC]
+        # Returns HTML for the board (cell size scaled to width, tooltip per cell), a legend, and a stats line (step,
+        # wind with arrow, humidity, water, breaks, burning, ash); None if the observation has no grid.
         """Draw the fire grid (one colour per cell state) with a legend, wind, humidity and resources."""
         if "grid" not in observation:
             return None
@@ -286,6 +318,10 @@ class WildfireEnvironment(Environment):
     # --- Internal mechanics ---
 
     def _apply_water(self, x: int, y: int) -> float:
+        # [FUNCTION DOC]
+        # HELPER: waters cell (x, y). Out of bounds: -0.05 with no resource used. Burning cell becomes damp and
+        # counts as extinguished (+0.25); fuel becomes damp (-0.10); already damp or ash/break: -0.05. Resets the
+        # cell timer and consumes one water. Returns the reward.
         st = self._state
         # Ensure x and y are integers (defensive type conversion)
         x, y = int(x), int(y)
@@ -323,6 +359,11 @@ class WildfireEnvironment(Environment):
         return reward
 
     def _apply_break(self, x: int, y: int) -> float:
+        # [FUNCTION DOC]
+        # HELPER: builds a firebreak at (x, y). Out of bounds: -0.05 with no resource used. Fuel or damp: +0.15;
+        # burning: -0.02 (fire is removed); existing break: -0.01; ash: -0.02. Converts to firebreak (except ash and
+        # existing breaks, which stay), resets the timer and consumes one firebreak. Returns the reward.
+        # KNOWN ISSUE: building on an existing break or ash still consumes a firebreak although nothing changes.
         st = self._state
         # Ensure x and y are integers (defensive type conversion)
         x, y = int(x), int(y)
@@ -352,6 +393,11 @@ class WildfireEnvironment(Environment):
         return reward
 
     def _spread_fire(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: one fire tick. For each burning cell, increments its timer and tries to ignite each fuel neighbour
+        # with probability base * (1 - humidity) * wind multiplier (2.0 downwind, 0.5 upwind) * 0.6 for
+        # diagonals. Then burning cells with timer >= 3 become ash, flagged fuel cells ignite, and damp cells
+        # revert to fuel after 6 ticks. Mutates grid and timers. Returns the number of new ash cells.
         """
         Balanced wildfire spread model:
           - burning cells persist for multiple ticks before turning to ash
@@ -458,16 +504,25 @@ class WildfireEnvironment(Environment):
         return newly_burned
 
     def _burning_count(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: number of burning cells.
         return sum(1 for v in self._state.grid if v == 2)
 
     def _saved_cells(self) -> int:
+        # [FUNCTION DOC]
+        # HELPER: number of non-ash cells (fuel, burning, break, water).
         # cells not turned to ash (includes fuel, burning, break, water)
         return sum(1 for v in self._state.grid if v in (1, 2, 3, 4))
 
     def _is_done(self) -> bool:
+        # [FUNCTION DOC]
+        # HELPER: True when nothing is burning or step_count reached max_steps.
         return self._burning_count() == 0 or self._state.step_count >= self.max_steps
 
     def _make_observation(self, reward_hint: float = 0.0) -> WildfireObservation:
+        # [FUNCTION DOC]
+        # HELPER: builds an unvalidated observation from state: copy of the grid, size, step, wind, humidity,
+        # burning and ash counts, remaining resources and reward hint.
         st = self._state
         burning = self._burning_count()
         burned = sum(1 for v in st.grid if v == 0)
@@ -489,6 +544,9 @@ class WildfireEnvironment(Environment):
     # --- Required abstract property implementation ---
     @property
     def state(self) -> WildfireState:
+        # [FUNCTION DOC]
+        # Property returning the state; before any reset, lazily creates a placeholder state with an empty grid
+        # and full resources.
         """Return the current environment state."""
         if self._state is None:
             # Initialize with minimal defaults if accessed before reset()

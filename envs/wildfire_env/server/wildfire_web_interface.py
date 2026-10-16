@@ -1,3 +1,7 @@
+# [MODULE DOC]
+# Custom single-page HTML/JS web interface for the wildfire environment (served at /web): grid view,
+# action controls and an instructions panel. The page loads marked.js and DOMPurify from a CDN, keeps a
+# WebSocket to /ws/ui for state updates and calls /web/reset, /web/step and /web/state.
 """
 Custom web interface for Wildfire Environment.
 
@@ -16,6 +20,13 @@ from ..models import WildfireAction
 def get_wildfire_web_interface_html(
     metadata: Optional[EnvironmentMetadata] = None,
 ) -> str:
+    # [FUNCTION DOC]
+    # Returns the full HTML page as a string. When metadata has README content, embeds it as JSON for
+    # client-side markdown rendering and includes a collapsible instructions section with a simple escaped
+    # HTML fallback.
+    # KNOWN ISSUE: the trailing .replace call looks for the literal text of the f-string placeholder, which the
+    # f-string has already substituted, so it never matches (harmless no-op). The imported WildfireAction is
+    # unused.
     """Generate custom HTML for the wildfire environment web interface."""
 
     # Prepare README markdown and a simple HTML fallback
@@ -1073,6 +1084,9 @@ def get_wildfire_web_interface_html(
 def _generate_instructions_section(
     instructions_html: str, metadata: Optional[EnvironmentMetadata]
 ) -> str:
+    # [FUNCTION DOC]
+    # HELPER: returns the instructions panel HTML (title from metadata name, toggle button, markdown target and a
+    # noscript fallback), or "" when there is no fallback HTML or metadata.
     """Generate the instructions section."""
     if not instructions_html or not metadata:
         return ""
@@ -1099,6 +1113,9 @@ def _generate_instructions_section(
 
 
 def _markdown_to_html_simple(markdown: str) -> str:
+    # [FUNCTION DOC]
+    # HELPER: minimal markdown to HTML conversion of HTML-escaped text: #/##/### headers, fenced and inline
+    # code, bold and italic, "- " list items wrapped in one ul, and newlines to br. Returns the HTML string.
     """Convert basic markdown to HTML."""
     import html
     import re
