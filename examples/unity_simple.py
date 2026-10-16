@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# [MODULE DOC]
+# Example script: runs Unity ML-Agents environments (PushBlock, 3DBall, or alternating) through
+# the OpenEnv Unity client with random actions, in one of three modes: connecting to an existing
+# server (default), starting a Docker container, or "direct" mode with an embedded local server.
+# Prints per-episode results and a summary. Adds src/ and the repo root to sys.path.
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
@@ -90,6 +95,10 @@ def run_pushblock_episode(
     max_steps: int = 1000,
     verbose: bool = True,
 ) -> dict:
+    # [FUNCTION DOC]
+    # Resets the client to PushBlock and steps with random discrete actions (0..6) until done or
+    # max_steps, printing setup info and progress every 100 steps when verbose.
+    # Returns: dict with steps, total reward and done flag. Side effects: env calls, stdout.
     """
     Run a single episode of PushBlock with random actions.
 
@@ -141,6 +150,9 @@ def run_3dball_episode(
     max_steps: int = 500,
     verbose: bool = True,
 ) -> dict:
+    # [FUNCTION DOC]
+    # Resets the client to 3DBall and steps with two random continuous actions in [-1, 1] until done
+    # or max_steps, printing progress when verbose. Returns: dict with steps, reward and done.
     """
     Run a single episode of 3DBall with random actions.
 
@@ -196,6 +208,9 @@ def run_episodes(
     max_steps: int,
     verbose: bool,
 ) -> list:
+    # [FUNCTION DOC]
+    # Runs the requested number of episodes on PushBlock, 3DBall, or alternating (even episodes
+    # PushBlock) for any other name, printing each result. Returns: list of episode result dicts.
     """Run multiple episodes and collect results."""
     all_results = []
 
@@ -238,6 +253,9 @@ def run_episodes(
 
 
 def print_summary(all_results: list) -> None:
+    # [FUNCTION DOC]
+    # Prints total episodes and steps and average/max/min reward.
+    # Raises: ZeroDivisionError/ValueError if the result list is empty.
     """Print summary statistics."""
     print("\n" + "=" * 60)
     print("Summary")
@@ -255,6 +273,9 @@ def print_summary(all_results: list) -> None:
 
 
 def run_with_server(args) -> None:
+    # [FUNCTION DOC]
+    # Server mode: prints the configuration, opens a client to args.url as a context manager, runs the
+    # episodes and prints the summary.
     """Run using a connection to an existing server."""
     print("=" * 60)
     print("Unity ML-Agents Environment - Server Mode")
@@ -278,6 +299,13 @@ def run_with_server(args) -> None:
 
 
 def run_with_docker(args) -> None:
+    # [FUNCTION DOC]
+    # Docker mode: builds UNITY_* settings, starts the container image via the client's Docker factory,
+    # runs episodes, prints the summary and always closes the client. On any exception prints
+    # troubleshooting hints and exits with status 1.
+    # KNOWN ISSUE: the base client's Docker factory returns a lazy bootstrap result that must be
+    # awaited or synced, but it is used here directly as a client; settings are also passed under an
+    # "environment" keyword rather than env_vars, so they may not reach the container.
     """Run using Docker (automatically starts container)."""
     print("=" * 60)
     print("Unity ML-Agents Environment - Docker Mode")
@@ -335,6 +363,11 @@ def run_with_docker(args) -> None:
 
 
 def run_direct(args) -> None:
+    # [FUNCTION DOC]
+    # Direct mode: starts an embedded server through the client's direct factory with the graphics and
+    # speed settings (initial env PushBlock when alternating), then for each episode resets to the
+    # chosen env and steps with random actions appropriate to it, printing results and a summary.
+    # Always closes the client.
     """
     Run Unity environment in direct mode (local server started automatically).
 
@@ -432,6 +465,12 @@ def run_direct(args) -> None:
 
 
 def main():
+    # [FUNCTION DOC]
+    # CLI entry point: parses mode (--docker or --direct, else server), URL, Docker image, env choice,
+    # episode count, max steps, window size, graphics, time scale, quality level and --quiet, then
+    # dispatches to the matching runner.
+    # KNOWN ISSUE: help texts and epilog say the default window is 800x600, but the defaults are
+    # 1280x720.
     parser = argparse.ArgumentParser(
         description="Run Unity ML-Agents environment examples",
         formatter_class=argparse.RawDescriptionHelpFormatter,
